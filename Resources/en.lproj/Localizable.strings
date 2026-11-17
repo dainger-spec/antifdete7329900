@@ -110,7 +110,8 @@
 "editor.ephemeral" = "Ephemeral (no website data or history written to disk)";
 "editor.ephemeral.detail" = "No website data or history is written to disk; nothing is left once it stops.";
 "editor.ephemeral.title" = "Ephemeral";
-"editor.error.coords" = "Latitude, longitude and accuracy must be numbers";
+"editor.error.coords" = "Latitude, longitude and accuracy must be numbers.";
+"editor.error.coords.range" = "Latitude goes from −90 to 90, and longitude from −180 to 180.";
 "editor.error.decrypt" = "Could not decrypt profile: %@";
 "editor.versions.title" = "Kept versions of the settings";
 "editor.versions.note" = "Sync kept one version of the settings as the profile's and kept the others here. None is removed by itself: choose the one you want, or remove those you do not need.";
@@ -130,8 +131,14 @@
 "editor.versions.remove" = "Remove";
 "editor.versions.removeTitle" = "Remove this version of the settings?";
 "editor.versions.removeMessage" = "It is deleted from this Mac and cannot be brought back. The profile's settings do not change.";
-"editor.error.startURL" = "Start URL is not a valid URL";
+"editor.error.startURL" = "The start address is not a web address: write it like example.com or https://example.com.";
+"editor.error.invalid" = "These settings cannot be saved: %@";
+"editor.error.userAgent" = "A User-Agent of your own takes 1 to 512 characters of plain Latin text: no Cyrillic, emoji or line breaks.";
+"editor.error.startURL.scheme" = "The start address must begin with http://, https:// or about:.";
 "editor.footer.note" = "Changes apply at the next launch.";
+"editor.footer.savingCookies" = "Saving, and importing the cookies…";
+"editor.footer.note.new" = "The profile appears in the list, stopped: launch it from there.";
+"editor.create" = "Create Profile";
 "editor.generation" = "View for websites";
 "editor.generation.footer" = "Safari on this Mac as it is: the engine and hardware are this Mac's, as a page measures them. The canvas is drawn as it is, without noise.";
 "editor.geo" = "Geolocation";
@@ -278,6 +285,11 @@
 "editor.camera.media.none" = "No file chosen";
 "editor.camera.media.stored" = "chosen file";
 "editor.camera.error.numbers" = "The camera's width, height and frame rate must be whole numbers.";
+"editor.camera.error.playback" = "The video's end must come after its start, or be 0 for the end of the video.";
+"editor.camera.error.noVideo" = "The camera's source is Video, and no video is chosen: choose a file, or another source.";
+"editor.camera.error.noImage" = "The camera's source is Image, and no image is chosen: choose a file, or another source.";
+"editor.camera.error.frameRate" = "The camera's frame rate is %d to %d frames a second.";
+"editor.camera.error.size" = "The camera's width and height are %d to %d pixels each.";
 "editor.camera.error.tooLarge" = "That file is too large. The camera's image and video are kept in the profile's settings and synced with them (both, whichever is the source), so an image may take up to %1$d MB, and the image and the video together about %2$d MB. Choose a smaller file, or remove the other one under its source.";
 "editor.camera.media.tooLargeToSync" = "This camera's image and video together take more than the %d MB that sync takes: the camera works here as before, but the profile's settings do not sync until you choose a smaller video or image (or remove one).";
 "editor.camera.error.read" = "Could not read %@.";
@@ -1621,6 +1633,9 @@
 "editor.proxy.saved.hidden" = "%ld proxies of the list are not shown: no check has found their type yet.";
 "editor.proxy.error.noneChosen" = "Choose a proxy of the list, or choose No Proxy.";
 "editor.proxy.error.empty" = "Paste a proxy, or choose No Proxy.";
+"editor.proxy.error.host" = "The proxy's address is a host name or an IP address alone, without http:// or a path.";
+"editor.proxy.error.credentials" = "The proxy's user name and password go together: fill in both, or neither.";
+"editor.proxy.error.port" = "The proxy's port is a number from 1 to 65535.";
 "editor.proxy.error.kindUnknown" = "The proxy's type is not known yet: click Check, or write it in front of the address — socks5:// or http://.";
 "editor.proxy.error.kindNotFound" = "The check did not find the proxy's type: it answered neither as SOCKS5 nor as HTTP (what it did is under the field). Write the type in front — socks5:// or http:// — or correct the address.";
 "editor.footer.checking" = "Checking the proxy…";

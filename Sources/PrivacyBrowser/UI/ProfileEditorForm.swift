@@ -269,35 +269,42 @@ struct ProfileEditorForm: View {
             Rectangle().fill(Theme.divider).frame(height: 1)
             HStack(spacing: 8) {
                 if let error {
+                    // Up to four lines: the longer reasons (a proxy whose type no check found) were
+                    // cut at two, mid-sentence.
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.danger)
-                        .lineLimit(2)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                } else if checkingProxy {
+                } else if checkingProxy || isSaving {
+                    // Save waits for a check, or for the pasted cookies to go in: said, not a dead button.
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text(L("editor.footer.checking"))
+                        Text(L(isSaving ? "editor.footer.savingCookies" : "editor.footer.checking"))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.textSecondary)
                     }
                 } else {
-                    Text(L("editor.footer.note"))
+                    // A new profile has no "next launch" to wait for: where it goes once made.
+                    Text(L(isNew ? "editor.footer.note.new" : "editor.footer.note"))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
                 Button(L("common.cancel"), action: onCancel)
                     .buttonStyle(.lumenGhost)
                     .keyboardShortcut(.cancelAction)
-                Button(L("common.save"), action: onSave)
+                // What the button does: a new profile is created, an existing one saved.
+                Button(L(isNew ? "editor.create" : "common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
                     .disabled(checkingProxy || isSaving || saveRefused)
             }
             .padding(.horizontal, 24)
-            .frame(height: 60)
+            .padding(.vertical, 10)
+            .frame(minHeight: 60)
         }
     }
 
@@ -755,9 +762,10 @@ struct ProfileEditorForm: View {
         return chosen.isEmpty || all.contains(chosen) ? all : all + [chosen]
     }
 
-    /// "Deutsch (Deutschland) — de-DE" in the app's language.
+    /// "Deutsch (Deutschland) — de-DE" in the app's language — the interface's, not the Mac's: with
+    /// `Locale.current` a Russian editor on a Mac set to English listed "German (Germany)".
     static func languageName(_ tag: String) -> String {
-        let name = Locale.current.localizedString(forIdentifier: tag) ?? tag
+        let name = Localization.locale.localizedString(forIdentifier: tag) ?? tag
         return name == tag ? tag : "\(name) — \(tag)"
     }
 
