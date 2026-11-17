@@ -106,6 +106,9 @@ final class AppModel: ObservableObject {
     let settings = AppSettings()
     /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
+    /// Add, asked for from outside the Proxies section (Settings › Proxies' Add…, a `.ovpn` opened
+    /// with Lumen in the Finder): the section takes it as it shows, once the vault is open.
+    @Published var proxyAddRequest: ProxyAddRequest?
     /// File › New Profile (⌘N): the Profiles window opens its editor for a new one.
     @Published var newProfileRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
@@ -271,6 +274,13 @@ final class AppModel: ObservableObject {
         guard proxyList != nil else { return }
         activateProfilesWindow()
         proxiesRequest = true
+    }
+
+    /// The Proxies section with Add's choices open (`request.choice` nil) or its sheet; a locked
+    /// vault first asks for its password, and the section shows once it is open.
+    func requestProxyAdd(_ request: ProxyAddRequest) {
+        proxyAddRequest = request
+        activateProfilesWindow()
     }
 
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }

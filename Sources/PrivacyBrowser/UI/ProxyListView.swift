@@ -12,6 +12,11 @@ import UniformTypeIdentifiers
 /// list (each profile keeps its own copy). The selected proxy's last check, step by step, below;
 /// the first proxy is selected when the list opens.
 ///
+/// Add, the header's main button, offers what can be added, each said with what it takes: a proxy
+/// (HTTP, SOCKS5), a link (VLESS, VMess, Trojan, Shadowsocks), OpenVPN (a `.ovpn` file), or a
+/// whole list (`ProxyAddChoicesView`); the empty list offers the same. OpenVPN and the links were
+/// in ⋯ alone until 0.1.19, where the owner did not find them.
+///
 /// A section of the window rather than a sheet: the sheet was wider than its own frame (the UI
 /// snapshots of run 429 showed it cut on both sides at 940 pt, and a narrow window cut it more),
 /// and a proxy, like a profile, is what the window is for.
@@ -26,7 +31,7 @@ struct ProxyListView: View {
     var body: some View {
         if let proxies = model.proxyList {
             ProxyListPanel(proxies: proxies, profileCounts: model.proxyUseCounts, profilesUsing: profilesUsing,
-                           selection: $selection, showsInspector: $showsInspector)
+                           selection: $selection, showsInspector: $showsInspector, externalAdd: $model.proxyAddRequest)
         }
     }
 
@@ -52,6 +57,9 @@ struct ProxyListPanel: View {
     /// The inspector at the right, shown while this is on (the header's button): beside the list
     /// when there is room for both, over the list's right side when there is not.
     var showsInspector: Binding<Bool> = .constant(true)
+    /// Add asked for from outside the section (Settings › Proxies, a `.ovpn` opened in the
+    /// Finder): taken, and cleared, as the section shows.
+    var externalAdd: Binding<ProxyAddRequest?> = .constant(nil)
     /// Which proxies are shown: all, or those in one state (`ProxyListFilter`; as the section
     /// opens — the snapshots).
     @State var filter: ProxyListFilter = .all
@@ -59,9 +67,10 @@ struct ProxyListPanel: View {
     @AppStorage("proxies.order") private var order: ProxyListOrder = .added
 
     @State private var search = ""
-    @State private var adding = false
-    /// Add OpenVPN…: a `.ovpn` file as an entry (docs/OPENVPN.md).
-    @State private var addingOpenVPN = false
+    /// Add's sheet: a proxy or a link, or OpenVPN (`ProxyAddSheet`).
+    @State private var adding: ProxyAddRequest?
+    /// Add's choices, under it.
+    @State private var showingAddChoices = false
     @State private var importing = false
     @State private var exporting = false
     @State private var assigning: ProxyAssignView.Request?
@@ -88,15 +97,14 @@ struct ProxyListPanel: View {
         }
         .onAppear(perform: selectFirstIfNone)
         .onChange(of: proxies.entries.map(\.id)) { _, _ in selectFirstIfNone() }
+        .onAppear(perform: takeExternalAdd)
+        .onChange(of: externalAdd.wrappedValue) { _, _ in takeExternalAdd() }
         // Another state's proxies: the first of them, when none of those selected is among them.
         .onChange(of: filter) { _, _ in
             if selectedVisible.isEmpty, let first = visible.first { selection = [first.id] }
         }
-        .sheet(isPresented: $adding) {
-            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0) { added in selection = [added] }
-        }
-        .sheet(isPresented: $addingOpenVPN) {
-            OpenVPNImportView(proxies: proxies) { added in selection = [added] }
+        .sheet(item: $adding) { request in
+            ProxyAddSheet(proxies: proxies, request: request) { added in selection = [added] }
         }
         .sheet(isPresented: $importing) {
             ProxyImportView(proxies: proxies) { added in selection = Set(added) }
@@ -257,7 +265,7 @@ struct ProxyListPanel: View {
     // MARK: The header
 
     /// As the profiles have theirs: the title and how the list stands under it, the search, the
-    /// inspector's button, Check, the rarer actions (⋯) and Import.
+    /// inspector's button, Check, the rarer actions (⋯) and Add.
     private var header: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 4) {
@@ -287,8 +295,7 @@ struct ProxyListPanel: View {
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             checkButton
             moreMenu
-            Button { importing = true } label: { Label(L("proxies.import"), systemImage: "plus") }
-                .buttonStyle(.lumenPrimary)
+            ProxyAddButton(choose: add, importList: { importing = true }, showing: $showingAddChoices)
                 .disabled(proxies.loadError != nil)
         }
         .frame(height: ProfilesScreen.headerHeight)
@@ -327,13 +334,29 @@ struct ProxyListPanel: View {
         }
     }
 
-    /// Add one, Assign, Edit, Export and Delete: each also in a proxy's own menu (a right click),
-    /// and Delete on the Delete key.
+    /// Add's choices, as Add offers them.
+    private func add(_ choice: ProxyAddChoice) {
+        adding = ProxyAddRequest(choice: choice)
+    }
+
+    /// Add asked for from outside: its sheet, or — nothing chosen yet — its choices.
+    private func takeExternalAdd() {
+        guard let request = externalAdd.wrappedValue else { return }
+        externalAdd.wrappedValue = nil
+        guard proxies.loadError == nil else { return }
+        if request.choice == nil && request.file == nil {
+            // Once the header is laid out: the choices stand under Add.
+            DispatchQueue.main.async { showingAddChoices = true }
+        } else {
+            adding = request
+        }
+    }
+
+    /// Import a list, Assign, Edit, Export and Delete: each also in a proxy's own menu (a right
+    /// click), and Delete on the Delete key. (Adding one is Add's, the header's main button.)
     private var moreMenu: some View {
         MoreMenu {
-            Button(L("proxies.add")) { adding = true }
-                .disabled(proxies.loadError != nil)
-            Button(L("proxies.addOpenVPN")) { addingOpenVPN = true }
+            Button(L("proxies.import")) { importing = true }
                 .disabled(proxies.loadError != nil)
             Button(L("proxies.assign")) {
                 assigning = ProxyAssignView.Request(profileIDs: [], proxyIDs: selectedVisible)
@@ -357,16 +380,14 @@ struct ProxyListPanel: View {
     @ViewBuilder
     private func content(compact: Bool) -> some View {
         if proxies.entries.isEmpty {
-            VStack(spacing: 14) {
+            // What can be added, each with what it takes, at once: Add's own choices.
+            VStack(spacing: 18) {
                 LumenEmptyHint(symbol: "network", text: L("proxies.empty"))
-                    .frame(maxHeight: 160)
-                HStack(spacing: 8) {
-                    Button { importing = true } label: { Label(L("proxies.import"), systemImage: "plus") }
-                        .buttonStyle(.lumenPrimary)
-                    Button(L("proxies.add")) { adding = true }
-                        .buttonStyle(.lumenGhost)
-                }
-                .disabled(proxies.loadError != nil)
+                    .frame(maxHeight: 110)
+                ProxyAddChoicesView(choose: add, importList: { importing = true }, titled: false)
+                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
+                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
+                    .disabled(proxies.loadError != nil)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -834,14 +855,23 @@ enum ProxyCheckText {
 /// it stays the entry's own while the line still names that proxy. A proxy whose type was not
 /// known yet (a new one, or an import line without a scheme) may stay so until its first check;
 /// one whose type was known is never made unknown: Save checks it first.
+///
+/// Add takes whatever a provider gives: a proxy line, a share link (vless://, vmess://, trojan://,
+/// ss://) — what it was read as is said under the field as it is typed — or, chosen with its button
+/// or dropped on the sheet, a `.ovpn` file, which goes on to OpenVPN's sheet (`ProxyAddSheet`).
 struct ProxyEditView: View {
     @ObservedObject var proxies: ProxyListModel
     /// Nil: a new proxy (Add).
     let entry: ProxyListEntry?
     let profileCount: Int
+    /// What Add was asked for: the field's example is a link's for a link.
+    var choice: ProxyAddChoice = .proxy
+    /// A `.ovpn` file chosen or dropped (Add only; nil: not offered).
+    var onOpenVPN: ((URL) -> Void)?
     /// The proxy just added (the list selects it).
     var onAdded: (UUID) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
+    @State private var dropTargeted = false
 
     @State private var label: String
     @State private var line: ProxyLine
@@ -853,10 +883,12 @@ struct ProxyEditView: View {
 
     /// `line`: what the field starts with (the screenshots' samples); by default the entry's proxy.
     init(proxies: ProxyListModel, entry: ProxyListEntry?, profileCount: Int, line: ProxyLine? = nil,
-         onAdded: @escaping (UUID) -> Void = { _ in }) {
+         choice: ProxyAddChoice = .proxy, onOpenVPN: ((URL) -> Void)? = nil, onAdded: @escaping (UUID) -> Void = { _ in }) {
         _proxies = ObservedObject(wrappedValue: proxies)
         self.entry = entry
         self.profileCount = profileCount
+        self.choice = choice
+        self.onOpenVPN = onOpenVPN
         self.onAdded = onAdded
         _label = State(initialValue: entry?.label ?? "")
         _line = State(initialValue: line ?? entry.map { ProxyLine(proxy: $0.proxy, kindKnown: $0.kindKnown) } ?? ProxyLine())
@@ -881,22 +913,18 @@ struct ProxyEditView: View {
                     TextField(L("proxies.edit.name"), text: $label, prompt: Text(verbatim: ""))
                         .lumenField(entry?.address ?? L("proxies.edit.name.placeholder"), isEmpty: label.isEmpty)
                 }
-                EditorField(L("proxies.edit.proxy")) {
-                    ProxyLineField(line: $line, checking: checking, onCheck: check)
+                EditorField(L(entry == nil ? "proxies.add.field" : "proxies.edit.proxy")) {
+                    ProxyLineField(line: $line, checking: checking, onCheck: check,
+                                   placeholder: choice == .link ? L("proxyLine.example.link") : nil)
                 }
-                // Mobile proxies: the provider's link that gives the modem a new IP.
-                EditorField(L("proxies.ipChange.link")) {
-                    TextField(L("proxies.ipChange.link"), text: $changeLink, prompt: Text(verbatim: ""))
-                        .lumenField(linkText.isEmpty ? L("proxies.ipChange.link.placeholder") : linkText, isEmpty: changeLink.isEmpty)
-                        .autocorrectionDisabled()
-                    // Where the link is opened from: this Mac's own connection, not the proxy.
-                    Text(L("proxies.ipChange.link.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textTertiary)
-                        .fixedSize(horizontal: false, vertical: true)
+                if entry == nil, onOpenVPN != nil {
+                    openVPNOffer
                 }
-                EditorToggle(L("proxies.ipChange.onLaunch"), detail: L("proxies.ipChange.onLaunch.detail"), isOn: $changesOnLaunch)
-                    .disabled(linkText.isEmpty)
+                // Mobile proxies: the provider's link that gives the modem a new IP. Not for a share
+                // link: no provider's modem is behind one.
+                if !isShareLink {
+                    ipChangeFields
+                }
                 if profileCount > 0 {
                     Text(String(format: L("proxies.edit.profiles"), profileCount))
                         .font(.lumenSecondary)
@@ -923,6 +951,66 @@ struct ProxyEditView: View {
         }
         .sheetFrame(width: 560)
         .background(Theme.raised)
+        .overlay {
+            if dropTargeted && onOpenVPN != nil {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.6), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
+        // A .ovpn file dropped anywhere on Add's sheet: OpenVPN's sheet, with it read.
+        .onDrop(of: [UTType.fileURL], isTargeted: $dropTargeted) { providers in
+            guard let onOpenVPN else { return false }
+            return OpenVPNFile.receive(providers) { url in
+                if OpenVPNFile.isConfiguration(url) {
+                    onOpenVPN(url)
+                } else {
+                    error = L("proxies.add.drop.notOpenVPN")
+                }
+            }
+        }
+    }
+
+    /// The line holds a share link (its relay is Xray).
+    private var isShareLink: Bool {
+        line.checkable?.kind == .xray
+    }
+
+    @ViewBuilder
+    private var ipChangeFields: some View {
+        EditorField(L("proxies.ipChange.link")) {
+            TextField(L("proxies.ipChange.link"), text: $changeLink, prompt: Text(verbatim: ""))
+                .lumenField(linkText.isEmpty ? L("proxies.ipChange.link.placeholder") : linkText, isEmpty: changeLink.isEmpty)
+                .autocorrectionDisabled()
+            // Where the link is opened from: this Mac's own connection, not the proxy.
+            Text(L("proxies.ipChange.link.note"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        EditorToggle(L("proxies.ipChange.onLaunch"), detail: L("proxies.ipChange.onLaunch.detail"), isOn: $changesOnLaunch)
+            .disabled(linkText.isEmpty)
+    }
+
+    /// OpenVPN is a file, not a line: said where the line is pasted, with its button.
+    private var openVPNOffer: some View {
+        HStack(spacing: 10) {
+            Image(systemName: ProxyAddChoice.openVPN.symbol)
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+                .accessibilityHidden(true)
+            Text(L("proxies.add.openVPN"))
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button(L("proxies.add.openVPN.choose")) {
+                if let url = OpenVPNFile.choose() { onOpenVPN?(url) }
+            }
+            .buttonStyle(.lumenSecondary)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
     }
 
     /// Check: the proxy the line names, on its own; what it finds goes to the list with Save.

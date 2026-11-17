@@ -124,7 +124,11 @@ struct PrivacyBrowserApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var model: AppModel?
+    weak var model: AppModel? {
+        didSet { openPendingFiles() }
+    }
+    /// `.ovpn` files opened before the model was there (Lumen started by the open).
+    private var pendingFiles: [URL] = []
     private lazy var quitCoordinator = QuitCoordinator(
         hasActivity: { [weak self] in self?.model?.hasActivity ?? false },
         lockForQuit: { [weak self] in await self?.model?.lock(forQuit: true) },
@@ -171,6 +175,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         LocalRelays.endLeftovers()
         // `--settings-window-check` (CI): nothing otherwise.
         SettingsWindowCheck.start()
+    }
+
+    /// A `.ovpn` opened with Lumen in the Finder (Info.plist's document type): Proxies › Add ›
+    /// OpenVPN with the file read — after the vault's password, when it is locked. Nothing else is
+    /// opened this way; one file at a time (the last, when several are opened together).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let files = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "ovpn" } // l10n: not text
+        guard !files.isEmpty else { return }
+        pendingFiles = files
+        openPendingFiles()
+    }
+
+    private func openPendingFiles() {
+        guard let model, let file = pendingFiles.last else { return }
+        pendingFiles = []
+        model.requestProxyAdd(ProxyAddRequest(choice: .openVPN, file: file))
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.

@@ -3,16 +3,20 @@ import BrowserCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Settings › Proxies › Add OpenVPN… (docs/OPENVPN.md): a `.ovpn` file becomes an entry of the
-/// list, which profiles are given as any proxy. The file is read once, here: files it names are
+/// Proxies › Add › OpenVPN (docs/OPENVPN.md) — also a `.ovpn` dropped on Add's sheet or on this
+/// one, or opened with Lumen in the Finder: a `.ovpn` file becomes an entry of the list, which
+/// profiles are given as any proxy. The file is read once, here: files it names are
 /// taken from beside it; what Lumen leaves out is said; a configuration Lumen cannot run is
 /// refused whole, with why. Its user name and password are the entry's, kept as every proxy's.
 /// Opened on an OpenVPN entry, the same sheet changes its name, credentials or file.
 struct OpenVPNImportView: View {
     @ObservedObject var proxies: ProxyListModel
     let entry: ProxyListEntry?
+    /// A file to read as the sheet opens (dropped on Add's sheet, opened in the Finder).
+    var file: URL?
     var onAdded: (UUID) -> Void = { _ in }
     @Environment(\.dismiss) private var dismiss
+    @State private var dropTargeted = false
 
     @State private var label: String
     @State private var username: String
@@ -22,9 +26,10 @@ struct OpenVPNImportView: View {
     @State private var problem: String?
     @State private var error: String?
 
-    init(proxies: ProxyListModel, entry: ProxyListEntry? = nil, onAdded: @escaping (UUID) -> Void = { _ in }) {
+    init(proxies: ProxyListModel, entry: ProxyListEntry? = nil, file: URL? = nil, onAdded: @escaping (UUID) -> Void = { _ in }) {
         _proxies = ObservedObject(wrappedValue: proxies)
         self.entry = entry
+        self.file = file
         self.onAdded = onAdded
         _label = State(initialValue: entry?.label ?? "")
         _username = State(initialValue: entry?.proxy.username ?? "")
@@ -111,6 +116,18 @@ struct OpenVPNImportView: View {
         }
         .sheetFrame(width: 560)
         .background(Theme.raised)
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.accent.opacity(0.6), lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onDrop(of: [UTType.fileURL], isTargeted: $dropTargeted) { providers in
+            OpenVPNFile.receive(providers) { load($0) }
+        }
+        .onAppear {
+            if let file, fileName == nil { load(file) }
+        }
     }
 
     /// "vpn.example.net:1194 (UDP), and 2 more servers".
@@ -122,20 +139,16 @@ struct OpenVPNImportView: View {
     }
 
     private func choose() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = [UTType(filenameExtension: "ovpn"), UTType(filenameExtension: "conf"), .plainText].compactMap { $0 }
-        panel.message = L("openvpn.import.panel")
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        load(url)
+        if let url = OpenVPNFile.choose() { load(url) }
     }
 
     /// Reads the file, and the files it names from beside it.
     private func load(_ url: URL) {
         problem = nil
         error = nil
+        // A file dropped or opened from the Finder: readable through its own grant (the sandboxed build).
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url), data.count <= OpenVPNConfiguration.maximumSize,
               let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else {
             configuration = nil
