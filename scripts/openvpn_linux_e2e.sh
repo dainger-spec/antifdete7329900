@@ -82,9 +82,10 @@ ip addr show lovpn-srv | grep -q 10.77.0.1 || fail "the server's tun did not com
 cat > services.py <<'EOF'
 import socket, struct, sys, threading, http.server
 ADDRESS = "10.77.0.1"
+BIG = bytes(range(256)) * (32 * 4096)
 class Page(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        body = ("seen-from=" + self.client_address[0] + "\n").encode()
+        body = BIG if self.path == "/big" else ("seen-from=" + self.client_address[0] + "\n").encode()
         self.send_response(200); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     def log_message(self, *args): pass
 def dns():
@@ -183,6 +184,11 @@ echo "$BODY"
 [[ "$BODY" == "seen-from=10.77.0.2" ]] || fail "the server saw the page come from elsewhere: $BODY"
 BIG="$(curl -sS --max-time 60 --socks5-hostname "$USER:$PASS@127.0.0.1:$PORT" -o /dev/null -w '%{http_code}' http://10.77.0.1:8080/)" || fail "a load by address failed"
 [[ "$BIG" == "200" ]] || fail "a load by address answered $BIG"
+
+SECONDS_TAKEN="$( { /usr/bin/time -f %e curl -sS --max-time 120 --socks5-hostname "$USER:$PASS@127.0.0.1:$PORT" -o "$W/big" http://10.77.0.1:8080/big; } 2>&1 | tail -1)"
+[[ "$(stat -c %s "$W/big")" == "33554432" ]] || fail "32 MB did not come through whole"
+python3 -I -c "import sys; d=open(sys.argv[1],'rb').read(); assert d == bytes(range(256)) * (32 * 4096)" "$W/big" || fail "32 MB came through changed"
+echo "32 MB through the tunnel intact in ${SECONDS_TAKEN} s"
 
 echo "== 2. DNS only through the tunnel"
 sort -u "$W/dns-askers.log"
