@@ -1,0 +1,55 @@
+name: Address bar probe
+
+# Scratch: the address bar check on a runner whose Safari is updated by Software Update (Safari 27.2
+# where it is offered: the address bar's code is Safari's frameworks'). One branch only.
+on:
+  push:
+    branches: ['claude/addressbar-safari272']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Address bar (${{ matrix.os }}, Safari updated)
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: Update Safari by Software Update, where an update is offered
+        continue-on-error: true
+        timeout-minutes: 30
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          softwareupdate --list 2>&1 | tee build-su.txt || true
+          label=$(grep -E '^\s*\* Label: Safari' build-su.txt | head -1 | sed 's/^.*Label: //')
+          echo "Safari's update: ${label:-none}"
+          if [[ -n "$label" ]]; then sudo softwareupdate --install "$label" --agree-to-license 2>&1 | tail -20; fi
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleVersion || true
+          defaults read /System/Library/PrivateFrameworks/Safari.framework/Resources/Info.plist CFBundleVersion || true
+          defaults read /System/Library/PrivateFrameworks/SafariShared.framework/Resources/Info.plist CFBundleVersion || true
+      - name: Build the app without the App Sandbox
+        timeout-minutes: 40
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Type and press Return in the address bar (Google in full, Bing, Yandex)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: FS_TRACE=1 TITLE="address bar, Safari updated" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/updated google,bing,yandex
+      - name: The profile processes' exception log
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p build/address-bar
+          log show --last 90m --style compact --predicate 'subsystem == "PrivacyBrowser" AND (category == "Exception" OR category == "SafariChrome" OR category == "SafariStores")' \
+            > build/address-bar/exception-log.txt 2>&1 || true
+          grep -E "caught by the run loop|thrown|Caught in|threw after Return|loads what was asked|Safari's stores|set aside|held to the profile" build/address-bar/exception-log.txt | cut -c1-400 | head -120 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: address-bar-safari-updated
+          path: build/address-bar
+          if-no-files-found: ignore
