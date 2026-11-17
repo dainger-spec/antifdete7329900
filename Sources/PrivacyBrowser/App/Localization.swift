@@ -143,10 +143,13 @@ enum Localization {
         var components = Locale.Components(locale: current)
         components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
                                                                    script: nil, region: current.region)
-        // The clock of the interface's language: a Russian interface on a Mac of the United States
-        // said «8:38 AM» (the region's 12 hours, ru snapshots of full run 44041802860). Russian
-        // writes the time in 24 hours.
-        if languageCode == "ru" { components.hourCycle = .zeroToTwentyThree }
+        // Russian's own conventions in a Russian interface: a Mac of the United States made it say
+        // «8:38 AM» and «41.3 МБ» (the region's 12 hours and decimal point, ru snapshots of full
+        // run 44041802860). Russian writes the time in 24 hours and a decimal comma.
+        if languageCode == "ru" {
+            components.region = Locale.Region("RU")
+            components.hourCycle = .zeroToTwentyThree
+        }
         return Locale(components: components)
     }()
 }
