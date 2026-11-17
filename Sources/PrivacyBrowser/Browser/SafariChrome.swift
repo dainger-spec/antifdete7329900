@@ -333,6 +333,9 @@ enum SafariChrome {
         stubChromeFeatures()
         closeSafarisAutoFill()
         installUnavailableNotice()
+        // Where the sweep with real input found Safari's code throwing in a profile's window, away
+        // from typing: a key the page did not take, the Reading List's rows, a bookmark's sheet.
+        SafariWindowGuard.install()
     }
 
     // MARK: Safari's own services

@@ -265,6 +265,26 @@ final class HostedDownloads: NSObject, WKDownloadDelegate {
         NSApp.orderedWindows.first { SafariChromeHost.isBrowserWindow($0) && $0.isVisible }
     }
 
+    // MARK: Safari's own downloads folder
+
+    /// The key Safari keeps its downloads folder under.
+    static let safarisFolderKey = "DownloadsPath"
+
+    /// Safari's own downloads folder is the one the app's settings name, for what Safari's code
+    /// does with it itself: an image's "Save Image to “Downloads”" names it and saves there. Unset in
+    /// a profile's process, the item read "Save Image to “(null)”" and choosing it said "Safari can't
+    /// save the file … to the downloads folder" (the sweep with real input, CI run 43990525206,
+    /// macOS 26). Set in this process's argument domain only, as Safari's other settings for a
+    /// profile are (`SafariChrome.configureSafarisOwnServices`): nothing is written to a file. Where
+    /// a download's file goes is still this delegate's to decide (`delegate(inPlaceOf:)`).
+    static func nameFolderForSafari(_ preferences: BrowsingPreferences) {
+        let path = preferences.downloadFolderURL.path
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        guard arguments[safarisFolderKey] as? String != path else { return }
+        arguments[safarisFolderKey] = path
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    }
+
     // MARK: View › Show Downloads
 
     /// Safari's own action behind View › Show Downloads (⌥⌘L), disabled in a profile's window.

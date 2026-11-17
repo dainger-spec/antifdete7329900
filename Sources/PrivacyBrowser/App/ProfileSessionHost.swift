@@ -101,6 +101,8 @@ enum ProfileSessionHost {
            let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
             BrowsingPreferences.current = preferences
         }
+        // Safari's own downloads folder, which its code names and saves to, is the settings' one.
+        HostedDownloads.nameFolderForSafari(BrowsingPreferences.current)
         let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared
@@ -344,6 +346,7 @@ enum ProfileSessionHost {
                 }
             case .preferences(let preferences):
                 BrowsingPreferences.current = preferences
+                HostedDownloads.nameFolderForSafari(preferences)
                 DockIcon.show(initials: preferences.dockInitials, of: profileName)
             case .webRTC(let message):
                 // The launch inside this process waits for it (`ProfileManager.webRTCRelay`).
