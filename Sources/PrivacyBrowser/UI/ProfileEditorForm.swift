@@ -437,7 +437,6 @@ struct ProfileEditorForm: View {
                         .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
                 }
             }
-            EditorNote(L("editor.generation.footer"))
         }
     }
 
@@ -784,9 +783,6 @@ struct ProfileEditorForm: View {
                 EditorNote(L("editor.local.allowedWarning"), tone: .warning)
             }
             EditorNote(L("editor.local.note"))
-            if draft.hasProxy {
-                EditorNote(L("editor.local.proxy"))
-            }
             EditorDivider()
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
             EditorNote(L("editor.privacy.footer"))
@@ -857,7 +853,6 @@ struct ProfileEditorForm: View {
             if draft.camera.delivery == .systemCamera { systemCameraSection }
             cameraCropAndFilters
             cameraPlaybackSection
-            EditorNote(L("editor.camera.secure.note"))
         }
     }
 

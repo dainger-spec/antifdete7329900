@@ -493,7 +493,8 @@ struct ProxyColumns {
     static let exit: CGFloat = 132
     static let ip: CGFloat = 118
     static let latency: CGFloat = 104
-    static let state: CGFloat = 156
+    /// Wide enough for «Неверный логин или пароль» with its dot: «Молчит после соединен…» was cut.
+    static let state: CGFloat = 184
     static let gap: CGFloat = 12
     static let minimumName: CGFloat = 170
     /// The rows' own inset, on both sides.
@@ -504,8 +505,9 @@ struct ProxyColumns {
 
     /// The table beside the inspector under the header: the proxy, where it exits as a country's
     /// code, its state — the type and the latency are the inspector's.
-    static let compactExit: CGFloat = 40
-    static let compactState: CGFloat = 180
+    /// The column's title whole («ВЫХ…» at 40), and the longest state beside it.
+    static let compactExit: CGFloat = 64
+    static let compactState: CGFloat = 196
     static let minimumCompactWidth: CGFloat = 2 * 12 + 2 * Self.inset + 2 * 8 + 150 + Self.compactExit + Self.compactState + 2 * Self.gap
 
     let showsIP: Bool
