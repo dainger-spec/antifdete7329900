@@ -583,8 +583,11 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertEqual(VMHelperEvent.parse(troubled.line())?.trouble.flatMap(VMNetworkTrouble.init(rawValue:)), .proxyUnreachable)
         XCTAssertNil(VMNetworkTrouble(rawValue: "a kind of a later helper"))
         // The connector's kinds, word for word (it is not linked here): a configuration file is one.
-        XCTAssertEqual(VMNetworkTrouble.allCases.map(\.rawValue),
+        let ownProxyKinds: [VMNetworkTrouble] = [.ownProxyUnreachable, .ownProxyLogin, .ownProxyNotUnderstood]
+        XCTAssertEqual(VMNetworkTrouble.allCases.filter { !ownProxyKinds.contains($0) }.map(\.rawValue),
                        ["nameNotFound", "notPublic", "unreachable", "proxyUnreachable", "proxyRefused", "proxyConfigurationFile"])
+        // The machine's own proxy's kinds are the app's words for the helper's counters, not the connector's.
+        XCTAssertEqual(ownProxyKinds.map(\.rawValue), ["ownProxyUnreachable", "ownProxyLogin", "ownProxyNotUnderstood"])
         XCTAssertGreaterThan(VMNetworkTrouble.failuresBeforeSaying, 1, "one dead address of a page is not a machine without internet")
         XCTAssertNil(VMHelperEvent.parse("2026-11-13 12:00:00.000 LumenVM[1:2] a line of the system's own"))
         XCTAssertNil(VMHelperEvent.parse(#"{"kind":"something-new"}"#), "an event of a later helper is not this version's")
