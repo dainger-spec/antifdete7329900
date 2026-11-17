@@ -92,3 +92,4 @@ signatureNotChecked	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans
 robotCheckNotShown	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	the robot check opens in the app
 featuresFromPlan	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	no proxies without the feature
 noBrowseOpens	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	a blocked account opens no profile
+webRTCAroundTunnel	ui	LumenUITests/ProxyTests/testWebRTCGoesThroughTheProxy	every candidate is a relay at the proxy's exit

@@ -83,6 +83,48 @@ final class ProxyTests: LumenUITestCase {
         shot("33 after relaunch")
     }
 
+    /// WebRTC through the session's proxy (the owner, 17 November): with a SOCKS5 proxy that carries
+    /// UDP, two peer connections of a page connect, every candidate a relay at the proxy's exit (no
+    /// address of the iPhone's own, no STUN from it); with a proxy that cannot carry UDP the pages
+    /// have no WebRTC at all. The testbed's proxy C exits at 198.51.100.1 (its STUN and /geo.json).
+    func testWebRTCGoesThroughTheProxy() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        launch(reset: true)
+        app.buttons["proxiesButton"].tap()
+        wait(app.navigationBars["Прокси"], "the proxy list opens")
+        addProxy(name: "С UDP", kind: "SOCKS5", port: "28383", user: "uc", password: "pc")
+        waitRow("С UDP", says: "UDP: умеет")
+        addProxy(name: "Нью-Йорк", kind: "SOCKS5", port: "28382", user: "ub", password: "pb")
+        waitRow("Нью-Йорк", says: "UDP: не умеет")
+        leaveProxies()
+        createSession(name: "Звонки")
+        openSession("Звонки")
+        chooseProxy("С UDP", in: "Звонки")
+
+        openPage("http://stun-\(run).lumentest:28380/__stun?before=1")
+        let before = pageLine("stun: ")
+        openPage("http://rtc-\(run).lumentest:28380/webrtc")
+        let channel = pageLine("channel: ")
+        let candidates = pageLine("candidates: ")
+        XCTAssertEqual(candidates, "candidates: relay 198.51.100.1",
+                       "every candidate is a relay at the proxy's exit, none of the iPhone's own: \(candidates)")
+        XCTAssertEqual(channel, "channel: open", "the data channel went across through the proxy: \(channel)")
+        shot("34 WebRTC through the proxy")
+        openPage("http://stun-\(run).lumentest:28380/__stun?after=1")
+        let after = pageLine("stun: ")
+        XCTAssertEqual(Self.direct(after), Self.direct(before), "no STUN from the iPhone's own address: \(before) → \(after)")
+
+        // A proxy that cannot carry UDP: no WebRTC in the pages, rather than one around the proxy.
+        chooseProxy("Нью-Йорк", in: "Звонки")
+        openPage("http://rtc-\(run).lumentest:28380/webrtc?udp=no")
+        page("webrtc: none")
+    }
+
+    /// "stun: proxy=3 direct=0" → "direct=0".
+    private static func direct(_ line: String) -> String {
+        line.split(separator: " ").first { $0.hasPrefix("direct=") }.map(String.init) ?? line
+    }
+
     /// The most dangerous breakage: a proxy that is dead, or dies, and the session quietly going
     /// direct. On this testbed going direct is visible: *.lumentest names resolve for this Mac too
     /// (ci.sh), so a page that went around its proxy loads and says "via: напрямую", and the testbed

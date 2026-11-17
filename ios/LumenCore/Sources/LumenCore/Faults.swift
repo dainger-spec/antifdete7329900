@@ -79,6 +79,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case noiseUnstable           // the canvas noise seed changes on every read
     case canvasNoiseLowBit       // the canvas noise flips a colour's low bit, which a canvas cannot hold at partial alpha: its PNG reads back otherwise
     case noWebPageNamespace      // no extension controller: pages lack window.browser, which Safari gives every page
+    case webRTCAroundTunnel      // the WebRTC relay runs, but the pages keep the engine's own ICE servers: STUN from the iPhone's address
     case unmaskedReplacement     // one replacement made plainly, as most scripts do: the natives check must see it
 }
 

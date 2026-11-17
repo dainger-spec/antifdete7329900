@@ -34,7 +34,16 @@ this Mac, so a test sees on the screen what the pages say about how they were re
                    by which route ("route T: direct=1 A=0 B=2 D=0 "), and how many site connections
                    that served such a request are open now ("open T: 1")
   Site connections are kept alive between requests (60 s), as real sites keep them.
-  STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
+  STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests. Asked
+            through proxy C it answers with C's exit, 198.51.100.1 (the address /geo.json gives C), at
+            the association's port, as a real proxy's STUN answer does; C's relays take 198.51.100.1
+            as each other (so two associations of C reach each other at their exit address), and
+            name each other so. /__stun says how many Binding requests came through C and how many
+            came straight from this Mac (around every proxy: "stun: proxy=N direct=M")
+  /webrtc   two peer connections of one page, given stun.lumentest as their ICE server, connect with
+            a data channel: the page lists every candidate of the first ("candidates: relay
+            198.51.100.1") and says "channel: open" once a message went across, or "channel: failed"
+            (after 20 s), or "webrtc: none" when the page has no RTCPeerConnection
   account   http://127.0.0.1:28395: a stand-in for the Lumen account server (account.py — sign-in,
             activation, the signed document of rights). The site shows and changes its accounts:
             /__account?email=E[&set=S]; and has the site's robot check, <anything>/robot-check?action=A:
@@ -64,6 +73,9 @@ CACHE_COUNTER = [0]
 SERVED_COUNTER = [0]
 OPEN = {}              # Host -> site connections open now that have served a request for it
 ENV_COUNTER = [0]
+C_EXIT = "198.51.100.1"   # proxy C's exit, as /geo.json and the STUN server say it
+C_RELAYS = set()          # the ports of proxy C's UDP relays on 127.0.0.1
+STUN_SEEN = {"proxy": 0, "direct": 0}
 EXITS = {"127.0.0.2": ("A", "DE", "Europe/Berlin", "203.0.113.10"),
          "127.0.0.3": ("B", "US", "America/New_York", "203.0.113.20")}
 
@@ -110,6 +122,40 @@ LONG_SCRIPTS = {
               "document.documentElement.style.background=document.body.style.background=dark?'#111':'#fff';"
               "document.body.style.color=dark?'#eee':'#111'},{passive:true})",
 }
+
+
+# /webrtc: two peer connections of the page, the first offering a data channel to the second; every
+# candidate of the first is listed (type and address), and a message across says the channel works.
+WEBRTC_SCRIPT = r"""
+const cand = document.getElementById('cand'), chan = document.getElementById('chan');
+if (!window.RTCPeerConnection) { cand.textContent = 'webrtc: none'; chan.textContent = 'channel: none'; }
+else {
+  const seen = [];
+  const config = { iceServers: [{ urls: 'stun:stun.lumentest:3478' }] };
+  const a = new RTCPeerConnection(config), b = new RTCPeerConnection(config);
+  const show = () => { cand.textContent = 'candidates: ' + (seen.length ? seen.join(', ') : '(none)'); };
+  a.onicecandidate = e => {
+    if (!e.candidate) { show(); return; }
+    const parts = e.candidate.candidate.split(' ');
+    const typ = parts[parts.indexOf('typ') + 1];
+    const entry = typ + ' ' + parts[4];
+    if (!seen.includes(entry)) seen.push(entry);
+    show();
+    b.addIceCandidate(e.candidate).catch(() => {});
+  };
+  b.onicecandidate = e => { if (e.candidate) a.addIceCandidate(e.candidate).catch(() => {}); };
+  const dc = a.createDataChannel('lumen');
+  dc.onopen = () => dc.send('hello');
+  b.ondatachannel = e => { e.channel.onmessage = m => { if (m.data === 'hello') chan.textContent = 'channel: open'; }; };
+  setTimeout(() => { if (chan.textContent !== 'channel: open') chan.textContent = 'channel: failed'; }, 20000);
+  (async () => {
+    await a.setLocalDescription(await a.createOffer());
+    await b.setRemoteDescription(a.localDescription);
+    await b.setLocalDescription(await b.createAnswer());
+    await a.setRemoteDescription(b.localDescription);
+  })().catch(e => { chan.textContent = 'channel: error ' + e; });
+}
+"""
 
 
 def long_page(mode):
@@ -374,6 +420,12 @@ async def site(reader, writer, scheme="http"):
                 SERVED_COUNTER[0] += 1
                 out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
                             extra=["Cache-Control: no-store"])
+            elif path == "/webrtc":
+                out = reply("200 OK", page("webrtc", "<h1>WebRTC</h1><p id=cand>candidates: …</p><p id=chan>channel: …</p>",
+                                           WEBRTC_SCRIPT), extra=["Cache-Control: no-store"])
+            elif path == "/__stun":
+                out = reply("200 OK", page("stun", f"<p>stun: proxy={STUN_SEEN['proxy']} direct={STUN_SEEN['direct']}</p>"),
+                            extra=["Cache-Control: no-store"])
             elif path == "/hold":
                 name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
                 out = reply("200 OK", page("hold", f"<h1>Держит</h1><p id=via>via: {name}</p><p id=ws>ws: …</p>"
@@ -490,6 +542,12 @@ class UDPRelay(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+        self.port = transport.get_extra_info("sockname")[1]
+        if self.name == "C":
+            C_RELAYS.add(self.port)
+
+    def connection_lost(self, exc):
+        C_RELAYS.discard(self.port)
 
     def datagram_received(self, data, addr):
         if self.client is None or addr == self.client:
@@ -505,11 +563,13 @@ class UDPRelay(asyncio.DatagramProtocol):
             else:
                 return
             port = struct.unpack(">H", rest[:2])[0]
-            target = "127.0.0.1" if host.endswith(".lumentest") else host
+            # C's exit is another association of C on this Mac.
+            target = "127.0.0.1" if host.endswith(".lumentest") or (self.name == "C" and host == C_EXIT) else host
             event("udp", proxy=self.name, host=host, port=port)
             self.transport.sendto(rest[2:], (target, port))
         else:
-            header = b"\x00\x00\x00\x01" + socket.inet_aton(addr[0]) + struct.pack(">H", addr[1])
+            source = C_EXIT if self.name == "C" and addr[0] == "127.0.0.1" and addr[1] in C_RELAYS else addr[0]
+            header = b"\x00\x00\x00\x01" + socket.inet_aton(source) + struct.pack(">H", addr[1])
             self.transport.sendto(header + data, self.client)
 
 
@@ -578,9 +638,12 @@ class Stun(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         if len(data) < 20 or struct.unpack(">H", data[:2])[0] != 1:
             return
-        event("stun", src=addr[0])
+        through = addr[0] == "127.0.0.1" and addr[1] in C_RELAYS
+        STUN_SEEN["proxy" if through else "direct"] += 1
+        event("stun", src=addr[0], via="C" if through else "direct")
+        mapped = C_EXIT if through else addr[0]
         xport = addr[1] ^ 0x2112
-        xip = bytes(a ^ b for a, b in zip(socket.inet_aton(addr[0]), struct.pack(">I", 0x2112A442)))
+        xip = bytes(a ^ b for a, b in zip(socket.inet_aton(mapped), struct.pack(">I", 0x2112A442)))
         attr = struct.pack(">HHBBH", 0x0020, 8, 0, 1, xport) + xip
         self.transport.sendto(struct.pack(">HHI", 0x0101, len(attr), 0x2112A442) + data[8:20] + attr, addr)
 

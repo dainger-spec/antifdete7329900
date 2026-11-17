@@ -46,6 +46,8 @@ final class SessionRuntime: ObservableObject {
     private let store: LumenStore
     /// The session's relay: its data store's only proxy (Relay.swift).
     private let relay: Relay
+    /// The session's WebRTC relay (TURN on 127.0.0.1, out through its SOCKS5 proxy's UDP).
+    private let webRTC = WebRTCTunnel()
     /// The page shim's family channel for this runtime's pages (`PageSettings.ShimConfig.channel`):
     /// one for every tab and window of the session, made anew at each launch, read by no page.
     private let channel: String
@@ -78,6 +80,7 @@ final class SessionRuntime: ObservableObject {
         // Until the relay listens, a proxy nothing answers on, without fallback: nothing leaves.
         dataStore.proxyConfigurations = Relay.configurations(port: nil, password: relay.password)
         applyProxy()
+        applyWebRTC()
         applyPageSettings()
         let savedTabs = store.loadTabs(of: session.id)
         tabs = savedTabs.tabs.map { makeTab($0, configuration: nil) }
@@ -140,7 +143,7 @@ final class SessionRuntime: ObservableObject {
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
         if proxy != nil, let rules = ContentRules.proxied { configuration.userContentController.add(rules) }
-        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy, channel: channel))
+        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy, relay: webRTC.relay, channel: channel))
         return configuration
     }
 
@@ -155,7 +158,15 @@ final class SessionRuntime: ObservableObject {
         self.proxy = proxy
         self.locked = locked
         applyProxy()
+        applyWebRTC()
         applyPageSettings()
+    }
+
+    /// The WebRTC relay for the session's proxy as it is now (its check found UDP or not, a new
+    /// password, a new exit): started, started again or stopped before the pages are given it.
+    private func applyWebRTC() {
+        let password = proxy.flatMap { ProxyPasswords.get($0.id) } ?? ""
+        webRTC.apply(proxy: proxy, password: password, locked: locked)
     }
 
     /// What the pages were last given (User-Agent and shim configuration, without the runtime's
@@ -163,13 +174,13 @@ final class SessionRuntime: ObservableObject {
     private var appliedPage: String?
 
     private func applyPageSettings() {
-        let config = PageSettings.config(for: session, proxy: proxy)
+        let config = PageSettings.config(for: session, proxy: proxy, relay: webRTC.relay)
         let key = "\(PageSettings.userAgent(for: session) ?? "")|\(String(describing: config))"
         guard key != appliedPage else { return }
         let first = appliedPage == nil
         appliedPage = key
         guard !first else { return }   // the tabs were built with these already
-        let script = PageSettings.script(for: session, proxy: proxy, channel: channel)
+        let script = PageSettings.script(for: session, proxy: proxy, relay: webRTC.relay, channel: channel)
         for tab in tabs {
             let controller = tab.webView.configuration.userContentController
             controller.removeAllUserScripts()
@@ -292,6 +303,7 @@ final class SessionRuntime: ObservableObject {
         for tab in tabs { tab.tearDown() }
         tabs = []
         relay.stop()
+        webRTC.stop()
         if let foreground { NotificationCenter.default.removeObserver(foreground) }
     }
 }
