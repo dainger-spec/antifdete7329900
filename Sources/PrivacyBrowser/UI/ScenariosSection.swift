@@ -187,7 +187,7 @@ private struct ScenariosSectionBody: View {
                 }
                 switch tab {
                 case .library:
-                    if scenarios.isEmpty { ScenariosFirstOpen(choose: begin, take: { template = $0 }) } else { library(runs: runs) }
+                    if scenarios.isEmpty { ScenariosFirstOpen(choose: begin, take: { template = $0 }, importFile: importFile) } else { library(runs: runs) }
                 case .templates:
                     ScenarioTemplateChooser(search: search, use: { template = $0 }, openCode: { taken in
                         guard sample == nil else { return }
@@ -236,6 +236,9 @@ private struct ScenariosSectionBody: View {
                 Button(L("scenarios.new.template")) { tab = .templates }
                 Button(L("scenarios.new.record")) { begin(.record) }
                 Button(L("scenarios.new.empty")) { begin(.empty) }
+                // A file someone sent: here as well as under ⋯, where a tester did not look for it.
+                Divider()
+                Button(L("scenarios.new.file")) { importFile() }
             } label: {
                 ScenarioMenuLabel(title: L("scenarios.new"), symbol: "plus", isMain: true)
             }
@@ -628,6 +631,7 @@ private struct ScenarioLibraryRow: View {
 private struct ScenariosFirstOpen: View {
     let choose: (ScenariosSectionBody.Beginning) -> Void
     let take: (ScenarioTemplate) -> Void
+    var importFile: () -> Void = {}
     private static let first = ["signin", "signedin", "feed", "collect"]
 
     var body: some View {
@@ -644,6 +648,7 @@ private struct ScenariosFirstOpen: View {
                 caption(L("scenarios.first.ways"))
                 way(L("scenarios.first.record"), L("scenarios.first.record.text"), isFirst: true) { choose(.record) }
                 way(L("scenarios.first.code"), L("scenarios.first.code.text")) { choose(.empty) }
+                way(L("scenarios.first.file"), String(format: L("scenarios.first.file.text"), ScenarioFile.fileExtension), action: importFile)
                 caption(L("scenarios.first.templates"))
                 ForEach(Array(Self.first.compactMap { ScenarioTemplate.template($0) }.enumerated()), id: \.element.id) { index, template in
                     way(L(template.titleKey), L(template.textKey), isFirst: index == 0) { take(template) }

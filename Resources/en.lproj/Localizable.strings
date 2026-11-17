@@ -3335,10 +3335,13 @@
 "scenarios.search.none" = "Nothing found.";
 "scenarios.import" = "Import a Scenario File…";
 "scenarios.export" = "Export…";
-"scenarios.export.failed" = "The scenario could not be saved: %@";
+"scenarios.export.failed" = "The scenario could not be exported: %@";
 "scenarios.new.template" = "From a Template…";
 "scenarios.new.record" = "Record Actions";
 "scenarios.new.empty" = "Empty, in Code";
+"scenarios.new.file" = "From a File…";
+"scenarios.first.file" = "Import a file";
+"scenarios.first.file.text" = "One sent to you, or one you exported: a .%@ file";
 "scenarios.count" = "Scenarios: %d";
 "scenarios.count.none" = "None yet";
 "scenarios.count.scheduled" = "scheduled: %d";

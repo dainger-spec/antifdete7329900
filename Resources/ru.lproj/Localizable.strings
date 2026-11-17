@@ -3335,10 +3335,13 @@
 "scenarios.search.none" = "Ничего не найдено.";
 "scenarios.import" = "Импортировать файл сценария…";
 "scenarios.export" = "Экспортировать…";
-"scenarios.export.failed" = "Сценарий не сохранился: %@";
+"scenarios.export.failed" = "Не удалось экспортировать сценарий: %@";
 "scenarios.new.template" = "Из шаблона…";
 "scenarios.new.record" = "Записать действия";
 "scenarios.new.empty" = "Пустой, кодом";
+"scenarios.new.file" = "Из файла…";
+"scenarios.first.file" = "Импортировать файл";
+"scenarios.first.file.text" = "Присланный вам или экспортированный: файл .%@";
 "scenarios.count" = "Сценариев: %d";
 "scenarios.count.none" = "Пока ни одного";
 "scenarios.count.scheduled" = "по расписанию: %d";
