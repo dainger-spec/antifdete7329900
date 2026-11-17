@@ -369,18 +369,26 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         let manager = FileManager.default
         try manager.createDirectory(at: files.share, withIntermediateDirectories: true)
         // What a clone that stopped part-way left.
-        for url in [files.disk, files.auxiliaryStorage, files.hardwareModel, files.machineIdentifier] { try? manager.removeItem(at: url) }
+        let made = [files.disk, files.auxiliaryStorage, files.hardwareModel, files.machineIdentifier]
+        for url in made { try? manager.removeItem(at: url) }
         let cloning = files.directory.appendingPathComponent("disk.img.cloning")
         try? manager.removeItem(at: cloning)
-        if clonefile(base.disk.path, cloning.path, 0) != 0 {
-            // Not a volume that clones (not APFS): a whole copy.
-            try manager.copyItem(at: base.disk, to: cloning)
+        do {
+            if clonefile(base.disk.path, cloning.path, 0) != 0 {
+                // Not a volume that clones (not APFS): a whole copy.
+                try manager.copyItem(at: base.disk, to: cloning)
+            }
+            try manager.copyItem(at: base.auxiliaryStorage, to: files.auxiliaryStorage)
+            try manager.copyItem(at: base.hardwareModel, to: files.hardwareModel)
+            try manager.moveItem(at: cloning, to: files.disk)
+            // Last: with it the machine is whole.
+            try VZMacMachineIdentifier().dataRepresentation.write(to: files.machineIdentifier)
+        } catch {
+            // A copy that stopped part-way — a full disk, above all — is gigabytes of nothing: gone
+            // now, not left on the full disk until the machine's next start.
+            for url in [cloning] + made { try? manager.removeItem(at: url) }
+            throw error
         }
-        try manager.copyItem(at: base.auxiliaryStorage, to: files.auxiliaryStorage)
-        try manager.copyItem(at: base.hardwareModel, to: files.hardwareModel)
-        try manager.moveItem(at: cloning, to: files.disk)
-        // Last: with it the machine is whole.
-        try VZMacMachineIdentifier().dataRepresentation.write(to: files.machineIdentifier)
     }
 
     // MARK: The window

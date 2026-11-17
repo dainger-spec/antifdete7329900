@@ -434,7 +434,10 @@ final class VMCenter: ObservableObject {
         }, onEnd: { [weak self] failure in
             guard let self, self.setupRun == run else { return }
             self.setupHelper = nil
-            guard failure == nil else { return self.setupFailed(failure ?? L("vm.error.unknown")) }
+            guard failure == nil else {
+                self.removeUnfinishedInstallation()
+                return self.setupFailed(failure ?? L("vm.error.unknown"))
+            }
             do {
                 try self.library.saveBaseInfo(VMBaseInfo(stage: .installed, version: installed?.version ?? "",
                                                          build: installed?.build ?? ""))
@@ -463,7 +466,23 @@ final class VMCenter: ObservableObject {
         setupHelper = nil
         activity = nil
         holdAwake(false)
+        removeUnfinishedInstallation()
         setup = library.setupState()
+        measureDisk()
+    }
+
+    /// What an installation that did not finish wrote into the base's folder — a disk of up to
+    /// twenty gigabytes, its firmware variables — is no system (the next installation starts over
+    /// and removes it first), but it took the room a full disk needed: removed now, not left until
+    /// then. Only while no base is recorded (`base.json`, written once an installation is whole);
+    /// the share and its tools stay. The downloaded image stays too: Continue installs again.
+    private func removeUnfinishedInstallation() {
+        guard library.baseInfo() == nil else { return }
+        let base = library.base
+        for url in [base.disk, base.auxiliaryStorage, base.hardwareModel, base.machineIdentifier] {
+            try? FileManager.default.removeItem(at: url)
+        }
+        measureDisk()
     }
 
     /// The memory the base gets while it is set up: macOS's first run is the heaviest thing a
