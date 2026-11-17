@@ -1197,7 +1197,7 @@
 "proxyProblem.showInList" = "Показать в «Прокси»";
 "proxyProblem.subtitle" = "Прокси %@ не работает — страницы не загрузятся.";
 "proxyProblem.title" = "«%@» не загружает страницы";
-"proxyProblem.worksNow" = "Сейчас прокси работает: обновите страницу в профиле. Если проверка исправила тип прокси, закройте профиль и откройте снова.";
+"proxyProblem.worksNow" = "Прокси снова работает — обновите страницу.";
 "pw.alreadySaved" = "Этот пароль уже сохранён.";
 "pw.couldNotSave" = "Не удалось сохранить: %@";
 "pw.never" = "Никогда для этого сайта";
@@ -1922,11 +1922,11 @@
 "profiles.exit.directIn" = "Напрямую, без прокси";
 "inspector.webRTC" = "WebRTC";
 "inspector.webRTC.viaProxy" = "Через прокси, только ретранслятор";
-"inspector.webRTC.likeSafari" = "Как в Safari, через подключение этого Mac";
+"inspector.webRTC.likeSafari" = "Как в Safari";
 "inspector.webRTC.silent" = "Есть, никуда не соединяется";
-"inspector.webRTC.silentHTTP" = "Есть, никуда не соединяется: HTTP-прокси не переносит UDP";
-"inspector.webRTC.notOwnProcess" = "Выключен: в этой сборке профили работают внутри приложения";
-"inspector.webRTC.bypass" = "Выключен: некоторые сайты идут мимо прокси";
+"inspector.webRTC.silentHTTP" = "Есть, но не подключается (HTTP-прокси)";
+"inspector.webRTC.notOwnProcess" = "Выключен в этой сборке";
+"inspector.webRTC.bypass" = "Выключен: часть сайтов мимо прокси";
 "inspector.checkProxy" = "Проверить прокси";
 "inspector.seen" = "Как видят сайты";
 "inspector.device" = "Устройство";
@@ -2022,7 +2022,7 @@
 "banners.more" = "ещё %ld";
 "banners.more.a11y" = "Ещё уведомлений: %ld, показать";
 "banners.collapse" = "свернуть";
-"banners.more.help" = "Показать остальные уведомления — по порядку важности";
+"banners.more.help" = "Показать остальные уведомления";
 "banners.collapse.help" = "Оставить одно, самое важное";
 "tags.color.menu" = "Цвет тега";
 "tags.color.none" = "Без цвета";
@@ -2798,9 +2798,9 @@
 "guard.state.proving" = "Проверяется на этом Mac…";
 "guard.todo.proving" = "Lumen проверяет, что защита видит соединения, которые WebKit открывает для профиля: служебный процесс без данных профилей отправляет один запрос WebRTC на адрес, который никуда не ведёт, и защита должна его отбросить. Это около 10 секунд.";
 "guard.todo.proofFailed" = "Проверка не прошла: защита не увидела соединение, которое WebKit открыл для профиля, — держать профиль на прокси ей было бы нечем. Поэтому WebRTC в профилях с прокси выключен. Нажмите «Проверить снова»; после обновления macOS или Safari проверка повторится сама.";
-"guardNotice.restartNeeded" = "Сетевая защита заработает после перезагрузки Mac: macOS заканчивает её установку при запуске. До тех пор WebRTC в профилях с прокси выключен.";
+"guardNotice.restartNeeded" = "Сетевая защита заработает после перезагрузки Mac. До этого WebRTC в профилях с прокси выключен.";
 "guardNotice.notInstalled" = "Сетевая защита не установлена — в профилях с прокси WebRTC выключен.";
-"guardNotice.awaitingApproval" = "Сетевая защита ждёт вашего разрешения в Системных настройках — до тех пор WebRTC в профилях с прокси выключен.";
+"guardNotice.awaitingApproval" = "Разрешите сетевую защиту в Системных настройках — до этого WebRTC в профилях с прокси выключен.";
 "guardNotice.off" = "Сетевая защита выключена — в профилях с прокси WebRTC выключен.";
 "guardNotice.notAnswering" = "Сетевая защита не отвечает — в профилях с прокси WebRTC выключен.";
 "guardNotice.open" = "Настройки WebRTC…";
