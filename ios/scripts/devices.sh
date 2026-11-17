@@ -132,6 +132,10 @@ create() { # leg want smallest|largest look size names... -> sets UDID, DESC
 }
 
 COMMON=(-project "$HERE/Lumen.xcodeproj" -scheme Lumen -derivedDataPath "$OUT/dd")
+# The build for every target at the app's own minimum, as install-floor.sh builds it. The Mac's core
+# package (../Package.swift) names no iOS minimum, and Xcode 26 builds such a package for iOS 12,
+# where CryptoKit is not (run 146 on macos-26: "'SymmetricKey' is only available in iOS 13.0").
+FLOOR="$(sed -n 's/^ *iOS: "\([0-9.]*\)".*/\1/p' "$HERE/project.yml" | head -1)"
 BUILT=""
 run_leg() { # leg want smallest|largest look size names...
     local leg="$1"
@@ -140,7 +144,8 @@ run_leg() { # leg want smallest|largest look size names...
     say "== $leg: $DESC ($UDID)"
     if [[ -z "$BUILT" ]]; then
         # Built once, for the first leg's simulator; the others run the same build (iOS 18 and up).
-        if ! xcodebuild build-for-testing "${COMMON[@]}" -destination "id=$UDID" >"$OUT/build.txt" 2>&1; then
+        if ! xcodebuild build-for-testing "${COMMON[@]}" -destination "id=$UDID" IPHONEOS_DEPLOYMENT_TARGET="${FLOOR:-18.0}" \
+                >"$OUT/build.txt" 2>&1; then
             grep -E "error:" "$OUT/build.txt" | head -30 | tee -a "$LOG"; say "BUILD FAILED"; exit 2
         fi
         BUILT=1
