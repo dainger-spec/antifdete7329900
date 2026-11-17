@@ -666,6 +666,7 @@ storage and network (§1, §4).
 | Restore points (copies of the profile's site data, cookies, history, open tabs) | the copied files as they were, still encrypted (`restore-points/<id>/`, with `point.bin`; this Mac only, not synced, not in a profile export) | listed when the sheet opens | — |
 | The profile's history of events (`journal.bin`) | encrypted (this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
+| Cookie snapshots (the last 3 copies of the persistent cookies; docs/COOKIE_RECOVERY.md) | encrypted (`cookie-snapshots.bin`, under the profile's key; this Mac only, not synced, not in a profile export) | encrypted (listed when Restore Cookies from a Snapshot… opens) | encrypted; written when the cookies change (every few minutes at most, at once after Lumen's own change) and at a clean stop; never plaintext on disk |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |

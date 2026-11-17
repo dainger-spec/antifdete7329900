@@ -341,6 +341,14 @@ document. Changes are the difference between the store and that baseline:
   change of now; then the baseline becomes the store. A cookie that expired is no deletion
   (each store drops it by itself).
 - **Launch** (the profile's store exists, no page has loaded):
+  0. cookie recovery (docs/COOKIE_RECOVERY.md) first: a store that lost cookies — missing website
+     data, a damaged cookie file, cookies gone after a clean end, far fewer after a run that did not
+     stop cleanly — is given back from this Mac's newest snapshot (never synced) every cookie it
+     lacks. Such a store records **no deletion** in step 1 — the loss is not the person's, and
+     recorded it would take those cookies off every other device — and what it holds otherwise is
+     recorded as of the baseline's time, as below: any change another device made since wins, and
+     step 2 applies it before the first page, so a snapshot never pushes a stale cookie over a newer
+     one nor brings back one deleted elsewhere;
   1. what the store changed since the baseline without being recorded (a run that ended
      without a stop) is recorded as changes of the baseline's time, the earliest they can
      be. With no baseline yet (cookie sync just turned on, or the first launch on this Mac),
@@ -361,6 +369,10 @@ document. Changes are the difference between the store and that baseline:
 A recorded change never overwrites a newer one already in the document (from another device,
 merged by sync but not applied yet). Applying a document entry is not a change of this
 device. Times are whole seconds.
+
+A restore of a snapshot by hand (Restore Cookies from a Snapshot…) is the person's own change: an
+import, recorded as a change of now at the next launch or stop, which the other devices get at the
+next sync.
 
 ## A Mac without a vault
 
