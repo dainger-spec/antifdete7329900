@@ -1523,3 +1523,11 @@ jobs:
           # Measured next to the macOS 27 job's same lines.
           grep -h "^INFO fragment jump" build/egress/selftest-unsandboxed.txt \
             | head -8 | cut -c1-1000 | sed 's/^/::notice title=self-test - measured::/' || true
+
+  links:
+    # Profiles on VLESS, VMess, Trojan and Shadowsocks links (docs/TUNNEL.md, "Links"): the relay's
+    # reproducible build, every kind against a real Xray server, and the leak test inside a capture.
+    # The same workflow runs on a push to a branch claude/xray-* and on request.
+    if: github.event_name != 'schedule'
+    name: Links — VLESS, VMess, Trojan, Shadowsocks
+    uses: ./.github/workflows/xray-tunnels.yml

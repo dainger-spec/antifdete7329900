@@ -47,6 +47,7 @@ Full only (`full.yml`), and why:
 | check | why not fast |
 |---|---|
 | the license's renewals (9.9 min) | can stop a release; does not fit in 20 min |
+| links — VLESS, VMess, Trojan, Shadowsocks (`xray-tunnels.yml`, called by the job `links`; also on a push to `claude/xray-*`): the relay's reproducible build, every kind against a real Xray server, the leak test in a capture | can stop a release; does not fit in 20 min |
 | the product's rename (9.3 min) | can stop a release; does not fit |
 | updates end to end (3.4 min), its result | can stop a release; does not fit |
 | Safari's menu walk (4.5 min), macOS 26 and 27 | an inventory compared with docs/menu-walk |
