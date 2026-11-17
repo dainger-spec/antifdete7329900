@@ -141,7 +141,7 @@ enum XrayCheck {
             fail("\(name): no profile: \(error)")
             return
         }
-        defer { try? repository.delete(profile.id) }
+        // (The check's vault, a temporary folder, goes whole at its end: no profile is deleted one by one.)
         let manager = ProfileManager(repository: repository)
         var messages: [String] = []
         manager.onError = { messages.append($0) }
