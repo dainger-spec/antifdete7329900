@@ -241,7 +241,6 @@ struct WelcomeSplash: View {
     private func title(_ layout: WelcomeLayout) -> some View {
         VStack(spacing: 0) {
             LumenGlyph(size: layout.markSize)
-                .shadow(color: Theme.rim.opacity(0.3), radius: 18)
                 .accessibilityHidden(true)
             Text(verbatim: "Lumen") // l10n: not text — the product's name
                 .font(.system(size: layout.wordSize, weight: .semibold))
