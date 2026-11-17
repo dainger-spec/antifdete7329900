@@ -128,7 +128,20 @@ create() { # leg want smallest|largest look size names... -> sets UDID, DESC
     xcrun simctl boot "$UDID" >/dev/null 2>&1; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
     xcrun simctl ui "$UDID" appearance "$look" || say "$leg: the appearance could not be set"
     xcrun simctl ui "$UDID" content_size "$size" || say "$leg: the text size could not be set"
+    warm "$UDID"
     DESC="${name//_/ }, iOS $version, appearance $look, text $size"
+}
+
+# warm <udid>: a new simulator, just booted on a runtime just downloaded, is still busy with its first
+# start, and XCUITest's runner gave up loading accessibility on it (run 152, the SE on iOS 18.6:
+# "Failed to initialize for UI testing ... Timed out while loading Accessibility"). Accessibility is
+# switched on beforehand, as XCUITest switches it on, and the system's own Settings app is started
+# and closed once, so the first app the runner starts does not pay for the first start.
+warm() {
+    xcrun simctl spawn "$1" defaults write com.apple.Accessibility AccessibilityEnabled -bool true >/dev/null 2>&1
+    xcrun simctl spawn "$1" defaults write com.apple.Accessibility ApplicationAccessibilityEnabled -bool true >/dev/null 2>&1
+    xcrun simctl launch "$1" com.apple.Preferences >/dev/null 2>&1 && sleep 15
+    xcrun simctl terminate "$1" com.apple.Preferences >/dev/null 2>&1
 }
 
 COMMON=(-project "$HERE/Lumen.xcodeproj" -scheme Lumen -derivedDataPath "$OUT/dd")
@@ -191,17 +204,19 @@ run_leg() { # leg want smallest|largest look size names...
     fi
     touch "$OUT/.start-$leg"
     test_leg "$leg"; local code=$?
-    # A test runner that never started says nothing of the app (run 147, the SE on iOS 18.6 on
-    # macos-26: "Early unexpected exit, operation never finished bootstrapping ... Test crashed with
-    # signal abrt while preparing to run tests", eight minutes after "Running tests..."). Its crash
-    # reports and the result's diagnostics are kept, the simulator is started afresh, and the leg runs
-    # once more; a second such start fails the leg as any failure does.
-    if [[ $code -ne 0 ]] && grep -q "never finished bootstrapping" "$OUT/$leg.txt"; then
+    # A test runner that never started says nothing of the app (the SE on iOS 18.6 on macos-26 — run
+    # 147: "Early unexpected exit, operation never finished bootstrapping ... Test crashed with signal
+    # abrt while preparing to run tests", eight minutes after "Running tests..."; run 152: "The test
+    # runner failed to initialize for UI testing. (Underlying Error: Timed out while loading
+    # Accessibility.)"). Its crash reports and the result's diagnostics are kept, the simulator is
+    # started afresh, and the leg runs once more; a second such start fails the leg as any failure does.
+    if [[ $code -ne 0 ]] && grep -qE "never finished bootstrapping|failed to initialize for UI testing" "$OUT/$leg.txt"; then
         diagnostics "$leg" "$leg-first" runner
         mv "$OUT/$leg.txt" "$OUT/$leg-first.txt"
-        say "again $leg: the test runner never started — $(grep -m1 -o 'Underlying Error: [^)]*' "$OUT/$leg-first.txt" | cut -c1-160)"
+        say "again $leg: the test runner never started — $(grep -m1 -oE 'Underlying Error: [^)]*' "$OUT/$leg-first.txt" | cut -c1-160)"
         xcrun simctl shutdown "$UDID" >/dev/null 2>&1
         xcrun simctl boot "$UDID" >/dev/null 2>&1; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
+        warm "$UDID"
         test_leg "$leg"; code=$?
     fi
     if [[ $code -eq 0 ]]; then
