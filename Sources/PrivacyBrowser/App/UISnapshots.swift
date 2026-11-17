@@ -1124,7 +1124,6 @@ enum UISnapshots {
             app: URL(fileURLWithPath: "/Applications/Lumen.app"), staging: URL(fileURLWithPath: "/nonexistent/updates"))
         let size = UpdateWindowLayout.size
         let texts = UpdateProgressTexts(AppUpdater.progressTexts)
-        let icon = UpdatePanels.icon
 
         problems += await Shot(name: "update-found", size: size) {
             UpdateFoundPanel(item: item, update: {}, later: {})
@@ -1153,7 +1152,7 @@ enum UISnapshots {
             let progress = UpdateProgressModel(version: item.version, stage: entry.stage, reopened: entry.reopened,
                                                cancel: { })
             problems += await Shot(name: entry.name, size: size) {
-                UpdateProgressView(model: progress, texts: texts, icon: icon)
+                UpdateProgressView(model: progress, texts: texts)
             }.capture(into: folder)
         }
         problems += await Shot(name: "update-failed", size: size) {

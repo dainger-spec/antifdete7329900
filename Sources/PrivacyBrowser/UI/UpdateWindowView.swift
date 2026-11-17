@@ -74,7 +74,7 @@ struct UpdateWindowView: View {
             switch model.updateWindowMode {
             case .installing?:
                 if let progress = model.updateProgress {
-                    UpdateProgressView(model: progress, texts: UpdateProgressTexts(AppUpdater.progressTexts), icon: UpdatePanels.icon)
+                    UpdateProgressView(model: progress, texts: UpdateProgressTexts(AppUpdater.progressTexts))
                 } else {
                     UpdaterPanel(updater: model.updater)
                 }
@@ -95,9 +95,6 @@ struct UpdateWindowView: View {
 }
 
 enum UpdatePanels {
-    /// The app's own icon, as the Dock has it.
-    static var icon: NSImage? { NSApp.applicationIconImage }
-
     /// "0.1.18" — the version running.
     static var runningVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
@@ -112,7 +109,7 @@ struct UpdaterPanel: View {
         if let updater {
             UpdaterStatePanel(updater: updater)
         } else {
-            UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.unavailable.title"),
+            UpdateWindowFrame(title: L("updates.unavailable.title"),
                               subtitle: String(format: L("updates.progress.version"), UpdatePanels.runningVersion)) {
                 UpdatePanelText(L("updates.unavailable"))
             } buttons: {
@@ -190,14 +187,14 @@ struct UpdaterStatePanel: View {
     var body: some View {
         switch updater.state {
         case .idle, .checking:
-            UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.checking.title"),
+            UpdateWindowFrame(title: L("updates.checking.title"),
                               subtitle: String(format: L("updates.progress.version"), UpdatePanels.runningVersion)) {
                 LumenActivityLine(width: 200).padding(.top, 30)
             } buttons: {
                 UpdateCloseButton()
             }
         case .upToDate:
-            UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.upToDate.title"),
+            UpdateWindowFrame(title: L("updates.upToDate.title"),
                               subtitle: String(format: L("updates.upToDate.text"), UpdatePanels.runningVersion)) {
                 Color.clear
             } buttons: {
@@ -211,7 +208,7 @@ struct UpdaterStatePanel: View {
                              update: { Task { await model.updateAndRestart() } },
                              later: { model.closeUpdateWindow(later: true) })
         case .blocked(let item, let block):
-            UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.blocked.title"),
+            UpdateWindowFrame(title: L("updates.blocked.title"),
                               subtitle: String(format: L("updates.progress.version"), item.version)) {
                 UpdatePanelText(String(format: block == .translocated ? L("updates.state.translocated") : L("updates.state.notWritable"),
                                        item.version))
@@ -241,7 +238,7 @@ struct UpdateFoundPanel: View {
     }
 
     var body: some View {
-        UpdateWindowFrame(icon: UpdatePanels.icon, title: String(format: L("updates.found.title"), item.version),
+        UpdateWindowFrame(title: String(format: L("updates.found.title"), item.version),
                           subtitle: String(format: L("updates.found.subtitle"), UpdatePanels.runningVersion, size)) {
             VStack(alignment: .leading, spacing: 14) {
                 UpdateNotesBox(caption: L("updates.found.notes"), notes: item.notes.isEmpty ? L("updates.notes.none") : item.notes,
@@ -287,8 +284,7 @@ struct UpdateFailedPanel: View {
     let close: () -> Void
 
     var body: some View {
-        UpdateWindowFrame(icon: UpdatePanels.icon,
-                          title: release == nil ? L("updates.checking.failedTitle") : L("updates.failed.title"),
+        UpdateWindowFrame(title: release == nil ? L("updates.checking.failedTitle") : L("updates.failed.title"),
                           subtitle: String(format: L("updates.progress.version"), release ?? UpdatePanels.runningVersion)) {
             UpdatePanelText(release.map { String(format: L("updates.failed.text"), $0, reason) }
                             ?? String(format: L("updates.failed.check"), reason))
@@ -313,7 +309,7 @@ struct UpdateNoticePanel: View {
     let close: () -> Void
 
     var body: some View {
-        UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.outcome.title"),
+        UpdateWindowFrame(title: L("updates.outcome.title"),
                           subtitle: String(format: L("updates.progress.version"), UpdatePanels.runningVersion)) {
             UpdatePanelText(text)
         } buttons: {
@@ -352,7 +348,7 @@ struct UpdateInstalledCard: View {
                 .contentShape(Rectangle())
                 .onTapGesture { dismiss() }
                 .accessibilityHidden(true)
-            UpdateWindowFrame(icon: UpdatePanels.icon, title: L("updates.installed.title"),
+            UpdateWindowFrame(title: L("updates.installed.title"),
                               subtitle: String(format: L("updates.installed.version"), update.version)) {
                 UpdateNotesBox(caption: L("updates.installed.notes"),
                                notes: update.notes.isEmpty ? L("updates.installed.noNotes") : update.notes, height: 150)

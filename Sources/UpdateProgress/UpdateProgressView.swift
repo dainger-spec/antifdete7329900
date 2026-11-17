@@ -19,6 +19,8 @@ public enum UpdatePalette {
     public static let textSecondary = Color(red: 161 / 255, green: 161 / 255, blue: 170 / 255)
     public static let textTertiary = Color(red: 133 / 255, green: 133 / 255, blue: 142 / 255)
     public static let hairline = Color.white.opacity(0.10)
+    /// The horizon's light (the app's `Theme.rim`).
+    public static let rim = Color(red: 236 / 255, green: 240 / 255, blue: 248 / 255)
     public static let done = Color(red: 95 / 255, green: 211 / 255, blue: 155 / 255)
     public static let warning = Color(red: 227 / 255, green: 165 / 255, blue: 60 / 255)
     public static let nsBackdrop = NSColor(srgbRed: 8 / 255, green: 9 / 255, blue: 11 / 255, alpha: 1)
@@ -182,18 +184,57 @@ public struct UpdateHorizon: View {
     }
 }
 
-/// Every update window's frame: the app's icon in the sky over the horizon, a title and a line
-/// under it, then the window's own content on the disc, its buttons at the foot.
+/// Lumen's split disc, as the lock screen stands it in the sky (the app's `LumenGlyph`, the 64-grid
+/// cut of `LumenMarkGeometry.large`, drawn here again: the helper links no app code).
+struct UpdateLumenGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let grid: CGFloat = 64, centreX: CGFloat = 32, centreY: CGFloat = 32, radius: CGFloat = 19, gap: CGFloat = 3, slide: CGFloat = 6
+        let scale = min(rect.width, rect.height) / grid
+        let origin = CGPoint(x: rect.midX - grid * scale / 2, y: rect.midY - grid * scale / 2)
+        let length = (1.0 + 9.0 as CGFloat).squareRoot()
+        let d = CGVector(dx: 1 / length, dy: -3 / length)
+        let n = CGVector(dx: -d.dy, dy: d.dx)
+        var path = Path()
+        for side: CGFloat in [1, -1] {
+            let h = side * gap / 2
+            let shift = side * slide / 2
+            let centre = CGPoint(x: centreX + d.dx * shift, y: centreY + d.dy * shift)
+            let half = (radius * radius - h * h).squareRoot()
+            let a = CGVector(dx: n.dx * h - d.dx * half, dy: n.dy * h - d.dy * half)
+            let b = CGVector(dx: n.dx * h + d.dx * half, dy: n.dy * h + d.dy * half)
+            let m = CGVector(dx: n.dx * side * radius, dy: n.dy * side * radius)
+            let angleA = atan2(a.dy, a.dx), angleB = atan2(b.dy, b.dx), angleM = atan2(m.dy, m.dx)
+            func positive(_ angle: CGFloat) -> CGFloat {
+                var value = angle.truncatingRemainder(dividingBy: 2 * .pi)
+                if value <= 0 { value += 2 * .pi }
+                return value
+            }
+            let whole = positive(angleA - angleB)
+            let sweep = positive(angleM - angleB) < whole ? whole : whole - 2 * .pi
+            func point(_ v: CGVector) -> CGPoint {
+                CGPoint(x: origin.x + (centre.x + v.dx) * scale, y: origin.y + (centre.y + v.dy) * scale)
+            }
+            path.move(to: point(a))
+            path.addLine(to: point(b))
+            path.addArc(center: point(.zero), radius: radius * scale, startAngle: .radians(Double(angleB)),
+                        endAngle: .radians(Double(angleB + sweep)), clockwise: sweep < 0)
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
+/// Every update window's frame, the lock screen's language: Lumen's disc and a title in the sky
+/// over the horizon's glowing rim, a line under it, then the window's own content on the disc, its
+/// buttons at the foot. Clean type, nothing drawn by hand.
 public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
-    let icon: NSImage?
     let title: String
     let subtitle: String
     @ViewBuilder let content: () -> Content
     @ViewBuilder let buttons: () -> Buttons
 
-    public init(icon: NSImage?, title: String, subtitle: String, @ViewBuilder content: @escaping () -> Content,
+    public init(title: String, subtitle: String, @ViewBuilder content: @escaping () -> Content,
                 @ViewBuilder buttons: @escaping () -> Buttons) {
-        self.icon = icon
         self.title = title
         self.subtitle = subtitle
         self.content = content
@@ -204,22 +245,15 @@ public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
         ZStack(alignment: .top) {
             UpdateHorizon()
             VStack(spacing: 0) {
-                Group {
-                    if let icon {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: 72, height: 72)
-                            .shadow(color: Color.white.opacity(0.14), radius: 18)
-                    } else {
-                        Color.clear.frame(width: 72, height: 72)
-                    }
-                }
-                .accessibilityHidden(true)
-                .padding(.top, 40)
+                UpdateLumenGlyph()
+                    .fill(UpdatePalette.textPrimary)
+                    .frame(width: 36, height: 36)
+                    .shadow(color: UpdatePalette.rim.opacity(0.28), radius: 16)
+                    .accessibilityHidden(true)
+                    .padding(.top, 52)
                 Text(title)
-                    .font(.system(size: 22, weight: .bold))
-                    .tracking(-0.44)
+                    .font(.system(size: 24, weight: .bold))
+                    .tracking(-0.6)
                     .foregroundStyle(UpdatePalette.textPrimary)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
@@ -252,12 +286,10 @@ public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
 public struct UpdateProgressView: View {
     @ObservedObject var model: UpdateProgressModel
     let texts: UpdateProgressTexts
-    let icon: NSImage?
 
-    public init(model: UpdateProgressModel, texts: UpdateProgressTexts, icon: NSImage?) {
+    public init(model: UpdateProgressModel, texts: UpdateProgressTexts) {
         self.model = model
         self.texts = texts
-        self.icon = icon
     }
 
     private enum Row: Hashable {
@@ -276,7 +308,7 @@ public struct UpdateProgressView: View {
     }
 
     public var body: some View {
-        UpdateWindowFrame(icon: icon, title: texts.title,
+        UpdateWindowFrame(title: texts.title,
                           subtitle: String(format: texts.version, model.version) + " · " + (model.reopened ? texts.opensItself : texts.keepOpen)) {
             VStack(alignment: .leading, spacing: 0) {
                 ForEach(Array(rows.enumerated()), id: \.element) { index, row in

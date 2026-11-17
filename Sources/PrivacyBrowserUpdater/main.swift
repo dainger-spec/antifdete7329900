@@ -53,8 +53,7 @@ let window: NSWindow? = MainActor.assumeIsolated {
     guard let request else { return nil }
     let texts = UpdateProgressTexts(request.texts ?? [:])
     let shown = UpdateWindowLayout.window(closable: false, title: texts.title)
-    shown.contentView = NSHostingView(rootView: UpdateProgressView(model: progress, texts: texts,
-                                                                   icon: NSWorkspace.shared.icon(forFile: app.path)))
+    shown.contentView = NSHostingView(rootView: UpdateProgressView(model: progress, texts: texts))
     shown.level = .floating
     shown.orderFrontRegardless()
     return shown
