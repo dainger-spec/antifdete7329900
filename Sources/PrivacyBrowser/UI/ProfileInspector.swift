@@ -103,6 +103,15 @@ struct ProfileInspectorView: View {
                 .buttonStyle(LumenIconButtonStyle(size: 30))
                 .help(L("profiles.row.edit"))
                 .accessibilityLabel(L("profiles.row.edit"))
+                // Everything the row's menu does, here too: beside the inspector the rows have no
+                // buttons of their own, and Duplicate, Export and Delete were then only a right
+                // click away — which a person has to know of.
+                MoreMenu(side: 30) {
+                    ProfileMenuItems(row: row, actions: actions)
+                }
+                .disabled(row.isBusy)
+                .help(String(format: L("profiles.row.moreFor"), row.name))
+                .accessibilityLabel(String(format: L("profiles.row.moreFor"), row.name))
             }
             Text(row.name)
                 .lumenHeadingTitle()

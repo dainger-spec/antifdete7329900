@@ -856,7 +856,7 @@
 "profiles.footnote.sealed" = "Stopped profiles are sealed with your master password.";
 "profiles.group.ready" = "Ready";
 "profiles.group.running" = "Running";
-"profiles.lastUsed.never" = "Never";
+"profiles.lastUsed.never" = "Never launched";
 "profiles.lastUsed.now" = "Now";
 "profiles.menu.automation" = "Automation API…";
 "profiles.menu.changePassword" = "Change Master Password…";
@@ -1493,6 +1493,7 @@
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Export Profile…";
 "profiles.menu.import" = "Import Profile…";
+"profiles.import.help" = "Import a profile exported from Lumen (a .pbprofile file)";
 "transfer.export.title" = "Export “%@”";
 "transfer.export.explanation" = "The whole profile — settings and proxy, passwords, history, bookmarks, cookies and website data — in one file encrypted with a password of its own: for another Mac, a backup, or to hand over.";
 "transfer.export.running" = "The profile is running: it will be stopped first, so that its data is saved whole.";

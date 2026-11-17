@@ -274,6 +274,7 @@ struct ProfileListView: View {
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                                titleVisibility: .visible,
                                 presenting: pendingDelete) { profile in
                 Button(L("profiles.delete.confirm"), role: .destructive) {
                     Task { await model.deleteProfile(profile.id) }
@@ -283,6 +284,7 @@ struct ProfileListView: View {
             }
             .confirmationDialog(removingDeleted.map(KeptDeletedBox.removeTitle) ?? "",
                                 isPresented: Binding(get: { removingDeleted != nil }, set: { if !$0 { removingDeleted = nil } }),
+                                titleVisibility: .visible,
                                 presenting: removingDeleted) { profile in
                 Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.removeConfirm"), role: .destructive) {
                     model.removeDeletedProfileForGood(profile.id)
@@ -362,6 +364,8 @@ struct ProfileListView: View {
                                     detail: detail, symbol: "key", group: .profiles, run: { actions.passwords(row.id) }))
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
+        // A .pbprofile from another Mac or a backup: it was only in the header's ⋯ menu and the empty list.
+        commands.append(Command(id: "import", title: L("profiles.menu.import"), symbol: "square.and.arrow.down", run: actions.importProfile))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
         commands.append(Command(id: "scenarios", title: L("palette.scenarios"), detail: L("palette.scenarios.detail"),
                                 symbol: "play.rectangle", shortcut: "⇧⌘E", run: actions.openScenarios))
@@ -1408,6 +1412,14 @@ struct ProfilesScreen: View {
             .buttonStyle(LumenIconButtonStyle(size: 32, isOn: showsInspector.wrappedValue))
             .help(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
+            // Import beside New Profile, not only in the ⋯ menu (a tester found OpenVPN only behind
+            // one): a profile from another Mac or a backup is how a second Mac starts.
+            Button(action: actions.importProfile) {
+                Image(systemName: "square.and.arrow.down")
+            }
+            .buttonStyle(LumenIconButtonStyle(size: 32))
+            .help(L("profiles.import.help"))
+            .accessibilityLabel(L("profiles.menu.import"))
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
             MoreMenu {
@@ -2364,12 +2376,25 @@ struct LumenRingButtonStyle: ButtonStyle {
     }
 }
 
-/// The ⋯ menu and the row's context menu.
-private struct ProfileMenuItems: View {
+/// The ⋯ menu, the row's context menu and the inspector's ⋯.
+struct ProfileMenuItems: View {
     let row: ProfileRowItem
     let actions: ProfileActions
 
     var body: some View {
+        // What a right click on a row is most often for comes first, as in the Finder: the row's
+        // own Launch and Stop were under the pointer only, and absent from its menu.
+        switch row.activity {
+        case .stopped:
+            Button(L("profiles.row.launch")) { actions.launch(row.id) }
+                .disabled(row.exit == .unreadable)
+        case .running:
+            Button(L("profiles.row.newWindow")) { actions.newWindow(row.id) }
+            Button(L("profiles.row.stop")) { actions.stop(row.id) }
+        case .starting, .sealing:
+            EmptyView()
+        }
+        Divider()
         if row.isRunning {
             Button(L("profiles.row.library")) { actions.library(row.id) }
         }
@@ -2420,6 +2445,8 @@ private struct SelectionMenuItems: View {
         .disabled(running.isEmpty)
         Divider()
         Button(L("profiles.bulk.warmUp")) { actions.warmUpSeveral(ids) }
+        // As the selection's bar has it.
+        Button(L("profiles.bulk.scenario")) { actions.scenarioSeveral(ids) }
         Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(ids) }
         Button(L("profiles.bulk.tags")) { actions.tagSeveral(ids) }
         Divider()
@@ -3160,6 +3187,7 @@ struct LumenSearchField: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textTertiary)
+                .help(L("profiles.search.clear"))
                 .accessibilityLabel(L("profiles.search.clear"))
             } else if let shortcut {
                 KeyCap(keys: shortcut, small: true)

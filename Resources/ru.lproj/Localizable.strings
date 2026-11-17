@@ -856,7 +856,7 @@
 "profiles.footnote.sealed" = "Остановленные профили зашифрованы мастер-паролем.";
 "profiles.group.ready" = "Готовы к запуску";
 "profiles.group.running" = "Запущены";
-"profiles.lastUsed.never" = "Никогда";
+"profiles.lastUsed.never" = "Не запускался";
 "profiles.lastUsed.now" = "Сейчас";
 "profiles.menu.automation" = "API автоматизации…";
 "profiles.menu.changePassword" = "Сменить мастер-пароль…";
@@ -1493,6 +1493,7 @@
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Экспортировать профиль…";
 "profiles.menu.import" = "Импортировать профиль…";
+"profiles.import.help" = "Импортировать профиль, экспортированный из Lumen (файл .pbprofile)";
 "transfer.export.title" = "Экспорт профиля «%@»";
 "transfer.export.explanation" = "Профиль целиком — настройки и прокси, пароли, история, закладки, cookies и данные сайтов — в один файл, зашифрованный отдельным паролем: для другого Mac, резервной копии или передачи.";
 "transfer.export.running" = "Профиль запущен: перед экспортом он будет остановлен, чтобы его данные сохранились целиком.";
