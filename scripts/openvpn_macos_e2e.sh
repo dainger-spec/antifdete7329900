@@ -126,16 +126,17 @@ threading.Thread(target=dns, daemon=True).start()
 http.server.ThreadingHTTPServer((ADDRESS, 8080), Page).serve_forever()
 EOF
 sudo /usr/bin/python3 -I "$W/services.py" > "$W/services.log" 2>&1 &
-for _ in $(seq 1 30); do curl -s --noproxy '*' --max-time 1 http://10.8.0.1:8080/ >/dev/null && break; sleep 0.5; done
-DIRECT="$(curl -s --noproxy '*' --max-time 5 http://10.8.0.1:8080/ | sed 's/<[^>]*>//g')"
-if [[ "$DIRECT" != seen-from=* ]]; then
+for _ in $(seq 1 30); do sudo lsof -nP -iTCP@10.8.0.1:8080 -sTCP:LISTEN >/dev/null 2>&1 && break; sleep 0.5; done
+if ! sudo lsof -nP -iTCP@10.8.0.1:8080 -sTCP:LISTEN >/dev/null 2>&1 || ! sudo lsof -nP -iUDP@10.8.0.1:53 >/dev/null 2>&1; then
   echo "--- services.log"; cat "$W/services.log"
-  echo "--- listeners"; sudo lsof -nP -iTCP:8080 -sTCP:LISTEN; sudo lsof -nP -iUDP:53
-  echo "--- route to 10.8.0.1"; route -n get 10.8.0.1
-  echo "--- curl"; curl -v --noproxy '*' --max-time 5 http://10.8.0.1:8080/ 2>&1 | tail -15
-  fail "the server's page does not answer on this Mac ($DIRECT)"
+  fail "the server's page and DNS do not listen on 10.8.0.1"
 fi
-say "INFO the page, asked from this Mac directly, sees ${DIRECT}: through the tunnel it must see the client's address, 10.8.0.2"
+# Asked from this Mac directly (not through the tunnel), the page sees another address than the
+# client's, or does not answer at all (macOS sends what is for a utun's own point-to-point address
+# into the utun): either way not 10.8.0.2, which only the tunnel gives.
+DIRECT="$(curl -s --noproxy '*' --max-time 5 http://10.8.0.1:8080/ | sed 's/<[^>]*>//g')"
+say "INFO the page, asked from this Mac directly: ${DIRECT:-no answer}; through the tunnel it must see 10.8.0.2"
+[[ "$DIRECT" != "seen-from=10.8.0.2" ]] || fail "the page sees the client's tunnel address without the tunnel"
 
 # Every packet of this Mac but loopback's, with the process each is counted for.
 sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' > "$OUT/capture.txt" 2> "$W/tcpdump.err" &
