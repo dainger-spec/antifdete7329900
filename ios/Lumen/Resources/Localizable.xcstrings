@@ -417,16 +417,6 @@
         }
       }
     },
-    "Войдите, чтобы продолжить": {
-      "localizations": {
-        "en": {
-          "stringUnit": {
-            "state": "translated",
-            "value": "Sign in to continue"
-          }
-        }
-      }
-    },
     "Войти": {
       "localizations": {
         "en": {
@@ -463,6 +453,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sign In"
+          }
+        }
+      }
+    },
+    "Вход в Lumen": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to Lumen"
           }
         }
       }
@@ -2443,6 +2443,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Only the browser string, time zone and language"
+          }
+        }
+      }
+    },
+    "Тот же аккаунт, что в Lumen для Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The same account as in Lumen for Mac."
           }
         }
       }
