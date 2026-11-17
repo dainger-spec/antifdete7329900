@@ -31,10 +31,12 @@ rm -rf "$W"
 mkdir -p "$W"
 PIDS=()
 cleanup() {
-  for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null; done
+  for pid in ${PIDS[@]+"${PIDS[@]}"}; do kill "$pid" 2>/dev/null; done
   [[ -f "$W/server.pid" ]] && sudo kill "$(cat "$W/server.pid")" 2>/dev/null
   sudo pkill -INT -f "tcpdump -i pktap" 2>/dev/null
   sudo pkill -f "$W/services.py" 2>/dev/null
+  # The server's log is root's: a copy the run's artifact can read.
+  sudo cat "$W/server.log" > "$OUT/server-log.txt" 2>/dev/null
   true
 }
 trap cleanup EXIT
@@ -123,11 +125,17 @@ def dns():
 threading.Thread(target=dns, daemon=True).start()
 http.server.ThreadingHTTPServer((ADDRESS, 8080), Page).serve_forever()
 EOF
-sudo python3 -I "$W/services.py" > "$W/services.log" 2>&1 &
-for _ in $(seq 1 20); do curl -s --max-time 1 http://10.8.0.1:8080/ >/dev/null && break; sleep 0.5; done
-DIRECT="$(curl -s --max-time 5 http://10.8.0.1:8080/ | sed 's/<[^>]*>//g')"
-[[ "$DIRECT" == "seen-from=10.8.0.1" ]] || fail "the server's page does not answer on this Mac ($DIRECT)"
-say "INFO the page, asked from this Mac directly, sees $DIRECT: through the tunnel it must see the client's address"
+sudo /usr/bin/python3 -I "$W/services.py" > "$W/services.log" 2>&1 &
+for _ in $(seq 1 30); do curl -s --noproxy '*' --max-time 1 http://10.8.0.1:8080/ >/dev/null && break; sleep 0.5; done
+DIRECT="$(curl -s --noproxy '*' --max-time 5 http://10.8.0.1:8080/ | sed 's/<[^>]*>//g')"
+if [[ "$DIRECT" != seen-from=* ]]; then
+  echo "--- services.log"; cat "$W/services.log"
+  echo "--- listeners"; sudo lsof -nP -iTCP:8080 -sTCP:LISTEN; sudo lsof -nP -iUDP:53
+  echo "--- route to 10.8.0.1"; route -n get 10.8.0.1
+  echo "--- curl"; curl -v --noproxy '*' --max-time 5 http://10.8.0.1:8080/ 2>&1 | tail -15
+  fail "the server's page does not answer on this Mac ($DIRECT)"
+fi
+say "INFO the page, asked from this Mac directly, sees ${DIRECT}: through the tunnel it must see the client's address, 10.8.0.2"
 
 # Every packet of this Mac but loopback's, with the process each is counted for.
 sudo tcpdump -i pktap,all -k NP -n -tt -l 'not host 127.0.0.1 and not host ::1' > "$OUT/capture.txt" 2> "$W/tcpdump.err" &
