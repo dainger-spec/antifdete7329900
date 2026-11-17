@@ -25,5 +25,6 @@ jobs:
           path: |
             build/openvpn-e2e/result.txt
             build/openvpn-e2e/work/serve*.txt
-            build/openvpn-e2e/work/server.log
+            build/openvpn-e2e/server-log.txt
+            build/openvpn-e2e/work/services.log
             build/openvpn-e2e/capture.txt
