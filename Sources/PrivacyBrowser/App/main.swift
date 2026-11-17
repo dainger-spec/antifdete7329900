@@ -134,6 +134,12 @@ MainActor.assumeIsolated {
         // SafariMenuWalkCheck, SafariMenuWalk; scripts/menu_walk.py compares it with the record).
         Localization.applyProcessLanguage()
         SafariMenuWalkCheck.start(arguments: arguments)
+    } else if arguments.contains("--sweep") {
+        // A profile's Safari window driven with real input events — keys, clicks, the menu bar —
+        // unit by unit, and every exception, notice, hang and crash of each (CI's sweep.yml;
+        // SafariSweepCheck, SafariSweep; scripts/sweep.py starts the proxy and reads the result).
+        Localization.applyProcessLanguage()
+        SafariSweepCheck.start(arguments: arguments)
     } else if arguments.contains("--webdriver-serve") {
         // The WebDriver's listener over a temporary vault, for a real client to drive (CI;
         // WebDriverCheck; scripts/webdriver_check.sh runs Selenium against it).
