@@ -72,6 +72,11 @@ final class SessionRuntime: ObservableObject {
             : SyncedDataStores.existing(session.storeID) ?? WKWebsiteDataStore(forIdentifier: session.storeID)
         relay = Relay(label: session.id.uuidString)
         channel = PageSettings.makeChannel()
+        #if DEBUG
+        // The measurement of 17 November (MeasureTests): does WebKit start the processes it starts
+        // after this in the zone the app's environment names, as the Mac's does?
+        if TestHooks.enabled, let zone = ProcessInfo.processInfo.environment["LUMEN_TEST_SESSION_XPC_TZ"] { setenv("__XPC_TZ", zone, 1) }
+        #endif
         // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
         let saved = store.loadHistory(of: session.id)
         let kept = HistoryRetention.kept(saved)

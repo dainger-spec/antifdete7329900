@@ -124,6 +124,36 @@ LONG_SCRIPTS = {
 }
 
 
+# /zone: the time zone the engine itself gives the page and workers loaded from a URL — dedicated,
+# shared and service — which no page script reaches (the measurement of 17 November: does WebKit on
+# the iPhone start its processes in a zone the app's environment names, as the Mac's does?).
+ZONE_WORKER = r"""
+const z = Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset();
+if (self.ServiceWorkerGlobalScope && self instanceof ServiceWorkerGlobalScope) {
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+  self.addEventListener('message', e => e.source.postMessage(z));
+} else if (self.SharedWorkerGlobalScope && self instanceof SharedWorkerGlobalScope) {
+  self.onconnect = e => e.ports[0].postMessage(z);
+} else { postMessage(z); }
+"""
+ZONE_SCRIPT = r"""
+const put = (id, text) => { document.getElementById(id).textContent = text; };
+put('pz', 'page zone: ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset());
+try { const w = new Worker('/zone-worker.js'); w.onmessage = e => put('wz', 'worker zone: ' + e.data); w.onerror = () => put('wz', 'worker zone: error'); }
+catch (e) { put('wz', 'worker zone: ' + e.name); }
+try { const s = new SharedWorker('/zone-worker.js'); s.port.onmessage = e => put('sz', 'shared zone: ' + e.data); s.port.start(); }
+catch (e) { put('sz', 'shared zone: ' + (window.SharedWorker ? e.name : 'none')); }
+if (!navigator.serviceWorker) put('vz', 'service zone: none');
+else navigator.serviceWorker.register('/zone-worker.js').then(r => {
+  navigator.serviceWorker.onmessage = e => put('vz', 'service zone: ' + e.data);
+  const ask = () => { const sw = r.active || r.waiting || r.installing; if (sw && sw.state === 'activated') sw.postMessage('zone'); else setTimeout(ask, 200); };
+  ask();
+}, e => put('vz', 'service zone: ' + e.name));
+setTimeout(() => { for (const id of ['wz', 'sz', 'vz']) { const el = document.getElementById(id); if (el.textContent.endsWith('…')) el.textContent = el.textContent.replace('…', 'timeout'); } }, 15000);
+"""
+
+
 # /webrtc: two peer connections of the page, the first offering a data channel to the second; every
 # candidate of the first is listed (type and address), and a message across says the channel works.
 WEBRTC_SCRIPT = r"""
@@ -420,6 +450,12 @@ async def site(reader, writer, scheme="http"):
                 SERVED_COUNTER[0] += 1
                 out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
                             extra=["Cache-Control: no-store"])
+            elif path == "/zone":
+                out = reply("200 OK", page("zone", "<h1>Пояс</h1><p id=pz>page zone: …</p><p id=wz>worker zone: …</p>"
+                                                   "<p id=sz>shared zone: …</p><p id=vz>service zone: …</p>", ZONE_SCRIPT),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/zone-worker.js":
+                out = reply("200 OK", ZONE_WORKER, "text/javascript", ["Cache-Control: no-store"])
             elif path == "/webrtc":
                 out = reply("200 OK", page("webrtc", "<h1>WebRTC</h1><p id=cand>candidates: …</p><p id=chan>channel: …</p>",
                                            WEBRTC_SCRIPT), extra=["Cache-Control: no-store"])
