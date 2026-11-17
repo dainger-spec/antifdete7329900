@@ -766,6 +766,21 @@ other than those two, a build declaring SDK 15 or newer (above, §2), and the sy
 `webprivacyd`, started as the first profile's WebKit starts, fetched Apple's lists from Apple directly
 in every run, as it does for Safari and for every proxy (§4a, "Not covered").
 
+**OpenVPN connections.** A profile's proxy can be an OpenVPN connection, imported from a provider's
+`.ovpn` ([OPENVPN.md](OPENVPN.md)). It is the same shape as a link: the app runs OpenVPN 2.7
+(unprivileged, in a sandbox that allows it loopback alone, its servers reached through forwarders
+that carry to each one's single address) with LumenTunnel as its tun, a user-space TCP/IP stack
+serving the profile SOCKS5 on 127.0.0.1 with a login made for the launch; names are asked of the
+DNS servers the VPN pushed, through the tunnel; nothing of this Mac's routes, addresses or DNS
+changes. The launch, the hand-over of the port, the kernel's hold of the profile's process (TCP to
+that port alone, no UDP) and the stop of a profile whose tunnel does not come back are the links' own
+step ([TUNNEL.md](TUNNEL.md), "Relays"). Measured on CI's Mac (macOS 26, the app built as a release)
+inside a pktap capture of the whole run: nothing of the profile's process, of OpenVPN or of
+LumenTunnel off loopback but the forwarder's packets to the server, the tunnel's name asked inside
+the tunnel only, a wrong password refused, the server killed and nothing loading, then the profile
+stopped. Not shown on a Mac: WebRTC through the tunnel with the network guard installed, IPv6 inside
+the tunnel, a real provider's mobile network.
+
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
 
@@ -1949,9 +1964,9 @@ open pages in them and read and write their cookies — not the passwords, the p
 the vault. A program running as this user that can read the app's memory or watch the user type
 is out of scope either way (above).
 
-A profile on a VLESS, VMess, Trojan or Shadowsocks link has a relay on the loopback address too
-(TUNNEL.md, "Links"): any program here can connect to it, and is refused without the login the
-app made for that launch and gave to the profile's process alone. While a relay that ended is
+A profile on a VLESS, VMess, Trojan or Shadowsocks link, or on an OpenVPN connection, has a relay on
+the loopback address too (TUNNEL.md, "Relays"): any program here can connect to it, and is refused
+without the login the app made for that launch and gave to the profile's process alone. While a relay that ended is
 started again its port is free for a moment; a program of this user's racing for it then would be
 sent the profile's connections — such a program is out of scope (above).
 

@@ -616,6 +616,33 @@ the guard drops each of those flows, because they are counted for the held profi
    version, no new approval; the check runs again once.
 9. Another VPN app on (WireGuard, Tailscale): it keeps running; step 3 again.
 
+## Relays: a link's Xray and an OpenVPN tunnel, one step (0.1.18)
+
+Two kinds of proxy are not reached as they are: a VLESS, VMess, Trojan or Shadowsocks link (below,
+"Links") and an OpenVPN connection ([OPENVPN.md](OPENVPN.md)). For each the app runs a **relay** on
+this Mac — Xray for a link, OpenVPN with LumenTunnel for a connection — and the profile reaches it as
+an ordinary SOCKS5 proxy on 127.0.0.1, with a user name and password made for that launch. Each
+relay's own workings are its own (`XrayRelays`, `OpenVPNTunnels`); everything around them is one
+step, `LocalRelays`, the same for both:
+
+| | What it is | Where |
+|---|---|---|
+| Which relay | `ProxySettings.localRelay`: none (an HTTP or SOCKS5 proxy), `.xray` (`kind == .xray`), `.openVPN` (`openVPN != nil`) | BrowserCore |
+| Start | in the manager, at a launch, before anything asks the proxy — the "do not start it" probe, the location lookup, the profile's process; a launch that ends without a process of the profile stops it again. Refused with why when it does not start (`launch.error.relayNotInBuild`, `.relayDidNotStart`, `.openVPN`). OpenVPN only for a profile in its own process | `ProfileManager.startRelay`, `LocalRelays.start` |
+| The route | the relay's port and login (`ProxyRoutes.Route`), known by its proxy (`ProxyRoutes.key`: a link's text; for an OpenVPN connection a SHA-256 of its configuration and login) and by its owner. The stored proxy is never replaced: whatever connects through it — the data store (`ProxyConfigurationFactory`), the probe (`ProxyProbe`), the location and exit lookups, the check, WebRTC's relay and the network guard's hold — asks `ProxyRoutes.connectable`, which gives the relay, or nothing: a store then gets a proxy that does not exist, never `[]` (direct) and never the link's server or the VPN server. A proxy challenge is answered with the relay's login, never the link's secret or the VPN's own | BrowserCore, PrivacyBrowser |
+| Hand over | the route follows the grant on the profile's standard input (`PBR1`, `ProxyRoutes.encodeRecord`), always written, empty too; never in argv or the environment. The profile's process does not start without the route its proxy needs | `ProfileProcess.start`, `ProfileSessionHost` |
+| Held to it | the profile's sandbox closes UDP and closes TCP but to the relay's port on loopback ("tcp-relay-only"); a process whose closure did not apply does not run. The report's TCP probes (`ProfileNetworkReport.tcp`) show the relay taken, another loopback port and an outside address refused (EPERM) | `ProfileNetworkGuard` |
+| Fail closed | while a relay is down nothing serves its port — a link's Xray is started again on the same port and login (twice a minute at most), an OpenVPN tunnel reconnects behind its port (up to 45 s) — and loads fail meanwhile. One gone for good stops its profile once, with what each says (`launch.relayEnded`, `launch.openVPNLost`) | `ProfileManager.relayLost` |
+| Checked | the Proxies section's check goes through the relay of a profile running on the proxy, or one started for the check and stopped after it; never the server itself | `ProxyChecker.check` |
+| Stopped | after the profile's process has ended (never before, which would leave its port to anyone for a moment); every relay at quit; those an earlier run left when it crashed, at the start | `LocalRelays.stop`, `.stopAll`, `.endLeftovers` |
+| Formats | a profile or list holding such a proxy is written in a format 0.1.17 and earlier refuse (docs/UPDATES.md §4): `config.bin` 2, `proxies.bin` 4, `.pbprofile` 4 — one bump for both, every other file as before | `ProfileConfiguration.format`, `ProxyList.format`, `ProfileTransfer.exportFormat`; `LocalRelayTests` |
+
+Virtual machines take a link through a relay of their own (`VMCenter`, below); they are not given
+OpenVPN connections yet. A release builds both relays (`scripts/release.sh`: `OVPN=1 XRAY=1` unless
+told `OVPN=0` or `XRAY=0`), from their pinned sources, with nothing on the Mac but Xcode:
+`scripts/build-openvpn.sh` needs Xcode's command line tools alone, and `scripts/build-xray.sh` fetches
+its own pinned Go and checks it against `scripts/xray.lock`.
+
 ## Links: VLESS, VMess, Trojan and Shadowsocks (the relay, November 2026)
 
 A profile's proxy can be a share link — `vless://`, `vmess://`, `trojan://` or `ss://`, as providers
@@ -641,10 +668,16 @@ then holds through the relay.
   the pinned commit with Go 1.27.4, reproducibly (CGO off, `-trimpath`, no VCS stamp, empty build id,
   every variable of code generation set): the SHA-256 for arm64 and x86_64 is in `scripts/xray.lock`,
   recorded on Linux by cross-compiling, and CI builds it again on macOS and must get the same bytes.
+  The Go is never the building Mac's: the script fetches Go's own toolchain module for the host
+  (`golang.org/toolchain`, the archive `GOTOOLCHAIN` fetches) from Go's module proxy, refuses it
+  unless its SHA-256 is the one the lock records (taken of the archive whose `h1:` Go's checksum
+  database logs, quoted there), keeps it in `build/xray-src/toolchain`, and builds with it alone
+  (`GOTOOLCHAIN=local`). So a release Mac needs git, curl and unzip — Xcode's — and nothing else.
   `XRAY=1 scripts/build-app.sh` puts it in the app as `Contents/MacOS/LumenXray`, signed under its own
   identifier (`$BUNDLE_ID.Xray`) with the hardened runtime and no entitlement; its licences (MPL-2.0,
-  where its source is, and the 42 Go modules the binary names) are `Resources/Xray-NOTICE.txt`
-  (`scripts/xray_notices.py`). Nothing is downloaded at run time.
+  where its source is, and the 42 Go modules the binary names) are
+  `Contents/Resources/ThirdParty/Xray/NOTICE.txt` (`Resources/Xray/NOTICE.txt`, made by
+  `scripts/xray_notices.py`), beside OpenVPN's. Nothing is downloaded at run time.
 - **One per running profile**, started by the manager (`XrayRelays`), never by the profile's process —
   and one per check of a link in the Proxies section, and per virtual machine on one. In: SOCKS5 on
   127.0.0.1 at a port free when it starts, with a user name and password of 32 hex characters made for
@@ -729,7 +762,8 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   The proxy list's text export writes links in plaintext, as it writes passwords — what that export is
   for.
 - Formats (docs/UPDATES.md §4, R2 and R4): `config.bin` is format 2 while its proxy is a link's, a
-  profile export (`.pbprofile`) format 4, the proxy list format 4. Versions before links (0.1.17 and
+  profile export (`.pbprofile`) format 4, the proxy list format 4 — the same numbers as an OpenVPN
+  connection's, one bump for the two ("Relays", above). Versions before links (0.1.17 and
   older) refuse them as a newer version's: such a profile does not start there, its file is not written
   over, and that version's sync stops with "a newer version" until it is updated — rather than read a
   profile without its proxy, or drop the link when it writes the list back. Every other file stays as
@@ -787,11 +821,13 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   mapping (UPnP, NAT-PMP), geodata downloads, an observatory, a browser dialer — each only when its
   configuration asks; the relay's configuration asks none, its environment holds no `XRAY_*`, and its
   sandbox would drop such connections.
-- **Updating Xray**: change the tag, commit and Go version in `scripts/xray.lock`, run
-  `scripts/build-xray.sh --record`, read upstream's changes for anything that adds a connection or
+- **Updating Xray**: change the tag, commit and Go version in `scripts/xray.lock` (for a new Go, its
+  toolchain lines from `scripts/build-xray.sh --toolchain-lines`, which checks each against
+  sum.golang.org), run `scripts/build-xray.sh --record`, read upstream's changes for anything that adds a connection or
   changes the SOCKS inbound's door, run this page's checks, and commit the lock with the notices.
 - **A sandboxed build has no relay** (a sandboxed app's child would inherit the App Sandbox); a build
-  without `XRAY=1` has none either: a link's profile does not start there, and says why.
+  without `XRAY=1` has none either: a link's profile does not start there, and says why. A release
+  has it unless made with `XRAY=0`.
 
 ## History: the packet tunnel (until 2 November 2026)
 

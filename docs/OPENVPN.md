@@ -29,12 +29,17 @@ real provider's mobile network (loss, reconnections).
 
 ## The shape: a relay started by the app, an authenticated SOCKS5 port on 127.0.0.1
 
-At a profile's launch the app starts the profile's tunnel and gives the profile, as its proxy, the
-tunnel's local port: SOCKS5 on 127.0.0.1 with a user name and password made for that launch alone.
-Everything a proxied profile has therefore holds unchanged — its process held to its proxy
-(ProfileNetworkGuard, the network guard), pages resolved by the proxy, WebRTC through the relay
-(docs/TUNNEL.md), the exit's location. This is the same shape as the Xray relay (VLESS, Trojan,
-Shadowsocks) on `feat/xray-tunnels`, so the two can share the launch's plumbing later.
+At a profile's launch the app starts the profile's tunnel, whose local port is, to the profile,
+SOCKS5 on 127.0.0.1 with a user name and password made for that launch alone. Everything a proxied
+profile has therefore holds unchanged — its process held to its proxy (ProfileNetworkGuard, the
+network guard), pages resolved by the proxy, WebRTC through the relay (docs/TUNNEL.md), the exit's
+location. It is the shape of a link's Xray relay (VLESS, VMess, Trojan, Shadowsocks), and the two share
+one launch step (`LocalRelays`; docs/TUNNEL.md, "Relays"): the tunnel is started before anything asks
+the proxy; its route (port and login) is registered in `ProxyRoutes` under a digest of the
+configuration and login, and handed to the profile's process after its grant; the stored proxy stays
+the OpenVPN connection, and whatever connects through it is given the route, or a proxy that does not
+exist; the profile's process is held by the kernel to TCP to that port alone ("tcp-relay-only");
+a tunnel gone for good stops the profile.
 
 ```
  profile's process (LumenProfile)              the app (Lumen)
@@ -67,13 +72,13 @@ Shadowsocks) on `feat/xray-tunnels`, so the two can share the launch's plumbing 
 
 | Property | What holds it | Shown by |
 |---|---|---|
-| The profile's process reaches only the local port | the profile's proxy *is* the port: ProfileNetworkGuard's three locks hold the process to it, UDP closed by its sandbox; the network guard, where installed, holds it to 127.0.0.1 | macOS e2e (pktap capture: no packet of the profile's process or made for it leaves loopback) |
+| The profile's process reaches only the local port | everything that connects through the profile's proxy is given the port (`ProxyRoutes`): ProfileNetworkGuard's three locks hold the process to it, and its sandbox closes UDP and closes TCP but to that port ("tcp-relay-only", as a link's profile); the network guard, where installed, holds it to 127.0.0.1 | macOS e2e (pktap capture: no packet of the profile's process or made for it leaves loopback) |
 | OpenVPN reaches only the VPN server | `sandbox-exec` with `(deny network*)` but loopback; its configuration names no server but the forwarders' loopback ports; each forwarder's target is one address resolved before OpenVPN starts | macOS e2e (no openvpn or LumenTunnel packet outside loopback); `LoopbackForwardersTests` (only the first local sender, only the one target) |
 | LumenTunnel reaches nothing but the tunnel | it runs inside OpenVPN's sandbox (it is OpenVPN's child); it opens no socket of its own but on 127.0.0.1, and refuses to start on a listener that is not on 127.0.0.1 | macOS e2e capture; `TunnelListener.check` |
 | DNS inside the tunnel | the profile's names reach LumenTunnel as SOCKS5 host names (WebKit does not resolve with a proxy); LumenTunnel asks the pushed servers (`dns_server_*`, `dhcp-option DNS`) over lwIP's UDP — through the tunnel; when none is pushed, 1.1.1.1 and 8.8.8.8, still through the tunnel. This Mac's resolver is never asked: OpenVPN's sandbox refuses mDNSResponder, and nothing in LumenTunnel calls it | Linux e2e (the name known only to the tunnel's DNS server loads; the DNS server sees the question from the tunnel's address; tcpdump on every interface sees it nowhere else); macOS e2e (capture: no question for the name outside the tunnel); `ScriptedPeerTests`, `KernelInteropTests` |
 | Pushed routes, redirect-gateway, DNS changes | irrelevant: nothing system-wide changes. The configuration given to OpenVPN has `route-noexec`, `ifconfig-noexec` and `pull-filter ignore "route"`/`"redirect-gateway"`; the AF_UNIX tun has no interface to configure; OpenVPN 2.7 runs no dns-updown script with it; no script directive is accepted from a `.ovpn` | the e2e servers push `redirect-gateway def1` and a route; the Mac's routes are untouched |
 | The port needs the launch's credentials | a user name and 128-bit password made at each launch; LumenTunnel gets only their SHA-256 (`LUMEN_SOCKS_VERIFIER`) — no process's environment or OpenVPN's configuration holds what opens the port; no method but user name and password is offered | both e2e (no credentials and wrong credentials refused); `ScriptedPeerTests` |
-| The profile's own process learns the port | after its grant on standard input (`OpenVPNHandoff`), never from its environment or arguments; a profile whose proxy is an OpenVPN connection does not start without it | — |
+| The profile's own process learns the port | after its grant on standard input, in the routes' record a link's relay is handed over with (`ProxyRoutes`, `LocalRelays.routes`), never from its environment or arguments; a profile whose proxy is an OpenVPN connection does not start without it | `LocalRelayTests` (the record, the key, nothing reached without a route) |
 | Fail closed | while the tunnel is down there is no LumenTunnel and nothing behind the port: connections wait or are refused, nothing goes around; a tunnel not back within 45 s stops the profile, said; one that does not come up at a launch stops the launch, said; a stopped profile stops its tunnel | Linux e2e (server killed: nothing loads, LumenTunnel gone); macOS e2e (server killed: nothing loads, the profile stopped and said so, no OpenVPN or LumenTunnel left) |
 | Nothing left behind | OpenVPN and LumenTunnel in a process group of their own, ended together; LumenTunnel watches a lifeline pipe only the app holds and ends OpenVPN when the app is gone; OpenVPN processes a crashed run left are ended at the next start | macOS e2e (after the refused launch and after the stop, no process left) |
 
@@ -110,10 +115,13 @@ credentials. The private key and the password never touch the disk there.
 
 The entry: `ProxySettings.openVPN` holds the configuration in normal form; `host` and `port` are the
 first server's, `kind` SOCKS5 (what the profile is given), `username` and `password` its
-auth-user-pass — kept encrypted as every proxy's, in the profile's settings and the proxy list. A
-version of Lumen without OpenVPN reads such a profile as a SOCKS5 proxy at the VPN server's address,
-which carries nothing: it fails closed. Two configurations of one server and login are told apart in
-the list by a fingerprint of the configuration.
+auth-user-pass — kept encrypted as every proxy's, in the profile's settings and the proxy list. Such a
+profile's settings are written in format 2, the proxy list holding one in format 4, a profile export
+in format 4 (docs/UPDATES.md §4) — the numbers a link's take too: Lumen 0.1.17 and earlier refuse
+them as a newer version's, rather than read the connection as a SOCKS5 proxy at the VPN server's
+address and write it back without its configuration. Two configurations of one server and login are
+told apart in the list by a fingerprint of the configuration, and so is where each exits
+(`ProxyLocation.endpoint`): the place found at one launch is remembered for the next, as a proxy's.
 
 ## Licensing: what ships
 
@@ -137,9 +145,14 @@ What remains for a release: publishing the source tarballs next to each release'
 ```sh
 scripts/build-openvpn.sh                     # build/openvpn/openvpn and its licenses (reused when built)
 OVPN=1 SANDBOX=0 scripts/build-app.sh        # the app with openvpn and LumenTunnel
-OVPN=1 scripts/release.sh …                  # a release with them
+scripts/release.sh …                         # a release: with them unless OVPN=0
 ```
 
+`scripts/build-openvpn.sh` needs only what Xcode's command line tools put on a Mac (curl, shasum,
+tar, make, clang, ar, lipo, strip, otool): every tarball carries its own configure script or Makefile
+— mbed TLS's with its generated files, built with its own Makefile — and each library's flags are
+given to OpenVPN's configure directly, so neither CMake, autotools, pkg-config nor Homebrew is used.
+The full pipeline's release dry run builds it with PATH cut to `/usr/bin:/bin:/usr/sbin:/sbin`.
 Without `OVPN=1` the app has neither program: Add OpenVPN… says this build has none, and a profile
 given an OpenVPN connection does not start, said. The sandboxed development build cannot run one
 either (profiles there are not in their own process).
@@ -176,6 +189,5 @@ either (profiles there are not in their own process).
   never a page's); a server that moves to another address mid-session is reached again at the next
   launch.
 - While OpenVPN reconnects (up to 45 s) pages do not load; past that the profile is stopped.
-- The location remembered for a profile's proxy is per launch for an OpenVPN connection (the local
-  port changes each time): the lookup at each launch waits as for a first one.
+- Virtual machines are not given OpenVPN connections yet (a link's relay, they are).
 - Virtual machines are not given OpenVPN connections.

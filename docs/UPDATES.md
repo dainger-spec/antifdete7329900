@@ -542,7 +542,14 @@ beside them, on the Mac that runs `release.sh`:
    commit.
 7. **Xcode 27**, the active one (`xcode-select -p`): its SwiftPM declares SDK 14.0, and a release of
    a build declaring 15 or newer is refused (the certificate fetched outside a profile's proxy on
-   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2).
+   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2). Nothing else is installed for OpenVPN
+   connections and links' relay, which every release builds (`OVPN=1 XRAY=1`, the default; `OVPN=0`
+   or `XRAY=0` leaves one out, said at the start and the end): `scripts/build-openvpn.sh` builds
+   OpenVPN with mbed TLS, LZO and LZ4 from their tarballs, each checked by its SHA-256, with Xcode's
+   tools alone; `scripts/build-xray.sh` builds Xray from its pinned commit with the Go toolchain it
+   fetches from Go's module proxy and checks against `scripts/xray.lock`, and the relay must come
+   out with the SHA-256 recorded there. The first release fetches a few hundred megabytes (the
+   sources, Go, Xray's modules) into `build/`; later ones reuse them.
 
 Then:
 
