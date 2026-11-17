@@ -84,7 +84,61 @@ final class VMFailureTests: XCTestCase {
     func testEveryKindHasAWordOfItsOwn() {
         XCTAssertEqual(Set(VMFailureKind.allCases.map(\.rawValue)),
                        ["noRoom", "limit", "disk", "files", "notSupportedHere", "noBase", "catalog",
-                        "nothingOffered", "image", "needsUpdate", "installation"])
+                        "nothingOffered", "image", "needsUpdate", "installation", "noVirtualization"])
+    }
+
+    /// A Mac that cannot run a virtual machine at all — Lumen itself in a virtual machine, where
+    /// macOS runs none inside another — is a kind of its own, said in the person's language, not
+    /// the helper's English sentence alone; and it goes through the helper's events.
+    func testAMacThatRunsNoVirtualMachineIsAKindOfItsOwn() throws {
+        let own = VMFailure(.noVirtualization, "This Mac cannot run virtual machines.")
+        XCTAssertEqual(VMFailureKind.of(own), .noVirtualization)
+        let event = VMHelperEvent(kind: .failed, message: own.message, failure: VMFailureKind.noVirtualization.rawValue)
+        XCTAssertEqual(try XCTUnwrap(VMHelperEvent.parse(event.line())).failureKind, .noVirtualization)
+    }
+
+    /// A machine whose own proxy fails its connections one after another while it runs: said as
+    /// the proxy's trouble once there are enough of them — by the network's own words for why,
+    /// which the network names as `VMNetProxyTrouble` does (VMNetCoreTests checks the other side).
+    func testAMachinesOwnProxyThatFailsIsSaidOnceItFailsAgainAndAgain() {
+        let enough = VMNetworkTrouble.failuresBeforeSaying
+        XCTAssertEqual(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough, kind: "unreachable"), .ownProxyUnreachable)
+        XCTAssertEqual(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough + 10, kind: "login"), .ownProxyLogin)
+        XCTAssertEqual(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough, kind: "notUnderstood"), .ownProxyNotUnderstood)
+        // Not yet: a page's one dead address is not a proxy that is down.
+        XCTAssertNil(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough - 1, kind: "unreachable"))
+        XCTAssertNil(VMNetworkTrouble.ofMachineProxy(failuresInARow: 0, kind: nil))
+        XCTAssertNil(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough, kind: nil))
+        XCTAssertNil(VMNetworkTrouble.ofMachineProxy(failuresInARow: enough, kind: "a later kind"))
+        // Each goes through the helper's traffic event.
+        for trouble in [VMNetworkTrouble.ownProxyUnreachable, .ownProxyLogin, .ownProxyNotUnderstood] {
+            let event = VMHelperEvent(kind: .traffic, bytesUp: 1, bytesDown: 2, connections: 0, trouble: trouble.rawValue)
+            XCTAssertEqual(VMHelperEvent.parse(event.line())?.trouble, trouble.rawValue)
+        }
+    }
+
+    /// Lumen run inside a virtual machine (a tester's Mac in UTM or Parallels, a cloud Mac): the
+    /// section says so at once, by the system's own word for it or by the virtual Mac's model.
+    func testAMacThatIsItselfAVirtualMachineIsToldApart() {
+        XCTAssertTrue(VMHostSupport.isVirtualMachine(model: "VirtualMac2,1", vmmPresent: 1))
+        XCTAssertTrue(VMHostSupport.isVirtualMachine(model: "VirtualMac2,1", vmmPresent: nil))
+        XCTAssertTrue(VMHostSupport.isVirtualMachine(model: "VMware20,1", vmmPresent: 1))
+        XCTAssertTrue(VMHostSupport.isVirtualMachine(model: nil, vmmPresent: 1))
+        XCTAssertFalse(VMHostSupport.isVirtualMachine(model: "Mac14,2", vmmPresent: 0))
+        XCTAssertFalse(VMHostSupport.isVirtualMachine(model: "MacBookPro18,3", vmmPresent: nil))
+        XCTAssertFalse(VMHostSupport.isVirtualMachine(model: nil, vmmPresent: nil))
+    }
+
+    /// The room a setup and a start go by: the larger of the system's two figures — the one "for
+    /// important usage" is zero on a disk that is not APFS, and the setup was refused there for a
+    /// disk with hundreds of gigabytes free — and none where the system says neither.
+    func testTheRoomIsTheLargerOfTheSystemsTwoFigures() {
+        let gib = VMRequirements.gibibyte
+        XCTAssertEqual(VMStartRoom.free(importantUsage: 80 * gib, available: 60 * gib), 80 * gib)
+        XCTAssertEqual(VMStartRoom.free(importantUsage: 0, available: 300 * gib), 300 * gib)
+        XCTAssertEqual(VMStartRoom.free(importantUsage: nil, available: 300 * gib), 300 * gib)
+        XCTAssertEqual(VMStartRoom.free(importantUsage: 5 * gib, available: nil), 5 * gib)
+        XCTAssertNil(VMStartRoom.free(importantUsage: nil, available: nil))
     }
 
     // MARK: - What the helper says

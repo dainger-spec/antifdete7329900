@@ -2778,6 +2778,7 @@
 "vm.signIn.note" = "Virtual machines are added after you sign in to your account.";
 "vm.unavailable.intel" = "Virtual machines need a Mac with Apple silicon: macOS runs as a guest only there.";
 "vm.unavailable.build" = "This build of Lumen carries no virtual machines.";
+"vm.unavailable.insideVM" = "Lumen is running in a virtual machine itself, and macOS does not run a virtual machine inside another. Virtual machines work in Lumen on the Mac itself, with Apple silicon.";
 "vm.intro.title" = "A profile that is\na whole Mac";
 "vm.intro.text" = "A separate macOS with its own Safari, disk and serial number. Sites see a real Mac — because it is one.";
 "vm.requirement.disk" = "Not enough free disk space: %1$@ is needed, %2$@ is free.";
@@ -2912,6 +2913,8 @@
 "vm.failure.image" = "The restore image does not load: the file is damaged, cut short, or not Apple's restore image for a Mac. Download it again (Disk Space… removes what was fetched) or choose another file.";
 "vm.failure.needsUpdate" = "This Mac needs a software update before it can install this macOS in a virtual machine. Open System Settings → General → Software Update, install what it offers, and continue: nothing is downloaded again.";
 "vm.failure.installation" = "The installation of macOS did not finish. Continue starts it over; the downloaded image is still here.";
+"vm.failure.noVirtualization" = "This Mac does not let apps run virtual machines. If Lumen itself runs in a virtual machine, open it on the Mac itself: macOS does not run a virtual machine inside another. Otherwise restart this Mac and try again.";
+"vm.failure.other" = "Something went wrong; macOS's own words for it are below. Try again — if it happens again, restart this Mac, and send us the technical detail.";
 "vm.row.notKept" = "Shut down instead of kept as it was: macOS could not save this machine's state. What was open in it is closed, and its next start is an ordinary one.";
 "vm.row.notKept.noRoom" = "Shut down instead of kept as it was: this Mac's disk has no room for the machine's state, which takes about as much as its memory. Free some space (Disk Space…) and instant wake works again.";
 "vm.error.diskFull" = "Not started: this Mac's disk has %1$@ free, and a machine is started with at least %2$@ — its macOS writes to its disk all the time, and breaks when the disk is full. Free some space; Disk Space… shows what the machines take.";

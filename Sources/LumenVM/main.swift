@@ -29,7 +29,9 @@ guard let line = readLine(strippingNewline: true), let request = try? VMHelperRe
     HelperIO.fail("LumenVM is started by Lumen, with a request on its standard input.")
 }
 guard VZVirtualMachine.isSupported else {
-    HelperIO.fail("This Mac cannot run virtual machines.")
+    // Above all a Mac that is itself a virtual machine: macOS runs none inside another. A kind the
+    // app has words for in the person's language, not this sentence alone.
+    HelperIO.fail("This Mac cannot run virtual machines (Virtualization reports no support here).", kind: .noVirtualization)
 }
 
 // A machine at work is the person's work. Without this, macOS puts a process whose window is

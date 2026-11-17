@@ -24,16 +24,25 @@ final class VMCenter: ObservableObject {
         case notInThisBuild
         /// A sandboxed build's helper could not reach the library.
         case sandboxed
+        /// This Mac is itself a virtual machine (`VMHostSupport`): macOS runs no virtual machine
+        /// inside another, and the helper would only say so after the person asked Apple for
+        /// gigabytes. Said at once instead.
+        case insideVirtualMachine
     }
 
     static var availability: Availability {
         #if arch(arm64)
         if AppEnvironment.isSandboxed { return .sandboxed }
-        return VMHelperProcess.executableURL == nil ? .notInThisBuild : .available
+        guard VMHelperProcess.executableURL != nil else { return .notInThisBuild }
+        return isInsideVirtualMachine ? .insideVirtualMachine : .available
         #else
         return VMHelperProcess.executableURL == nil ? .notInThisBuild : .notAppleSilicon
         #endif
     }
+
+    /// Asked of the system once: a Mac does not stop or start being a virtual machine while the
+    /// app runs.
+    private static let isInsideVirtualMachine = VMHostSupport.thisMacIsAVirtualMachine
 
     /// The Profiles window has the section at all: the build carries the machines' helper.
     static var isOffered: Bool { availability != .notInThisBuild }
@@ -192,8 +201,9 @@ final class VMCenter: ObservableObject {
         case .none: break
         }
         if case .downloading(let progress)? = activity, let total = progress.total { download = max(0, total - progress.have) }
+        // Where the system says nothing of the room, nothing is refused on a guess.
         var problems = VMRequirements.problems(appleSilicon: Self.availability != .notAppleSilicon, helperAvailable: true,
-                                               freeDisk: freeDisk, downloadBytes: download,
+                                               freeDisk: startRoom.free ?? .max, downloadBytes: download,
                                                hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
         // Once macOS is installed, the room it needed is taken already.
         if case .needsGuestSetup = setup { problems.removeAll { if case .notEnoughDisk = $0 { return true } else { return false } } }
@@ -201,13 +211,10 @@ final class VMCenter: ObservableObject {
         return problems
     }
 
-    /// Free room on the volume the library is on.
-    var freeDisk: Int64 {
-        var url = library.root
-        while !FileManager.default.fileExists(atPath: url.path), url.path != "/" { url.deleteLastPathComponent() }
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage ?? 0
-    }
+    /// Free room on the volume the library is on, as the setup and a start go by it (`startRoom`):
+    /// the figure "for important usage" alone was zero on a disk that is not APFS, and the setup
+    /// refused a disk with hundreds of gigabytes free.
+    var freeDisk: Int64 { startRoom.free ?? 0 }
 
     /// The room on the library's volume as a machine's start goes by it (`VMStartRoom`), and
     /// whether that volume clones files (APFS does). The room is the larger of the system's two
@@ -221,8 +228,9 @@ final class VMCenter: ObservableObject {
                                                               .volumeAvailableCapacityKey, .volumeSupportsFileCloningKey]) else {
             return (nil, nil)
         }
-        let figures: [Int64?] = [values.volumeAvailableCapacityForImportantUsage, values.volumeAvailableCapacity.map { Int64($0) }]
-        return (figures.compactMap { $0 }.max(), values.volumeSupportsFileCloning)
+        return (VMStartRoom.free(importantUsage: values.volumeAvailableCapacityForImportantUsage,
+                                 available: values.volumeAvailableCapacity.map { Int64($0) }),
+                values.volumeSupportsFileCloning)
     }
 
     // MARK: The setup
@@ -716,6 +724,10 @@ final class VMCenter: ObservableObject {
         // A machine that has its disk starts without the base (the base may have been removed to
         // free the disk); one not made yet needs it, to be cloned from.
         guard running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
+        guard Self.availability == .available else {
+            problems[id] = Self.availability == .insideVirtualMachine ? L("vm.unavailable.insideVM") : L("vm.unavailable.build")
+            return
+        }
         guard isReady || library.machine(for: id).isComplete else {
             problems[id] = L("vm.error.noBase")
             return

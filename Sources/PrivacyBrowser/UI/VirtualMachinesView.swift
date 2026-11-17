@@ -43,6 +43,7 @@ private struct VirtualMachinesScreen: View {
         switch VMCenter.availability {
         case .notAppleSilicon: return .unavailable(L("vm.unavailable.intel"))
         case .sandboxed, .notInThisBuild: return .unavailable(L("vm.unavailable.build"))
+        case .insideVirtualMachine: return .unavailable(L("vm.unavailable.insideVM"))
         case .available: break
         }
         if license.isConfigured, !license.record.isSignedIn { return .signedOut }
