@@ -43,7 +43,8 @@ trap cleanup EXIT
 say() { echo "$*" | tee -a "$OUT/result.txt"; }
 fail() {
   say "OPENVPN FAIL $*"
-  echo "--- serve.txt (last 30)"; tail -30 "$W/serve.txt" 2>/dev/null
+  for log in "$W"/serve*.txt; do echo "--- $(basename "$log") (last 40)"; tail -40 "$log"; done
+  echo "--- processes of the app"; pgrep -fl "$APP/Contents/MacOS/" || true
   echo "--- server.log (last 20)"; sudo tail -20 "$W/server.log" 2>/dev/null
   exit 1
 }
@@ -95,7 +96,9 @@ script-security 2
 auth-user-pass-verify $W/verify.sh via-file
 verb 3
 EOF
-sudo "$OVPN" --config "$W/server.conf" --daemon --log "$W/server.log" --writepid "$W/server.pid" || fail "the server did not start"
+# The server runs a copy of the same build, so that a process of the app's own openvpn is never the server's.
+cp "$OVPN" "$W/openvpn-server"
+sudo "$W/openvpn-server" --config "$W/server.conf" --daemon --log "$W/server.log" --writepid "$W/server.pid" || fail "the server did not start"
 for _ in $(seq 1 30); do ifconfig | grep -q "inet 10.8.0.1 " && break; sleep 0.5; done
 ifconfig | grep -q "inet 10.8.0.1 " || fail "the server's utun did not come up"
 say "INFO server on $SERVER_ADDRESS:1194/udp, tunnel 10.8.0.0/24"
