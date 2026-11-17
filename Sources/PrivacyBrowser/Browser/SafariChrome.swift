@@ -1039,7 +1039,7 @@ enum SafariChrome {
     /// Replaces the late stubs whose classes are loaded by now; called again as images load.
     static func stubLateFeatures() {
         // Typing's guard too, on the classes of an image that came in later (SafariPlatformSupport's).
-        if isAvailable { SafariTypingGuard.install() }
+        if isAvailable { SafariTypingGuard.installLate() }
         for (className, selectorName) in lateStubs where !lateStubsMade.contains(className + " " + selectorName) {
             guard NSClassFromString(className) != nil else { continue }
             replaceWithConstant(className, selectorName) { nil }
