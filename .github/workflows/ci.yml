@@ -16,7 +16,7 @@ jobs:
           path: build/openvpn
           key: openvpn-${{ hashFiles('scripts/build-openvpn.sh') }}
       - name: Build the app with OpenVPN
-        run: CONFIG=debug OVPN=1 SANDBOX=0 APP_DIR=build/ovpn scripts/build-app.sh 2>&1 | tail -60
+        run: OVPN=1 SANDBOX=0 APP_DIR=build/ovpn scripts/build-app.sh 2>&1 | tail -30
       - name: OpenVPN end to end
         run: scripts/openvpn_macos_e2e.sh build/ovpn/Lumen.app build/openvpn-e2e
       - name: Sizes
