@@ -225,6 +225,15 @@ enum SafariTabs {
     /// window to read at all. Read from Safari's tabs; when this Safari's tabs tell no page, from
     /// the page in front of each window.
     static func snapshot(excluding closing: NSWindow? = nil) -> (windows: [OpenTabs.Window], looked: Bool) {
+        // Each reading starts again from Safari's first name for a tab's address: a name set aside
+        // once — a tab group's tab in front on its way to its page, a moment before its address is
+        // set — stayed set aside for the rest of the process, every name and then the web views in
+        // turn, until no tab read any page and none was kept for the next start (the sweep with real
+        // input, CI runs 44012019641 and 44016597696: after an hour of tab groups made and deleted,
+        // "pages - - -" before ⌘Q, one tab after the relaunch; "A new tab of Safari's did not take
+        // its address" 26 times). A name that does not hold is still set aside, for this reading.
+        distrusted = []
+        readings = [:]
         var open = tabs(excluding: closing)
         // A name of Safari's that does not tell the page in front is not the tab's address: the
         // next one, then the tab's web view, then the windows' pages in front.
