@@ -42,6 +42,9 @@ enum AddressBarTyping {
         /// The windows that were up, other than before the typing, once it was over: Safari's
         /// completion list is one (whether the typing reached the completions at all).
         var windowsWhileTyping: [String] = []
+        /// Safari's classes on the typing's way, by name (completions, cloud tabs, suggestions): what a
+        /// stub would name.
+        var completionClasses: [String] = []
         /// The search providers Safari's chrome has here, as they describe themselves.
         var providers = ""
 
@@ -110,9 +113,12 @@ enum AddressBarTyping {
         report.thrown = thrown
         report.caughtByRunLoop = ExceptionLog.reported - reportedBefore
         report.notices = SafariChrome.noticesPresented - noticesBefore
-        report.caughtByTypingGuard = SafariTypingGuard.caught - guardBefore
         report.field = (field.currentEditor() as? NSTextView)?.string ?? field.stringValue
         report.providers = SafariChrome.searchProvidersDescription()
+        let words = ["Completion", "CloudTab", "SharedWithYou", "TopHit", "Suggestion", "UnifiedField"]
+        report.completionClasses = Array(SafariTypingGuard.classesOfSafarisImages()
+            .filter { name in words.contains { name.contains($0) } }.sorted().prefix(300))
+        report.caughtByTypingGuard = SafariTypingGuard.caught - guardBefore
         // The field left as it was found: empty, and not editing.
         _ = PBCatchException {
             (field.currentEditor() as? NSTextView)?.string = ""

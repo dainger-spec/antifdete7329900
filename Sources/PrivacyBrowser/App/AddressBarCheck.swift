@@ -148,6 +148,9 @@ enum AddressBarCheck {
         print("\(tag) INFO \(engine.name): field \"\(report.field)\", window key \(report.windowWasKey), "
               + "exceptions out of key presses \(report.outOfKeyPresses), caught by the run loop \(report.caughtByRunLoop), "
               + "windows that came up \(report.windowsWhileTyping.joined(separator: " | ")), caught by the typing guard \(report.caughtByTypingGuard), thrown in all \(report.thrown.count), notices \(report.notices)")
+        if engine == .google, !report.completionClasses.isEmpty {
+            print("\(tag) CLASSES \(report.completionClasses.joined(separator: " "))")
+        }
         for line in report.providers.split(separator: "\n") { print("\(tag) INFO \(engine.name) providers: \(line.prefix(400))") }
         // Each distinct exception once, with its frames.
         var said: Set<String> = []
