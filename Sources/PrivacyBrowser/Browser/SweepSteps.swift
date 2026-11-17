@@ -973,7 +973,11 @@ enum SweepSteps {
             }
         }
         if let why = await chooseInMenuBar(items) {
-            S.expect(false, "chosen with a click and the keyboard: \(why)")
+            if why == S.offWhenOpened {
+                S.note(why)
+            } else {
+                S.expect(false, "chosen with a click and the keyboard: \(why)")
+            }
         } else {
             S.note("chosen with a click on the menu bar, the arrow keys and Return")
         }

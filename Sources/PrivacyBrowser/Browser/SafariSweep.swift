@@ -495,6 +495,8 @@ enum SafariSweep {
     /// it is there; else why not. A menu that does not say which item is highlighted is counted:
     /// `first` is the place the arrows start from (-1: before the first item).
     static func arrow(to item: NSMenuItem, in menu: NSMenu, key: Int = kVK_DownArrow, first: Int = -1) async -> String? {
+        // Validated as the menu opened: an item off then is not one the arrows stop at.
+        if !item.isEnabled { return offWhenOpened }
         let places = stops(in: menu)
         var presses = 0
         var readable = menu.highlightedItem != nil
@@ -520,6 +522,9 @@ enum SafariSweep {
         note("reached by counting the arrows: the menu does not say what is highlighted")
         return nil
     }
+
+    /// What `arrow(to:in:)` says of an item the menu turned off as it opened.
+    static let offWhenOpened = "off when the menu opened"
 
     /// Chooses `item` of the open `menu` with the arrow keys and Return. Nil when chosen.
     static func choose(_ item: NSMenuItem, in menu: NSMenu) async -> String? {
