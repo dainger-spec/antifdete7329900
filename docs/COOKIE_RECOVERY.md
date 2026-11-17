@@ -177,4 +177,5 @@ end with the run. A profile made ephemeral loses its snapshots at the save.
   the last, whose first form damaged a cookie file that an emptied store no longer has. Run 965 then
   found the synced cookies bringing the deleted cookies back into the removed store, which sync's
   record after a loss now takes from the snapshot (above). A deletion through WebDriver is also
-  written to disk at once.
+  written to disk at once. Run 975 (macOS 26.7.2): the whole group passed in both builds, with the
+  groups beside it (cookie import, session cookies after a stop, profile sync).
