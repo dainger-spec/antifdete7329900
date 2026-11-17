@@ -172,6 +172,28 @@ final class VMCenter: ObservableObject {
     }
 
     var hasRunning: Bool { !helpers.isEmpty || setupHelper != nil }
+
+    /// The memory (GB) of every machine that holds some now: the profiles' that run or start, and
+    /// the base while it is installed or set up.
+    var runningMemoryGB: [Int] {
+        var memory = running.keys.compactMap { list.profile($0)?.memoryGB }
+        switch activity {
+        case .installing?: memory.append(VMRequirements.standardMemoryGB)
+        case .guestSetup?: memory.append(Self.setupMemoryGB)
+        default: break
+        }
+        return memory
+    }
+
+    /// What the machines running at once take, when that leaves this Mac less than macOS needs
+    /// (`VMRequirements.isMemoryTight`) — two machines on a Mac with 8 GB; nil otherwise, and
+    /// for one machine alone (the editor already says when one machine's memory is too much).
+    var memoryTakenIfTight: Int64? {
+        let host = Int64(clamping: ProcessInfo.processInfo.physicalMemory)
+        let memory = runningMemoryGB
+        guard memory.count >= 2, VMRequirements.isMemoryTight(hostMemory: host, runningGB: memory) else { return nil }
+        return host - VMRequirements.memoryLeft(hostMemory: host, runningGB: memory)
+    }
     var isReady: Bool { if case .ready = setup { return true } else { return false } }
 
     /// What the machines take on disk in all: the base, what was fetched for it, every machine.

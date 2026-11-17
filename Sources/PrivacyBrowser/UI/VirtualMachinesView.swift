@@ -240,6 +240,11 @@ private struct VirtualMachinesScreen: View {
             if center.runningCount >= VMRequirements.runningLimit {
                 VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
             }
+            if let taken = center.memoryTakenIfTight {
+                // Each machine fits on its own; two at once on a Mac with 8 GB take all of it.
+                VMNote(String(format: L("vm.memory.tight"), VMText.memory(Int64(clamping: ProcessInfo.processInfo.physicalMemory)),
+                              VMText.memory(taken)), tone: .warning, symbol: "memorychip")
+            }
             if center.profiles.isEmpty {
                 VStack(spacing: 14) {
                     LumenEmptyHint(symbol: "macwindow.on.rectangle", text: L("vm.empty"))
@@ -364,6 +369,11 @@ enum VMText {
 
     static func bytes(_ value: UInt64) -> String {
         bytes(Int64(clamping: value))
+    }
+
+    /// Memory as macOS says it: in binary units, so that a Mac with 8 GB reads "8 GB", not "8.59 GB".
+    static func memory(_ value: Int64) -> String {
+        value.formatted(.byteCount(style: .memory).locale(Localization.locale))
     }
 
     /// "about 12 min left", from what is still to fetch and how fast it comes.

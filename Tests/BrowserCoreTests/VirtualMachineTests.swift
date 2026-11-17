@@ -240,6 +240,26 @@ final class VMRequirementsTests: XCTestCase {
             XCTAssertTrue(VMRequirements.memoryChoices.contains(VMRequirements.recommendedMemoryGB(hostMemory: host * gigabyte)))
         }
     }
+
+    /// A Mac with 8 GB: a new machine fits (it gets 4, and the Mac keeps 4) — and two of them at
+    /// once take all of it, which is said (a warning, never a refusal); on a Mac with 16 GB two
+    /// machines as recommended leave it room.
+    func testTwoMachinesOnAMacWith8GBAreSaidToBeTooMuch() {
+        let gib = VMRequirements.gibibyte
+        let small = 8 * gib
+        let one = VMRequirements.recommendedMemoryGB(hostMemory: small)
+        XCTAssertEqual(VMRequirements.problems(appleSilicon: true, helperAvailable: true, freeDisk: 500 * gib, downloadBytes: 0,
+                                               hostMemory: small, machineMemoryGB: one), [], "a new machine does not fit an 8 GB Mac")
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [one]))
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [one, one]))
+        XCTAssertEqual(VMRequirements.memoryLeft(hostMemory: small, runningGB: [one, one]), 0)
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [3, 3]))
+        let medium = 16 * gib
+        let two = VMRequirements.recommendedMemoryGB(hostMemory: medium)
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: [two, two]))
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: [8, 8]))
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: []))
+    }
 }
 
 final class VMGuestSettingsTests: XCTestCase {

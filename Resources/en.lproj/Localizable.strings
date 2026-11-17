@@ -2808,6 +2808,7 @@
 "vm.setup.guest.startOver" = "Start Over";
 "vm.empty" = "The base system is ready. Each machine you create is a new Mac, made from it in seconds.";
 "vm.limit.reached" = "Machines running: %d — Apple's limit for macOS in virtual machines on one Mac. Shut one down to start another.";
+"vm.memory.tight" = "This Mac has %1$@ of memory, and the machines running now take %2$@ of it: macOS keeps too little for itself, so the Mac and the machines slow down. Shut one down, or give the machines less memory (Edit…).";
 "vm.note.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder, as a Mac's disk is a disk. To have them encrypted, turn on FileVault on this Mac.";
 "vm.base.line" = "Base system: macOS %1$@ · %2$@ on disk";
 "vm.base.open" = "Open the Base System…";
