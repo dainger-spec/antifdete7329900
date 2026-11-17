@@ -20,6 +20,8 @@ import Network
 ///   and the capture must hold none of them;
 /// - the WebRTC call page (`/pb-rtc`, `call`): two peer connections through the app's relay, the
 ///   link's UDP and the server — relay candidates only, at the self-test proxy's address;
+/// - the profile's own process, asked from inside (its network report): TCP to its relay taken, and
+///   the kernel's refusal (EPERM) of TCP to another loopback port and to an address outside, and of UDP;
 /// - the relay's door: SOCKS5 without the launch's login, and with a wrong password, refused; with it, taken;
 /// - for the link named `failClosed`: a page fetching every 300 ms and its relay killed three times,
 ///   as the app runs it (`restartLimit` 2): after the first two kills the relay is started again on its
@@ -200,6 +202,20 @@ enum XrayCheck {
         let canary = latest["canary"] as? [[String: Any]]
         check("\(name): no request of the page reached this Mac's own loopback around the link (the canary took none)",
               canary?.isEmpty == true, canary.map { "\($0.count) connection(s): \($0.prefix(3))" } ?? "the self-test proxy's log did not come")
+
+        // The profile's own process, asked from inside: the kernel takes its TCP to the relay and
+        // refuses it (EPERM) to another port of this Mac's loopback, to an address outside, and UDP.
+        if let report = await manager.networkReport(of: profile.id) {
+            let tcp = report.tcp
+            info("\(name): the profile's process: TCP \(tcp), UDP \(report.udp), closed tcp-relay-only \(report.tcpRelayOnly), udp \(report.udpClosed)")
+            check("\(name): the profile's process reaches its relay by TCP, and the kernel refuses it TCP to anything else and UDP",
+                  report.tcpRelayOnly && report.udpClosed && tcp["relay"] == "connected"
+                    && tcp["loopback"] == "refused EPERM" && tcp["outside"] == "refused EPERM"
+                    && !report.udp.isEmpty && !report.udp.values.contains { $0 == "sent" || $0.hasPrefix("ready") },
+                  "TCP \(tcp), UDP \(report.udp), tcp-relay-only \(report.tcpRelayOnly), udp closed \(report.udpClosed)")
+        } else {
+            fail("\(name): the profile's process did not report on its network")
+        }
 
         // 2. The relay's door: its login only.
         if let route = ProxyRoutes.shared.route(for: proxy) {

@@ -739,16 +739,23 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   (`lumen-xray-config`) against one real Xray server with an inbound per kind — VLESS REALITY vision
   (RAW) and XHTTP, VLESS TLS vision, WebSocket and gRPC, VMess WebSocket, Trojan TLS, Shadowsocks 2022 —
   a page and UDP by an `.invalid` name through each, the door closed, with its control.
-- `.github/workflows/xray-tunnels.yml` (macOS): the reproducible build and the notices, those tests, the
-  relay check, the app built with `XRAY=1`, and `scripts/xray_leak_check.py` — a profile on each kind,
+- `.github/workflows/xray-tunnels.yml` (macOS 26 and macOS 27): the reproducible build and the notices,
+  those tests, the relay check, the app built with `XRAY=1` — run as a release declares it, SDK 14.0
+  (on macOS 26 a copy of Xcode 26's build declaring it, as the self-test runs; a build declaring 15 or
+  newer has this Mac fetch a certificate's missing intermediate outside any proxy, docs/ISOLATION_AND_
+  LIMITATIONS.md §2, and the first run of this check saw exactly that) — and
+  `scripts/xray_leak_check.py`: a profile on each kind,
   started as the app starts one, inside a capture of every packet of the runner (pktap: each packet
   with its process), the servers on the runner's own address so that the relays' packets are in it;
   two of the links name their server by a host name, which the runner's resolver is pointed at a name
   server of the check for, so that the relay resolves it inside its sandbox, as a provider's link has
   it. It fails on any packet of a profile's process off loopback, any of a relay to anything but its
-  server, any page's name resolved on the runner, any packet to a documentation address, and a link
-  by name whose server's name was not asked; its controls — a DNS question asked on purpose, each
-  relay's packets counted for its pid — must be seen.
+  server, any page's name resolved on the runner, any packet to a documentation address, any packet of
+  the app's processes (by pid and by name), of WebKit's or of Safari's services off loopback while a
+  profile runs, and a link by name whose server's name was not asked; its controls — a DNS question the
+  app asks on purpose, seen and named after the app; each relay's packets counted for its pid — must be
+  seen. The page's requests to this Mac's own loopback, which the capture leaves out, are seen by the
+  self-test proxy's canary there, which must take none.
 
 ### Limits
 

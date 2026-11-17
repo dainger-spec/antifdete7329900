@@ -2,15 +2,18 @@
 """Does anything of a profile on a VLESS, VMess, Trojan or Shadowsocks link go around the link?
 Measured on a Mac, inside a capture of every packet (docs/TUNNEL.md, "Links").
 
-    python3 -I scripts/xray_leak_check.py --app build/xray/Lumen.app --out build/xray-leaks [--quic-site URL]
+    python3 -I scripts/xray_leak_check.py --app build/xray/Lumen.app --out build/xray-leaks [--sdk 14.0] [--quic-site URL]
 
-Needs sudo (tcpdump on pktap), macOS, and an app built with the links' relay (`XRAY=1`).
+Needs sudo (tcpdump on pktap, /etc/resolver), macOS, and an app built with the links' relay (`XRAY=1`).
+`--sdk 14.0` runs a copy of the app whose executables declare SDK 14.0 — what a release declares — unless
+they declare it already (scripts/aia_variants.py; docs/ISOLATION_AND_LIMITATIONS.md §2).
 
 1. Servers, all on this Mac: one Xray server (the app's own pinned Xray, copied as `xray-server` so
    the capture tells it from the relay) listening on this Mac's own network address — not loopback,
    so that every packet between a profile's relay and its server is in the capture — with an inbound
-   for VLESS + REALITY + vision, VLESS + TLS + WebSocket, VMess + WebSocket, Trojan + TLS and
-   Shadowsocks 2022 (REALITY's target and the TLS certificate made for the run). The server's only
+   for each shape xray_relay_check.py runs: VLESS + REALITY + vision (RAW) and XHTTP, VLESS + TLS +
+   vision, WebSocket and gRPC, VMess + WebSocket, Trojan + TLS and Shadowsocks 2022 (REALITY's target
+   and the TLS certificate made for the run); a profile is started on each. The server's only
    way out is the self-test proxy (scripts/selftest_proxy.py `--socks-udp`), which answers every page
    and STUN request itself and connects nowhere — but for `--quic-site`'s host, which the server
    lets out to the Internet (a page that offers HTTP/3). Two more links, REALITY + vision and
@@ -18,18 +21,29 @@ Needs sudo (tcpdump on pktap), macOS, and an app built with the links' relay (`X
    resolver is pointed for that domain at a name server of this script (/etc/resolver, taken back at
    the end), so the relay, inside its sandbox, resolves its server's name the way it would a
    provider's — through mDNSResponder — and the name server notes the question.
-2. `Lumen --xray-check` (XrayCheck.swift) starts a profile on each link the way the app does — its
+2. The relay's sandbox on its own, before the capture: Xray started as the app starts a relay
+   (`Lumen --xray-relay`) but with a configuration that would go anywhere must reach the server's port,
+   TCP and UDP, and no other port, and write no file — while the same Xray without the sandbox does
+   both (the control).
+3. `Lumen --xray-check` (XrayCheck.swift) starts a profile on each link the way the app does — its
    own process, its relay started by the app, the profile held to it — loads the leak page, makes a
-   WebRTC call, knocks on the relay's door, and kills one relay to see the profile fail closed.
-3. The capture, read here. It fails on:
+   WebRTC call, asks the profile's process to knock from inside (TCP to its relay taken, to anything
+   else refused by the kernel, UDP refused), knocks on the relay's door, and kills one relay three
+   times to see it come back twice and then the profile fail closed.
+4. The capture, read here. It fails on:
    * any packet of a profile's process, or sent on its behalf (pktap `proc`/`eproc`), to anything
-     but loopback — at any time: such a process has nothing else to talk to;
-   * any packet of a relay (`LumenXray`, by pid) to or from anything but its server's address and port;
+     but loopback — at any time: such a process has nothing else to talk to; while a profile runs, the
+     same of any process named as the app (the check's own: the manager, which runs WebRTC's relay),
+     of WebKit's processes, and of Safari's services started after the first profile (egress_check);
+   * any packet of a relay (`LumenXray`, by pid or name) to or from anything but its server's address
+     and ports (a question for its server's own name excepted);
+   * any packet carrying the run's token;
    * any DNS question carrying the run's token, or under leak.example.com — a name a page asked for
      that was resolved on this Mac instead of at the far end of the link;
    * any packet to a documentation address (the leak page's own targets);
    and on its controls not being there: the DNS question the check asks on purpose for a name with
-   the token (the capture sees questions), and the relays' own packets to their servers, counted for
+   the token, seen and named after the app (the capture sees the app's questions and tells them
+   apart), and the relays' own packets to their servers, counted for
    the relay's pid (the capture sees the relays and tells processes apart). A control missing is
    SKIPPED, and fails the run: a capture that could not see is never a pass. A link by name whose
    server's name was not asked of this Mac's resolver while its profile ran fails too.
@@ -51,11 +65,12 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from egress_check import DOCUMENTATION, FLOW, PORT, QUESTION, SERVICES, parse  # noqa: E402
-from xray_relay_check import TLSTarget, free_port, links, make_material, wait_for_port  # noqa: E402
+from xray_relay_check import TLSTarget, free_port, links, make_material, read_reply, wait_for_port  # noqa: E402
 from aia_variants import BINARY, PROFILE_BINARY, copy_declaring, declared_sdk  # noqa: E402
 
-# The kinds the app is checked with: every protocol, REALITY and TLS, two transports.
-CHECKED = ["reality-vision", "tls-ws", "vmess-ws", "trojan-tls", "ss2022"]
+# The kinds the app is checked with: every shape xray_relay_check.py runs — every protocol, REALITY and
+# TLS, the flow vision, and the transports RAW, XHTTP, WebSocket and gRPC.
+CHECKED = ["reality-vision", "reality-xhttp", "tls-vision", "tls-ws", "tls-grpc", "vmess-ws", "trojan-tls", "ss2022"]
 FAIL_CLOSED = "reality-vision"
 # Links that name their server by a host name, not an address: the relay resolves it, inside its
 # sandbox, through this Mac's resolver (mDNSResponder) — as a provider's link with a name would.
@@ -123,6 +138,177 @@ class NameServer:
 
     def close(self):
         self.sock.close()
+
+
+class Listener:
+    """A TCP and a UDP echo on one port number of `address`, counting what reaches each."""
+
+    def __init__(self, address):
+        for _ in range(20):
+            self.tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.tcp.bind((address, 0))
+            self.port = self.tcp.getsockname()[1]
+            self.udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                self.udp.bind((address, self.port))
+                break
+            except OSError:
+                self.tcp.close()
+                self.udp.close()
+        self.tcp.listen(16)
+        self.accepted = 0
+        self.datagrams = 0
+        threading.Thread(target=self.serve_tcp, daemon=True).start()
+        threading.Thread(target=self.serve_udp, daemon=True).start()
+
+    def serve_tcp(self):
+        while True:
+            try:
+                connection, _ = self.tcp.accept()
+            except OSError:
+                return
+            self.accepted += 1
+            with connection:
+                connection.settimeout(5)
+                try:
+                    connection.sendall(connection.recv(256))
+                except OSError:
+                    pass
+
+    def serve_udp(self):
+        while True:
+            try:
+                data, peer = self.udp.recvfrom(2048)
+            except OSError:
+                return
+            self.datagrams += 1
+            self.udp.sendto(data, peer)
+
+    def close(self):
+        self.tcp.close()
+        self.udp.close()
+
+
+def socks_open(port):
+    sock = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sock.sendall(b"\x05\x01\x00")
+    if sock.recv(2) != b"\x05\x00":
+        raise ConnectionError("the SOCKS5 greeting was refused")
+    return sock
+
+
+def tcp_through(port, address, target):
+    """True when a connection through the SOCKS5 relay on `port` to address:target echoes back."""
+    try:
+        with socks_open(port) as sock:
+            sock.sendall(b"\x05\x01\x00\x01" + socket.inet_aton(address) + struct.pack("!H", target))
+            read_reply(sock)
+            sock.settimeout(4)
+            sock.sendall(b"lumen-sandbox-probe")
+            return sock.recv(64) == b"lumen-sandbox-probe"
+    except (OSError, ConnectionError):
+        return False
+
+
+def udp_through_relay(port, address, target):
+    """True when a datagram through the SOCKS5 relay's UDP to address:target echoes back."""
+    try:
+        with socks_open(port) as control, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client:
+            client.bind(("127.0.0.1", 0))
+            client.settimeout(2)
+            own = client.getsockname()
+            control.sendall(b"\x05\x03\x00\x01" + socket.inet_aton(own[0]) + struct.pack("!H", own[1]))
+            relay_host, relay_port = read_reply(control)
+            header = b"\x00\x00\x00\x01" + socket.inet_aton(address) + struct.pack("!H", target)
+            for _ in range(3):
+                client.sendto(header + b"lumen-sandbox-probe", (relay_host, relay_port))
+                try:
+                    if client.recvfrom(2048)[0].endswith(b"lumen-sandbox-probe"):
+                        return True
+                except socket.timeout:
+                    continue
+    except (OSError, ConnectionError):
+        pass
+    return False
+
+
+def run_relay(command, config, port=None, seconds=2.0):
+    """Starts `command` with `config` on its standard input as the app starts a relay (from "/", PATH
+    alone); with `port`, yields once it listens there (or not), else after `seconds`. Returns the
+    process, whether it listened, and a function that stops it and gives its last words."""
+    process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                               env={"PATH": "/usr/bin:/bin"}, cwd="/")
+    process.stdin.write(json.dumps(config).encode())
+    process.stdin.close()
+    if port:
+        listening = wait_for_port(port, 15)
+    else:
+        time.sleep(seconds)
+        listening = None
+
+    def stop():
+        if process.poll() is None:
+            process.terminate()
+        try:
+            output = process.communicate(timeout=10)[0]
+        except subprocess.TimeoutExpired:
+            process.kill()
+            output = process.communicate()[0]
+        return " | ".join(output.decode(errors="replace").strip().splitlines()[-3:])[:400]
+    return process, listening, stop
+
+
+def relay_sandbox_check(lumen, relay, address, out):
+    """The relay's sandbox apart from its configuration (XrayRelayLauncher): Xray started as the app
+    starts a relay — `Lumen --xray-relay <Xray> <server port>` — but with a configuration that would go
+    anywhere (freedom), must reach the server's port, TCP and UDP, and nothing else; and, given a log
+    file, write none. The control: the same configurations in Xray without the sandbox reach the other
+    port and write the file — so what stops the sandboxed one is the sandbox. Returns the failures."""
+    server, other = Listener(address), Listener(address)
+    failures = []
+    try:
+        for sandboxed in (True, False):
+            label = "sandboxed, as the app runs it" if sandboxed else "the control, the same Xray without the sandbox"
+            port = free_port()
+            command = [lumen, "--xray-relay", relay, str(server.port)] if sandboxed else [relay, "run", "-c", "stdin:"]
+            config = {
+                "log": {"loglevel": "warning"},
+                "inbounds": [{"listen": "127.0.0.1", "port": port, "protocol": "socks",
+                              "settings": {"auth": "noauth", "udp": True, "ip": "127.0.0.1"}}],
+                # A freedom refuses private addresses by default; this Mac's is one.
+                "outbounds": [{"protocol": "freedom", "settings": {
+                    "finalRules": [{"action": "allow", "network": "tcp,udp", "ip": [address + "/32"]}]}}],
+            }
+            _, listening, stop = run_relay(command, config, port=port)
+            results = {
+                "tcp to the server's port": bool(listening) and tcp_through(port, address, server.port),
+                "tcp to another port": bool(listening) and tcp_through(port, address, other.port),
+                "udp to the server's port": bool(listening) and udp_through_relay(port, address, server.port),
+                "udp to another port": bool(listening) and udp_through_relay(port, address, other.port),
+            }
+            said = stop()
+            # A file to write: Xray opens its log file as it starts.
+            written = os.path.join(out, "relay-sandbox-%s.log" % ("in" if sandboxed else "out"))
+            if os.path.exists(written):
+                os.remove(written)
+            config["log"]["error"] = written
+            config["inbounds"][0]["port"] = free_port()
+            _, _, stop_writer = run_relay(command, config)
+            said_writing = stop_writer()
+            results["a file written"] = os.path.exists(written)
+            print("XRAY-LEAK INFO the relay's sandbox, %s: %s; it listened %s; it said %s; given a log file: %s"
+                  % (label, results, listening, said or "nothing", said_writing or "nothing"))
+            expected = {"tcp to the server's port": True, "tcp to another port": not sandboxed,
+                        "udp to the server's port": True, "udp to another port": not sandboxed,
+                        "a file written": not sandboxed}
+            wrong = {name: value for name, value in results.items() if expected[name] != value}
+            if wrong or not listening:
+                failures.append("%s: %s (expected %s)" % (label, wrong or "it did not listen", expected))
+    finally:
+        server.close()
+        other.close()
+    return failures
 
 
 def point_resolver(domain, port):
@@ -429,6 +615,17 @@ def main():
         with open(spec_path, "w") as handle:
             json.dump(spec, handle)
         os.chmod(spec_path, 0o600)
+
+        # The relay's sandbox on its own, before the capture (its probes go where a relay must not).
+        sandbox_failures = relay_sandbox_check(os.path.join(app, "Contents", "MacOS", "Lumen"), relay, address, options.out)
+        for failure in sandbox_failures:
+            print("XRAY-LEAK FAIL the relay's sandbox: %s" % failure)
+        if sandbox_failures:
+            status = 1
+        else:
+            print("XRAY-LEAK PASS the relay's sandbox: Xray started as the app starts a relay, with a configuration that "
+                  "would go anywhere, reached the server's port (TCP and UDP) and no other, and wrote no file; the same "
+                  "Xray without the sandbox reached the other port and wrote its file")
 
         capture_path = os.path.join(options.out, "capture.txt")
         capture = subprocess.Popen(["sudo", "tcpdump", "-i", "pktap,all", "-k", "NP", "-n", "-tt", "-l", "-s", "256",
