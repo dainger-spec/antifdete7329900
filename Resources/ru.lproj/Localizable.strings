@@ -177,7 +177,7 @@
 "editor.location.unknown.detail" = "Определится при следующем запуске.";
 "editor.name" = "Название";
 "editor.network.footer" = "Если прокси не работает, профиль не выйдет в сеть напрямую.";
-"editor.passwords.autoFill" = "Автозаполнение имён и паролей";
+"editor.passwords.autoFill" = "Автозаполнение логинов и паролей";
 "editor.passwords.footer" = "После входа на сайт браузер предложит сохранить пароль.";
 "editor.privacy.footer" = "Проверки Safe Browsing идут мимо прокси, поэтому она выключена.";
 "editor.proxy.bypass" = "Домены в обход (через запятую)";
@@ -3954,7 +3954,7 @@
 "cookieRecovery.notice" = "Восстановлено cookies: %ld";
 "cookieRecovery.notice.detail" = "Они пропали после прошлого запуска — Lumen вернул их из снимка от %@.";
 "cookieRecovery.notice.close" = "Закрыть";
-"editor.cookies.snapshots" = "Хранить снимки cookies и восстанавливать потерянные";
+"editor.cookies.snapshots" = "Восстанавливать потерянные cookies";
 "editor.cookies.snapshots.footer" = "Если cookies пропадут после сбоя, Lumen вернёт их при запуске.";
 "editor.cookies.snapshots.footer.ephemeral" = "Временный профиль не хранит данные сайтов, поэтому снимков cookies у него нет.";
 "profiles.row.cookieSnapshots" = "Восстановить cookies из снимка…";

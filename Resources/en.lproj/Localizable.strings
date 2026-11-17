@@ -177,7 +177,7 @@
 "editor.location.unknown.detail" = "Found at the next launch.";
 "editor.name" = "Name";
 "editor.network.footer" = "If the proxy fails, the profile never goes online directly.";
-"editor.passwords.autoFill" = "AutoFill user names and passwords";
+"editor.passwords.autoFill" = "AutoFill logins and passwords";
 "editor.passwords.footer" = "After you sign in, the browser offers to save the password.";
 "editor.privacy.footer" = "Safe Browsing checks bypass the proxy, so it's off.";
 "editor.proxy.bypass" = "Bypass domains (comma-separated)";
@@ -3954,7 +3954,7 @@
 "cookieRecovery.notice" = "%ld cookies restored";
 "cookieRecovery.notice.detail" = "They were lost after the last run — Lumen put them back from the snapshot of %@.";
 "cookieRecovery.notice.close" = "Close";
-"editor.cookies.snapshots" = "Keep cookie snapshots and restore lost cookies";
+"editor.cookies.snapshots" = "Restore lost cookies";
 "editor.cookies.snapshots.footer" = "If cookies are lost after a crash, Lumen puts them back at launch.";
 "editor.cookies.snapshots.footer.ephemeral" = "An ephemeral profile keeps no website data, so it keeps no cookie snapshots.";
 "profiles.row.cookieSnapshots" = "Restore Cookies from a Snapshot…";
