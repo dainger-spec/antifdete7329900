@@ -505,9 +505,10 @@ struct ProxyColumns {
 
     /// The table beside the inspector under the header: the proxy, where it exits as a country's
     /// code, its state — the type and the latency are the inspector's.
-    /// The column's title whole («ВЫХ…» at 40), and the longest state beside it.
-    static let compactExit: CGFloat = 64
-    static let compactState: CGFloat = 196
+    /// The column's title whole («ВЫХ…» at 40), and the longest state beside it. Together no wider
+    /// than 242: a 1024-point window keeps the table beside the inspector (wider, it went under it).
+    static let compactExit: CGFloat = 56
+    static let compactState: CGFloat = 184
     static let minimumCompactWidth: CGFloat = 2 * 12 + 2 * Self.inset + 2 * 8 + 150 + Self.compactExit + Self.compactState + 2 * Self.gap
 
     let showsIP: Bool
