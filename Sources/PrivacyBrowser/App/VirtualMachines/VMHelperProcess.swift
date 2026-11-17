@@ -37,6 +37,8 @@ final class VMHelperProcess {
     /// The helper said how its work ended: `stopped`, `installed`, `catalog` — or `failed`.
     private var concluded = false
     private(set) var hasEnded = false
+    /// The app ended the helper itself (`kill`'s last resort): the person's Force Stop, not a crash.
+    private var endedOnPurpose = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
 
     init(onEvent: @escaping (VMHelperEvent) -> Void, onEnd: @escaping (_ failure: String?) -> Void) {
@@ -125,9 +127,10 @@ final class VMHelperProcess {
     private func ended(status: Int32) {
         guard !hasEnded else { return }
         hasEnded = true
-        if !concluded, failure == nil {
-            // Ended without a word (killed, or it crashed): never taken for a clean end.
-            failure = String(format: L("vm.error.helperEnded"), Int(status))
+        if !concluded, failure == nil, !endedOnPurpose {
+            // Ended without a word (killed, or it crashed): never taken for a clean end. Said in the
+            // person's words, the status as a technical detail.
+            failure = L("vm.error.helperEnded") + "\n" + String(format: L("vm.row.trouble.detail"), "status \(Int(status))")
             log.error("The machines' helper ended without saying how: status \(Int(status), privacy: .public)")
         }
         onEnd(failure)
@@ -149,8 +152,10 @@ final class VMHelperProcess {
     func kill() {
         send("kill")
         let process = self.process
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) { [weak self] in
             guard process.isRunning else { return }
+            // Asked for: its end is the person's Force Stop, not a helper that crashed.
+            MainActor.assumeIsolated { self?.endedOnPurpose = true }
             _ = Darwin.kill(process.processIdentifier, SIGKILL)
         }
     }

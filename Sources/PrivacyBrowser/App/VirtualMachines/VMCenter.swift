@@ -1035,9 +1035,11 @@ final class VMCenter: ObservableObject {
         helpers[id]?.stop()
     }
 
-    /// Ends the machine now, as pulling a Mac's plug would: for one that does not shut down.
+    /// Ends the machine now, as pulling a Mac's plug would: for one that does not shut down. One
+    /// whose proxy is still being checked has no machine yet: its start is called off.
     func forceStop(_ id: UUID) {
-        helpers[id]?.kill()
+        guard let helper = helpers[id] else { return stop(id) }
+        helper.kill()
     }
 
     /// Lock and Quit: every machine is shut down, the setup paused, and this waits until the
@@ -1147,7 +1149,12 @@ final class VMCenter: ObservableObject {
     /// they always were.
     static func failureText(kind: VMFailureKind?, message: String?) -> String {
         let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let kind else { return detail.isEmpty ? L("vm.error.unknown") : detail }
+        // A failure of no kind the app has words for still gets a sentence in the person's
+        // language: the system's (or the helper's) words alone were English in a Russian
+        // interface, with a domain and a number for all they said.
+        guard let kind else {
+            return detail.isEmpty ? L("vm.error.unknown") : L("vm.failure.other") + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+        }
         let words = L("vm.failure.\(kind.rawValue)")
         return detail.isEmpty ? words : words + "\n" + String(format: L("vm.row.trouble.detail"), detail)
     }
