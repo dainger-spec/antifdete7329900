@@ -354,6 +354,7 @@ def main():
         check("the old build's scenarios passed", code == 0 and "SELFTEST-UPDATES run PASSED" in log, f"exit {code}")
         profile_ids = re.findall(r"INFO profile \S+ ([0-9A-F-]{36})", log)
         handed = "INFO handed-over" in log
+        opened_at = time.time()
         if handed:
             # A person opening Lumen again the moment it quit — a Dock click — while the installer
             # waits and checks: that start must step aside (UpdateLaunchGuard) and leave the install
@@ -382,7 +383,9 @@ def main():
         print(said[-4000:])
         print("::endgroup::", flush=True)
         check("the installer says it installed the update", "Update: installed" in said)
-        stepped = subprocess.run(["log", "show", "--last", "15m", "--style", "compact", "--predicate",
+        # This variant's own start only: the log since a moment before it was opened.
+        since = datetime.datetime.fromtimestamp(opened_at - 5).strftime("%Y-%m-%d %H:%M:%S")
+        stepped = subprocess.run(["log", "show", "--start", since, "--style", "compact", "--predicate",
                                   'subsystem == "PrivacyBrowser" AND category == "Updates"'],
                                  capture_output=True, text=True).stdout
         print("::group::the app's update log", flush=True)
