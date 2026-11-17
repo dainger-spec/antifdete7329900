@@ -441,8 +441,13 @@ final class OpenVPNTunnel {
         }
     }
 
+    /// The checks' own switch (`PB_OPENVPN_ECHO_LOG=1`, scripts/openvpn_macos_e2e.sh): OpenVPN's and
+    /// LumenTunnel's lines on this process's standard error, where the check's log takes them.
+    private static let echoesLog = ProcessInfo.processInfo.environment["PB_OPENVPN_ECHO_LOG"] == "1"
+
     /// A line of OpenVPN's log (kept in memory, the last 200, never written anywhere else here).
     private func heard(_ line: String) {
+        if Self.echoesLog { FileHandle.standardError.write(Data(("openvpn: " + line + "\n").utf8)) }
         recentLog.append(line)
         if recentLog.count > 200 { recentLog.removeFirst(recentLog.count - 200) }
         if let problem = Self.problem(in: line) { lastProblem = problem }
@@ -466,6 +471,7 @@ final class OpenVPNTunnel {
 
     /// A line from the tunnel's program: up (its port serves), down (it ended).
     private func status(_ line: String) {
+        if Self.echoesLog { FileHandle.standardError.write(Data(("tunnel status: " + line + "\n").utf8)) }
         guard let data = line.data(using: .utf8),
               let fields = try? JSONSerialization.jsonObject(with: data) as? [String: String],
               let event = fields["event"] else { return }
