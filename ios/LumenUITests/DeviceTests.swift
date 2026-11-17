@@ -60,7 +60,8 @@ final class DeviceTests: LumenUITestCase {
 
         app.buttons["settingsButton"].tap()
         onScreen(wait(app.buttons["settingsDone"], "the settings open"), "the settings' Done")
-        reveal(app.segmentedControls["profileLevel"], "the device profile's choice can be reached")
+        // The dashboard's design: the device profile is a choice of rows (Полный, Упрощённый, Свой).
+        _ = onScreen(reveal(app.buttons["profile-full"], "the device profile's choice can be reached"), "the device profile's choice", wholly: false)
         shot("\(leg) 05 settings")
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: long)
