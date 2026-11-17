@@ -140,6 +140,10 @@ enum ProfileEvent: Codable {
     case sealing
     /// How the profile's WebKit data was sealed, just before the process exits.
     case sealed(ProfileSealReport)
+    /// The launch put back cookies the profile's store had lost (docs/COOKIE_RECOVERY.md): how many,
+    /// from the snapshot of when, why, and whether the profile's window said so. Once per launch,
+    /// for the profile's journal; nothing of a cookie.
+    case cookiesRecovered(CookieSnapshotKeeper.Report)
     /// No geolocation service answered through the profile's proxy: where it exits is not known,
     /// and the profile runs in the last known location's time zone and language, or this Mac's.
     case proxyLocationUnknown

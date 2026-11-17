@@ -190,6 +190,8 @@ struct ProfileListView: View {
     @State private var whatSitesSeeFor: ProfileSummary?
     @State private var exporting: ProfileSummary?
     @State private var exportingCookies: ProfileSummary?
+    /// "Restore Cookies from a Snapshot…" (`CookieSnapshotsView`).
+    @State private var cookieSnapshotsFor: ProfileSummary?
     @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
     /// A kept deleted profile (R3) the person asked to remove for good: confirmed first.
@@ -243,6 +245,7 @@ struct ProfileListView: View {
             }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
+            .sheet(item: $cookieSnapshotsFor) { profile in CookieSnapshotsView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
             .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
@@ -635,6 +638,7 @@ struct ProfileListView: View {
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
+            cookieSnapshots: { id in cookieSnapshotsFor = summary(id) },
             warmUp: { id in warmUpSeveral([id]) },
             restorePoints: { id in restoringFor = summary(id) },
             duplicate: { id in duplicating = summary(id) },
@@ -898,6 +902,8 @@ struct ProfileActions {
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }
     var exportCookies: (UUID) -> Void = { _ in }
+    /// The profile's cookie snapshots, to restore one (`CookieSnapshotsView`).
+    var cookieSnapshots: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
     /// The profile's restore points and journal (`RestorePointsView`).
     var restorePoints: (UUID) -> Void = { _ in }
@@ -2374,6 +2380,10 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
+        // A temporary profile keeps no copy of its cookies.
+        if !row.ephemeral {
+            Button(L("profiles.row.cookieSnapshots")) { actions.cookieSnapshots(row.id) }
+        }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
         Button(L("profiles.row.restorePoints")) { actions.restorePoints(row.id) }
         // Absent while there is no address (the API is off, or not in the plan): the inspector's

@@ -47,9 +47,10 @@ final class SelfTest {
         // A hung check must not hold CI; what had been checked by then is still counted. The whole
         // run took 538–596 s on macOS 27.0.1's runner (full runs 3 to 5) and was cut at 600 s in
         // run 6, its last ~25 checks never made: 900 s; 1080 s since the languages-per-profile
-        // group (six launches of a profile's own process, about three minutes).
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1080) {
-            print("SELFTEST TIMEOUT after 1080 s")
+        // group (six launches of a profile's own process, about three minutes); 1200 s since cookie
+        // recovery (eight launches here, three of a profile's own process, and two of it killed).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1200) {
+            print("SELFTEST TIMEOUT after 1200 s")
             MainActor.assumeIsolated { _ = test.finish(timedOut: true) }
             exit(3)
         }
@@ -389,6 +390,7 @@ final class SelfTest {
         await group("password AutoFill") { try await passwordAutoFill(repository) }
         await group("cookie import") { try await cookieImport(repository) }
         await group("session cookies after a stop") { try await sessionCookieAfterStop(repository) }
+        await group("cookie recovery") { try await cookieRecovery(repository) }
         await group("profile transfer") { try await profileTransfer(repository) }
         await group("automation API") { try await automationAPI(repository) }
         await group("profile sync") { try await profileSync(repository) }
@@ -7176,6 +7178,269 @@ final class SelfTest {
             try await manager.deleteBecauseThePersonAsked(measured.id)
             if let other { try await manager.deleteBecauseThePersonAsked(other.id) }
         }
+    }
+
+    // MARK: Cookie recovery (docs/COOKIE_RECOVERY.md)
+
+    /// A profile's cookies come back after its store lost them, and only then. In this process
+    /// (both builds): a stopped profile's website data removed, then its cookie file damaged — each
+    /// time its first request carries the cookies again, put back from their snapshot before the
+    /// page loaded; cookies deleted through Lumen (WebDriver) are copied at once and stay deleted
+    /// when the store is lost after; an ephemeral profile keeps no snapshot. In a profile's own
+    /// process (the unsandboxed build): the process killed, its cookie file damaged, the cookies back
+    /// at the next launch, said in its window; then deleted through Lumen, the process killed and the
+    /// file damaged again — and nothing comes back.
+    private func cookieRecovery(_ repository: ProfileRepository) async throws {
+        let names = ["here: cookies come back when the website data is removed", "here: cookies come back when the cookie file is damaged",
+                     "here: cookies deleted through Lumen are copied at once and not brought back"]
+        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+            for name in names { skip("cookie recovery, \(name)", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it shows what a request carries)") }
+            skip("cookie recovery, in a profile's own process", "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
+            return
+        }
+        let start = URL(string: "http://recovery.selftest.invalid/pb-cookies")!
+        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
+        let future = Date().addingTimeInterval(30 * 86_400)
+        let values = ["rec_a", "rec_b", "rec_c", "rec_d"].map { ($0, "\($0)-\(UUID().uuidString.prefix(8))") }
+        let cookies = values.map { ImportedCookie(name: $0.0, value: $0.1, domain: "recovery.selftest.invalid", hostOnly: true, expires: future) }
+        let session = ImportedCookie(name: "rec_session", value: "session-only", domain: "recovery.selftest.invalid", hostOnly: true)
+        func carriesAll(_ text: String) -> Bool { values.allSatisfy { text.contains("\($0.0)=\($0.1)") } }
+        func carriesNone(_ text: String) -> Bool { !values.contains { text.contains("\($0.0)=") } }
+        func snapshotsFile(_ id: UUID) -> URL { repository.directory(for: id).appendingPathComponent("cookie-snapshots.bin") }
+
+        // MARK: In this process
+        let profile = try repository.create(name: "Cookie recovery", configuration: ProfileConfiguration(
+            startURL: start, proxy: proxy, matchProxyLocation: false))
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var recovered: [CookieSnapshotKeeper.Report] = []
+        manager.onCookiesRecovered = { _, report in recovered.append(report) }
+        func pageText() async -> String {
+            guard let tab = manager.session(for: profile.id)?.windowControllers.first?.selectedTab else { return "" }
+            _ = await waitUntil(timeout: 15) { !tab.isLoading && tab.url == start }
+            return (try? await js(tab.webView, "return document.body ? document.body.innerText : '';")) as? String ?? ""
+        }
+        func stopAndLetGo() async throws {
+            weak var store = manager.session(for: profile.id)?.dataStore
+            try await manager.stop(profile.id)
+            let released = await waitUntil(timeout: 10) { store == nil }
+            if !released { info("cookie recovery: WebKit still held the store 10 s after the stop") }
+        }
+        func lastSnapshot() -> CookieSnapshot? { (try? repository.cookieSnapshots(for: profile.id))?.latest }
+
+        // A run: cookies imported while it runs — copied at once — and a session cookie, never copied.
+        try await manager.launch(profile.id)
+        _ = await pageText()
+        let imported = try await manager.importCookies(cookies + [session], into: profile.id)
+        let copied = lastSnapshot()
+        let sealed = (try? Data(contentsOf: snapshotsFile(profile.id))) ?? Data()
+        let copiedNames: [String] = copied?.cookies.map { $0.name }.sorted() ?? []
+        let importedNames: [String] = values.map { $0.0 }.sorted()
+        let readable = values.contains { sealed.range(of: Data($0.1.utf8)) != nil } || sealed.range(of: Data("recovery.selftest.invalid".utf8)) != nil
+        let importedWhole = imported == .applied(stored: 5, refused: [])
+        check("cookie recovery: an import into a running profile is copied at once, sealed — no value readable on disk — without its session cookie",
+              importedWhole && copied?.trigger == .change && copiedNames == importedNames && !sealed.isEmpty && !readable,
+              "import \(imported), snapshot \(copied.map { "\($0.trigger.rawValue): \($0.cookies.map { $0.name })" } ?? "none"), \(sealed.count) bytes")
+        let runningMark = repository.lastCookieRunEnd(for: profile.id)
+        try await stopAndLetGo()
+        check("cookie recovery: a running profile carries its running mark, and a clean stop takes it away",
+              runningMark == .unclean && repository.lastCookieRunEnd(for: profile.id) == .clean,
+              "while running \(runningMark.rawValue), after the stop \(repository.lastCookieRunEnd(for: profile.id).rawValue)")
+
+        // The website data removed while the profile is stopped: the cookies come back before the first page.
+        try FileManager.default.removeItem(at: repository.webDataArchiveURL(for: profile.id))
+        try await manager.launch(profile.id)
+        let afterRemoval = await pageText()
+        let toldRemoval = recovered.count == 1 && recovered.last?.cause == .websiteDataMissing && recovered.last?.restored == values.count
+        check("cookie recovery, \(names[0]): its first request carries them again, put back before the page loaded, and the journal is told",
+              carriesAll(afterRemoval) && !afterRemoval.contains("rec_session") && toldRemoval,
+              "page \(afterRemoval), told \(recovered.map { "\($0.cause.rawValue) \($0.restored)" })")
+        info("cookie recovery: the notice \(recovered.last?.noticeShown == true ? "was shown" : "was not shown (no window of this process on screen)") over the profile's window in this process")
+        try await stopAndLetGo()
+
+        // The cookie file damaged while the profile is stopped (cut short in the archive): WebKit's own
+        // file is checked as it holds together first — the check reads the format WebKit writes.
+        let vault = WebDataStoreVault(repository: repository)
+        let key = try repository.profileKey(for: profile.id)
+        try await vault.prepareForLaunch(profileID: profile.id, key: key)
+        let files = CookieSnapshotKeeper.cookieFiles(of: profile.id)
+        var records = 0
+        var wellFormed = !files.isEmpty
+        var checked: [String] = []
+        for file in files {
+            let result = BinaryCookiesFile.check((try? Data(contentsOf: file)) ?? Data())
+            checked.append("\(file.lastPathComponent): \(result)")
+            if case let .wellFormed(count) = result { records += count } else { wellFormed = false }
+        }
+        check("cookie recovery: WebKit's cookie file of a profile is found and holds together as read here, its records counted without reading one",
+              wellFormed && records >= values.count, checked.isEmpty ? "no cookie file in \(WebDataStoreVault.discoverDirectories(for: profile.id).map(\.path))" : "\(checked)")
+        for file in files {
+            let data = try Data(contentsOf: file)
+            try data.prefix(12).write(to: file)
+        }
+        let state = CookieSnapshotKeeper.storeState(for: profile.id, restored: .archive)
+        _ = try await vault.seal(profileID: profile.id, key: key, activeStore: false)
+        recovered = []
+        try await manager.launch(profile.id)
+        let afterDamage = await pageText()
+        let toldDamage = recovered.last?.cause == .cookieFileDamaged && recovered.last?.restored == values.count
+        check("cookie recovery, \(names[1]): found damaged before the store opened, and its first request carries them again",
+              state.state == .damaged && carriesAll(afterDamage) && toldDamage,
+              "found \(state.state.rawValue) (\(state.note)), page \(afterDamage), told \(recovered.map { "\($0.cause.rawValue) \($0.restored)" })")
+
+        // Deleted through Lumen (WebDriver, on the site's page): copied at once; then the store lost —
+        // and nothing comes back.
+        func driver(_ command: String, _ body: String = "{}") async -> WebDriverAnswer {
+            await manager.webDriver(profile.id, WebDriverCall(id: UUID(), command: command, element: nil, name: nil, body: body))
+        }
+        let opened = await driver("open")
+        let went = await driver("navigate", #"{"url": "\#(start.absoluteString)"}"#)
+        let deleted = await driver("deleteCookies")
+        let afterDelete = lastSnapshot()
+        _ = await driver("close")
+        try await stopAndLetGo()
+        try FileManager.default.removeItem(at: repository.webDataArchiveURL(for: profile.id))
+        recovered = []
+        try await manager.launch(profile.id)
+        let afterClear = await pageText()
+        let driven = [opened, went, deleted].allSatisfy { $0.error == nil }
+        let copiedClear = afterDelete?.trigger == .change && afterDelete?.cookies.isEmpty == true
+        check("cookie recovery, \(names[2]): the store lost after — nothing comes back",
+              driven && copiedClear && carriesNone(afterClear) && recovered.isEmpty,
+              "WebDriver \([opened, went, deleted].map { $0.error?.message ?? "ok" }), snapshot after the deletion "
+                  + "\(afterDelete.map { "\($0.trigger.rawValue): \($0.cookies.count)" } ?? "none"), page \(afterClear), told \(recovered.count)")
+        try await stopAndLetGo()
+        check("cookie recovery: nothing went wrong here", messages.isEmpty, messages.joined(separator: " | "))
+        try await manager.deleteBecauseThePersonAsked(profile.id)
+
+        // An ephemeral profile keeps no snapshot, and no mark.
+        let ephemeral = try repository.create(name: "Cookie recovery, ephemeral", configuration: ProfileConfiguration(ephemeral: true))
+        try await manager.launch(ephemeral.id, openingWindow: false)
+        _ = try await manager.importCookies(cookies, into: ephemeral.id)
+        let ephemeralMark = repository.lastCookieRunEnd(for: ephemeral.id)
+        try await manager.stop(ephemeral.id)
+        let ephemeralKept = FileManager.default.fileExists(atPath: snapshotsFile(ephemeral.id).path)
+        check("cookie recovery: an ephemeral profile keeps no snapshot of its cookies, and no running mark",
+              !ephemeralKept && ephemeralMark == .clean, "snapshots \(ephemeralKept ? "kept" : "none"), mark \(ephemeralMark.rawValue)")
+        try await manager.deleteBecauseThePersonAsked(ephemeral.id)
+
+        // MARK: In a profile's own process
+        try await cookieRecoveryInItsOwnProcess(repository, start: start, proxy: proxy, cookies: cookies)
+    }
+
+    /// The process of a profile killed with its cookie file damaged after, as a crash and a damaged
+    /// store leave it (`cookieRecovery`): its cookies come back at the next launch, said in its window;
+    /// deleted through Lumen, then killed and damaged again: nothing comes back.
+    private func cookieRecoveryInItsOwnProcess(_ repository: ProfileRepository, start: URL, proxy: ProxySettings,
+                                               cookies: [ImportedCookie]) async throws {
+        let restoredName = "cookie recovery, in a profile's own process: killed, its cookie file damaged — its cookies are back at the next launch, said in its window"
+        let clearedName = "cookie recovery, in a profile's own process: deleted through Lumen, killed, its cookie file damaged — nothing comes back"
+        guard !AppEnvironment.isSandboxed else {
+            skip(restoredName, "the sandboxed build runs no process per profile", .build)
+            skip(clearedName, "the sandboxed build runs no process per profile", .build)
+            return
+        }
+        let profile = try repository.create(name: "Cookie recovery, own process", configuration: ProfileConfiguration(
+            startURL: start, proxy: proxy, matchProxyLocation: false))
+        defer { try? repository.delete(profile.id) }
+        let manager = ProfileManager(repository: repository)
+        var messages: [String] = []
+        manager.onError = { messages.append($0) }
+        var running: Bool?
+        manager.onProfileRunning = { _, _ in running = true }
+        var exited: Int32?
+        manager.onChildExited = { _, status in exited = status }
+        manager.onChildStopped = { _, status in exited = status }
+        var recovered: [CookieSnapshotKeeper.Report] = []
+        manager.onCookiesRecovered = { _, report in recovered.append(report) }
+        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
+        defer { if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") } }
+        setenv("PB_PROFILE_PROCESS", "1", 1)
+        let key = try repository.profileKey(for: profile.id)
+        let homes = SafariHomeVault(repository: repository)
+
+        /// Whether `found` holds every one of `cookies`, with its value.
+        func holdsAll(_ found: [ImportedCookie]) -> Bool {
+            cookies.allSatisfy { cookie in found.contains { $0.name == cookie.name && $0.value == cookie.value } }
+        }
+        /// The profile up in its own process.
+        func launchUp() async -> Bool {
+            running = nil
+            exited = nil
+            do { try await manager.launch(profile.id) } catch {
+                info("cookie recovery, own process: the launch failed: \(error)")
+                return false
+            }
+            if let pid = manager.processIdentifier(of: profile.id) { info("egress-pid \(pid)") }
+            let up = await waitUntil(timeout: 90) { running != nil || exited != nil }
+            return up && exited == nil
+        }
+        /// Killed as a crash ends it; then its WebKit data — sealed into its home by the manager, as
+        /// any crash leaves it — has its cookie file cut short, as damage leaves it.
+        func killAndDamage() async throws -> Int {
+            guard let pid = manager.processIdentifier(of: profile.id) else { return -1 }
+            _ = kill(pid, SIGKILL)
+            guard await waitUntil(timeout: 30, { exited != nil }) else { return -1 }
+            try homes.prepareForLaunch(profileID: profile.id, key: key)
+            let target = profile.id.uuidString.lowercased()
+            var damaged = 0
+            if let walk = FileManager.default.enumerator(at: homes.homeDirectory(for: profile.id), includingPropertiesForKeys: nil) {
+                for case let file as URL in walk where file.pathExtension == "binarycookies" && file.path.lowercased().contains(target) {
+                    try Data(try Data(contentsOf: file).prefix(12)).write(to: file)
+                    damaged += 1
+                }
+            }
+            try homes.seal(profileID: profile.id, key: key)
+            return damaged
+        }
+
+        guard await launchUp() else {
+            check(restoredName, false, "the profile's process did not come up (ended \(exited.map(String.init) ?? "no"))")
+            check(clearedName, false, "not reached")
+            await manager.shutDown()
+            return
+        }
+        let imported = try await manager.importCookies(cookies, into: profile.id)
+        let copied = (try? repository.cookieSnapshots(for: profile.id))?.latest
+        let markWhileRunning = repository.lastCookieRunEnd(for: profile.id)
+        let damaged = try await killAndDamage()
+        let markAfterKill = repository.lastCookieRunEnd(for: profile.id)
+        recovered = []
+        let back = await launchUp()
+        let told = await waitUntil(timeout: 10) { !recovered.isEmpty }
+        let exported = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let importedWhole = imported == .applied(stored: cookies.count, refused: [])
+        let marked = markWhileRunning == .unclean && markAfterKill == .unclean
+        let report = recovered.last
+        let toldRight = told && report?.cause == .cookieFileDamaged && report?.restored == cookies.count && report?.noticeShown == true
+        check(restoredName,
+              importedWhole && copied?.cookies.count == cookies.count && marked && damaged > 0 && back && toldRight && holdsAll(exported),
+              "import \(imported), copied by its process \(copied?.cookies.count ?? 0), mark \(markWhileRunning.rawValue)/\(markAfterKill.rawValue), "
+                  + "cookie files cut short \(damaged), up again \(back), told \(recovered.map { "\($0.cause.rawValue) \($0.restored) notice \($0.noticeShown)" }), "
+                  + "the store now \(exported.map { $0.name })")
+
+        // Deleted through Lumen in its process (WebDriver), killed, the file damaged again: nothing back.
+        func driver(_ command: String, _ body: String = "{}") async -> WebDriverAnswer {
+            await manager.webDriver(profile.id, WebDriverCall(id: UUID(), command: command, element: nil, name: nil, body: body))
+        }
+        let answers = [await driver("open"), await driver("navigate", #"{"url": "\#(start.absoluteString)"}"#), await driver("deleteCookies")]
+        let afterDelete = (try? repository.cookieSnapshots(for: profile.id))?.latest
+        _ = await driver("close")
+        var damagedAgain = -1
+        if back { damagedAgain = try await killAndDamage() }
+        recovered = []
+        let backAgain = await launchUp()
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let exportedAgain = (try? await manager.exportCookies(of: profile.id)) ?? []
+        let driven = answers.allSatisfy { $0.error == nil }
+        let cameBack = exportedAgain.contains { cookie in cookies.contains { $0.name == cookie.name } }
+        check(clearedName,
+              driven && afterDelete?.cookies.isEmpty == true && damagedAgain > 0 && backAgain && recovered.isEmpty && !cameBack,
+              "WebDriver \(answers.map { $0.error?.message ?? "ok" }), copied after the deletion \(afterDelete.map { "\($0.trigger.rawValue): \($0.cookies.count)" } ?? "none"), "
+                  + "cookie files cut short \(damagedAgain), up again \(backAgain), told \(recovered.count), the store now \(exportedAgain.map { $0.name })")
+        try? await manager.stop(profile.id)
+        info("cookie recovery, own process: messages \(messages)")
     }
 
     // MARK: Profile export and import

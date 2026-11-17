@@ -3857,3 +3857,35 @@
 "warmup.status.proxyNotAnswering" = "Остановлен: прокси не отвечает.";
 "profiles.filter.notWarmed" = "Не прогреты";
 "profiles.row.warmed" = "Прогрет %@";
+
+/* Cookie recovery: snapshots of a profile's cookies, put back when its store lost them (CookieSnapshotKeeper, CookieRecoveryNotice, CookieSnapshotsView; docs/COOKIE_RECOVERY.md) */
+"cookieRecovery.notice" = "Cookies восстановлены из снимка от %@";
+"cookieRecovery.notice.detail" = "Хранилище cookies профиля потеряло их после прошлого запуска. Возвращено cookies: %ld.";
+"cookieRecovery.notice.close" = "Закрыть";
+"editor.cookies.snapshots" = "Хранить снимки cookies и восстанавливать потерянные";
+"editor.cookies.snapshots.footer" = "Пока профиль работает, Lumen хранит три последних снимка его постоянных cookies — в зашифрованных данных профиля на этом Mac, без синхронизации. Если после сбоя, принудительного завершения или повреждения хранилища cookies пропали, следующий запуск вернёт их до загрузки первой страницы и скажет об этом. Если выключить, снимки удаляются.";
+"editor.cookies.snapshots.footer.ephemeral" = "Эфемерный профиль не хранит данные сайтов, поэтому снимков cookies у него нет.";
+"profiles.row.cookieSnapshots" = "Восстановить cookies из снимка…";
+"cookieSnapshots.title" = "Снимки cookies — %@";
+"cookieSnapshots.explanation" = "Пока cookies профиля меняются, Lumen копирует постоянные cookies раз в несколько минут, а также при остановке. Если хранилище их потеряло, следующий запуск вернёт их сам; здесь снимок можно вернуть вручную.";
+"cookieSnapshots.ephemeral" = "Временный профиль не хранит данные сайтов: снимков у него нет.";
+"cookieSnapshots.off" = "Снимки cookies у этого профиля выключены (его настройки → Данные). Снимки ниже, если они есть, удалятся при следующем запуске.";
+"cookieSnapshots.unreadable" = "Не удалось прочитать снимки. Они не удалены: следующий снимок отложит файл в сторону.";
+"cookieSnapshots.list" = "Снимки: %1$ld из %2$ld";
+"cookieSnapshots.none" = "Снимков пока нет: первый появится, когда профиль запущен и у него есть cookies.";
+"cookieSnapshots.count" = "cookies: %ld";
+"cookieSnapshots.count.valid" = "действительных cookies: %1$ld из %2$ld";
+"cookieSnapshots.restore" = "Восстановить…";
+"cookieSnapshots.restore.title" = "Восстановить cookies на %@?";
+"cookieSnapshots.restore.message" = "Его cookies, срок которых не истёк (%ld), заменят cookies профиля с теми же именами; cookies, появившиеся позже, останутся. Истёкшие и сессионные cookies не восстанавливаются.";
+"cookieSnapshots.restore.now" = "Профиль запущен: они появятся сразу.";
+"cookieSnapshots.restore.nextLaunch" = "Профиль остановлен: они появятся при следующем запуске, до загрузки первой страницы.";
+"cookieSnapshots.restore.sync" = "Этот профиль синхронизирует cookies: восстановленные попадут и на другие устройства при следующей синхронизации.";
+"cookieSnapshots.restore.confirm" = "Восстановить";
+"cookieSnapshots.restored.now" = "Восстановлено в запущенный профиль cookies: %ld.";
+"cookieSnapshots.restored.refused" = "Восстановлено cookies: %1$ld; WebKit не сохранил %2$ld.";
+"cookieSnapshots.restored.queued" = "Cookies (%1$ld) будут восстановлены при следующем запуске «%2$@», до загрузки первой страницы.";
+"journal.cookiesRecovered" = "Потерянные cookies восстановлены из снимка от %@";
+"journal.cookiesRecovered.plain" = "Потерянные cookies восстановлены из снимка";
+"journal.cookiesRestored" = "Cookies восстановлены из снимка от %@";
+"journal.cookiesRestored.plain" = "Cookies восстановлены из снимка";

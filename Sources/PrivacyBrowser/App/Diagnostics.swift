@@ -133,6 +133,7 @@ enum Diagnostics {
             entry["searchEngine"] = (c.searchEngine ?? .standard).rawValue
             entry["history"] = c.historyEnabled
             entry["syncCookies"] = c.syncsCookies
+            entry["cookieSnapshots"] = c.keepsCookieSnapshots
             entry["tags"] = c.tags.count
             entry["hasNotes"] = !c.notes.isEmpty
             return entry

@@ -112,6 +112,10 @@ ALLOWED_IN_FILE = {
     ("ProfileProcess.swift", "status"): "a process's exit status or signal number",
     ("ProfileManager.swift", "report.attempts"): "a count of seal attempts",
     ("ProfileManager.swift", "report.pagesClosed"): "a count of pages closed",
+    ("ProfileManager.swift", "report.noticeShown"): "a yes/no: whether a profile's window said its cookies were put back",
+    ("CookieSnapshotKeeper.swift", "note"):
+        "what the check of a profile's cookie file found (BinaryCookiesFile): fixed words of the code and counts of records, "
+        "never a cookie's name, value or domain (CookieRecoveryTests)",
     ("SafariAccountPreferences.swift", "domain"): "a preferences domain's name from the code: com.apple.Safari, or the self-test's",
     ("SafariAccountPreferences.swift", "removed"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
     ("SafariAccountPreferences.swift", "left"): "names of com.apple.Safari keys from that file's own list, or \"none\"",

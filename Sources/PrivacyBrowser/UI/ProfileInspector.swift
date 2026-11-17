@@ -370,6 +370,9 @@ struct ProfileInspectorView: View {
             InspectorMenuLink(title: L("inspector.cookies"), count: counts?.syncedCookies) {
                 Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
                 Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
+                if !row.ephemeral {
+                    Button(L("profiles.row.cookieSnapshots")) { actions.cookieSnapshots(row.id) }
+                }
             }
             // When it was last warmed, and how much: a profile never warmed, or not for a month, is
             // told from one warmed this morning without opening its warm-up.
