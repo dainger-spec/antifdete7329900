@@ -2,7 +2,8 @@
 
 Status, 2026-10-31: **not in the product, shelved** (the owner's decision: a customer would need
 Xcode, some 10 GB, and an iOS runtime, 8–9 GB, on their Mac — twenty gigabytes of developer tools,
-which a product can hardly ask of a buyer). The one question below was measured once, and that is as
+which a product can hardly ask of a buyer). Since 16 November Lumen for Mac has no mobile profiles
+at all (the owner): this is kept as a record of what was measured, not as a plan. The one question below was measured once, and that is as
 far as it goes for now. Everything below the script does not measure is marked **assumption**.
 
 **The answer, measured (CI run 513, measurement branch `claude/measure-ios-spike`; GitHub's

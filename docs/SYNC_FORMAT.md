@@ -5,6 +5,49 @@ document describes the client: wire format, objects and merge rules. The HTTP co
 for a server is in [SYNC_SERVER_API.md](SYNC_SERVER_API.md). A server and an account page are
 built to the decisions below.
 
+## Where a Mac syncs to
+
+`DeviceSettings.SyncTarget`, chosen in **Settings → Sync** (or **More → Sync…**); one at a time, the
+same vault and the same objects whichever it is:
+
+| Target | Transport | What is typed in | Stored in `settings.bin` |
+|---|---|---|---|
+| **Lumen account** (`.account`) | `HTTPSyncTransport` at the account server (`PBAccountServerURL`), `Authorization: Bearer` this Mac's device token from `account.json` (`AccountSync`; the account server's CONTRACT §16.1) | nothing | the choice only: `{"account": {}}` |
+| **Folder** (`.folder`) | `LocalDirectorySyncTransport`: local-only, a NAS share or an external disk | a folder | a security-scoped bookmark and the path |
+| **Own server** (`.server`) | `HTTPSyncTransport`: a server of one's own that speaks SYNC_SERVER_API.md | its HTTPS address and an access token | the address and the token |
+
+**Lumen account** is offered while this Mac is signed in to an account (`AccountSync.isOffered`),
+but not on an account the server has disabled. The server takes sync requests only while a paid plan
+runs (its CONTRACT §16, the owner's decision of 15 November 2026, since v2026.11.15): on the trial,
+without a plan and after the paid period ended it answers `403 sync_not_in_plan`, which the app says
+as a state; a payer's data stays there and syncs again after a payment, and the space follows the
+plan, 100 MiB at least. The vault's encryption is exactly the other targets': the server receives
+ciphertext and the plaintext `vault-header` only, and the key never leaves the user's devices. Lumen
+for iPhone signed in to the same account finds this vault with `GET /v1/device/sync/vaults` and opens
+it with the master password; the vault's id in the URL is the vault's own (`UnlockedVault.vaultID`),
+the one its header names. A Mac that has no vault finds it the same way and brings it back — or joins
+it, while another Mac goes on syncing it (*A Mac without a vault*, below); a Mac that makes a vault of
+its own syncs that one, and the server keeps up to 3 vaults per account.
+
+Sync through the account:
+- **Waits for the license.** The first sync after the app starts follows a renewal of the document
+  of rights that reached the server with this Mac still signed in (`LicenseModel.renewForSync`,
+  CONTRACT §16.1): a token copied to another Mac with the app's files is `device_revoked` or
+  `machine_mismatch` by then, and gone (§9.4). A `401` from the sync renews again, which signs an
+  unlinked Mac out. Signed out, the target stays and nothing syncs: the status says to sign in.
+- **Says the server's refusals as states**, in both languages, and changes nothing on this Mac for
+  any of them: `403 forbidden` (the vault is another account's), `too_many_vaults`,
+  `account_disabled`, `sync_on_hold` (no request before its `availableAt`, kept in the status),
+  `sync_not_in_plan` (no paid plan running: the trial, no plan, a paid period that ended), `429`.
+  `507 quota_exceeded` and
+  `413 too_large` are about one object: it waits (`SyncReport.deferredOverQuota`,
+  `deferredTooLarge`), the rest syncs, and the status says the plan's space is full, with the
+  account page a click away; or, for one too large, which profile's settings or files wait
+  (`SyncReport.tooLargeByProfile`) and why — the settings hold the camera's image and video, and
+  a smaller video makes them sync (below).
+- **`409 generation_changed`** stops the run with nothing more written and nothing said; the app
+  runs again at once, once, and that run starts over (below).
+
 ## Accepted decisions for a server (October 2026)
 
 Accepted by the project's owner before any server exists, so that a server and its account page
@@ -70,7 +113,8 @@ buyer can check it the same way the competitor was checked.
 | Wire format: envelope, opaque object IDs, AAD binding | `SyncEnvelope.swift` | ready (`pbsync-2` written since the vault's generation 2; `pbsync-1` still read) |
 | Engine: CAS writes, deferral, tombstones, per-record merges | `SyncEngine.swift` | ready, unit-tested |
 | Backend contract | `SyncTransport` protocol | ready; this is all a backend implements |
-| `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | **server-ready client**: speaks SYNC_SERVER_API.md, tested against an in-process stub; no server included |
+| `HTTPSyncTransport` | `Sync/Transports/HTTPSyncTransport.swift` | client: speaks SYNC_SERVER_API.md and the Lumen server's generation header and error bodies; tested against in-process stubs (`StubSyncServer`, `GenerationStubServer`) |
+| Sync through the Lumen account | `Sync/AccountSync.swift`, `AppModel.syncNow` | the account server with the device token; built to the account server's CONTRACT §16; not run against the live server from this repository |
 | `LocalDirectorySyncTransport` | `Sync/Transports/LocalDirectorySyncTransport.swift` | **local-only**: a folder (NAS share, external disk); CAS is atomic within one process only |
 | Sync target and last status | `DeviceSettings` (`settings.bin`, encrypted, never synced) | ready; folders are kept as security-scoped bookmarks so access survives relaunch in the App Sandbox |
 
@@ -139,8 +183,40 @@ bound), settings, proxy credentials, passwords, URLs, or cookies (names, values,
 ## Engine algorithm
 
 The engine keeps per-object local state in `sync-state.bin`, encrypted: the last synced
-revision and the SHA-256 of the last synced bytes.
+revision and the SHA-256 of the last synced bytes; the place those records are of — a server's
+address and the vault, or a folder's path (`SyncEngine.place(of:)`); and, from a server that keeps a
+generation of its data (`ServerGenerationTransport`: the Lumen server), the generation those records
+are of. Format 2 with a generation (its server and vault are the place: what the version that
+brought generations reads); format 3 with a place and no generation (a folder, a server of one's
+own that keeps none), which a version from before places refuses rather than take another place's
+copies for newer; format 1, the map of records alone as every version before wrote it, names no
+place.
 
+0. **Start over when the records are not of the sync location's data** (the account server's
+   CONTRACT §16.2). The records are of one place: kept for another — the account after a folder, a
+   folder after the account, a folder or server used before, any other folder or server — or for
+   none said (format 1, kept by a version from before places: the first sync after the update), they
+   are forgotten, and this place kept with them. Another place's revisions say nothing of this
+   one's: a folder used for months before the account holds older copies at higher revisions than
+   the vault the account made anew, and the account's records took them for newer — which a
+   version before this one pulled over this Mac's newer files. The list names the server's
+   generation (`X-Lumen-Server-Generation`: 32 hex, or `none` when the server has no such vault).
+   Another one than the one kept — the server's database put back from a copy, its sync data deleted
+   on the account page, or the first run of a client that knows of generations — and the records
+   are forgotten, the new one kept. Whatever the place and generation, an object the records name
+   that is missing from the list or listed at a lower revision forgets them too (a disk snapshot put
+   back, a file removed): objects are never deleted one by one there, and revisions only grow. A
+   server that names no generation is spoken to as before, and a generation kept for another address
+   is dropped. Forgotten records mean every
+   object counts as changed here, and the steps below do the rest: what only this device has goes
+   up (`If-None-Match: *`), what both have is merged — a config by its times, the other version kept
+   beside it; without times, or equal ones, **this device's stays** and the server's is kept beside
+   it, in a file of its own, never over one kept before — and what only the server has comes down.
+   No object is taken from the server only because its revision differs from a forgotten record.
+   Local data is never touched by the step itself (`SyncReport.startedOver`). Every write of the run
+   names the generation (`none` too); a write the server accepts may name a new one (the vault made
+   anew), which is the run's from then on. `409 generation_changed` stops the run: nothing more is
+   written, the records stay as they are, and the next run starts over.
 1. Publish `vault-header` if it is absent. If the server's header has a different vault
    ID, refuse; if a newer version of the app wrote it (its `format`), stop with
    `CoreError.newerFormat` — this device needs that version first (docs/UPDATES.md §4).
@@ -186,7 +262,16 @@ revision and the SHA-256 of the last synced bytes.
 4. Delete local directories of profiles removed from the index, and report their IDs so
    the app also removes their WebKit stores.
 
-A lost CAS race leaves the object in `report.deferred`; the next sync retries it.
+A lost CAS race leaves the object in `report.deferred`; the next sync retries it. So does a write
+the server refuses for that object alone — `413` (too large) or `507` (no room left in the plan's
+sync space): the object waits (`report.deferredTooLarge`, `report.deferredOverQuota`) and the run
+goes on with the rest. The Lumen server takes 16 MiB an object. A profile's settings (`config.bin`)
+hold its camera's image and video, whose bytes the object carries about 2.48 times over (base64 in
+the settings' JSON, in the payload and in the envelope, each 4/3, and a `\/` for one character in
+64): the editor keeps the two together within `CameraSubstitution.maxMediaBytes` (6 MiB, a 14.9 MiB
+object). A profile saved before with more — a video of up to 12 MiB was taken — keeps working on
+its Mac, and its settings wait at every sync; the app names the profile and says to choose a
+smaller video.
 
 A profile file this device cannot open — damaged, cut short, under another key — is handled before
 any of the above, and never pushed: it once was, over the server's good copy of the settings, which
@@ -277,19 +362,108 @@ A recorded change never overwrites a newer one already in the document (from ano
 merged by sync but not applied yet). Applying a document entry is not a change of this
 device. Times are whole seconds.
 
-## New device
+## A Mac without a vault
+
+A new Mac, a Mac whose disk was erased, a second Mac: beside creating a vault, the setup screen
+offers **I already have a vault** (`RestoreFlow`, `RestoreModel`; the core is `VaultRestore`). The
+vault a Mac synced is brought to this one, and this Mac goes on with it — the same vault, not a new
+one beside it. It is offered only where this Mac has no `vault.json`: at the first launch, and after
+"Forgot password…" on the lock screen, which moves the vault's folder aside and never deletes it
+(the way to replace a vault a Mac already made with the synced one).
 
 ```swift
-let vault = try await SyncEngine.bootstrap(transport: t, root: root, password: pw) // verifies the password
-let repo  = try ProfileRepository(vault: vault)
-_ = try await SyncEngine(repository: repo, transport: t).sync()
+let header = try await VaultRestore.header(at: t, expecting: vaultID)        // plaintext: dates, nothing secret
+let staged = try VaultRestore.open(header, password: pw, root: root)         // verifies the password; makes the staging
+let names  = try await VaultRestore.profiles(of: staged.vault, at: t)        // the index, read with the vault's key
+let result = try await VaultRestore.download(into: staged.vault, from: t, target: target)
+let vault  = try VaultRestore.moveIntoPlace(staged.vault, root: root)        // by journaled renames, vault.json last
 ```
+
+**Where it is, and which one.**
+
+| Place | How the vault is found | What is typed |
+|---|---|---|
+| Lumen account | `GET /v1/device/sync/vaults` with this Mac's device token (CONTRACT §16.1), after a renewal of this run, as a sync | nothing: the first launch's sign-in comes before the setup screen |
+| Sync folder | the folder's `vault-header` | the folder |
+| Server of one's own | SYNC_SERVER_API.md has no list of vaults | the address, the token and the vault's ID (shown under Settings → Sync on a Mac that syncs to such a server; it is the name the server keeps the vault under) |
+
+The Lumen server names a vault by its ID and when it was last written to, nothing more. The app reads
+each listed vault's plaintext header and shows what tells two vaults apart before any password: when
+the vault was made, when it last changed, the start of its ID, and whether a newer version of the app
+wrote it (it is then not offered: this Mac needs that version first, docs/UPDATES.md §4). Once the
+master password has opened the header, the index is read with the vault's key, and the names of its
+profiles are shown before anything is moved into place.
+
+**What is kept where before there is a vault.** Nothing new. The device token is in `account.json`
+as before (the rights are decided with it before a vault opens); the account's session stays in
+memory and is sealed into the vault when it opens (`AccountSessionVault`); the master password is
+held only while it opens the header; a server's token typed here goes into the restored vault's
+`settings.bin`, encrypted, and nowhere else.
+
+**What the server may answer** — each said as a state, in both languages, with what was and was not
+changed (`AccountVaults.State`): no vault on the account; `sync_not_in_plan` (sync is the server's
+only while a paid plan runs: a trial account has nothing there, a payer's vaults are there again
+after a payment); `sync_on_hold` with the date it opens for a device new to the account;
+`account_disabled`; `401` (this Mac is not signed in any more: the license is renewed, which says
+why); `429`; no answer.
+
+**How it is brought** (`VaultRestore`):
+
+- **Nothing at the sync location is written.** The engine's own run goes through
+  `ReadOnlySyncTransport`: every read as the transport makes it, no write at all. What the engine
+  would have written (an index it merged into another order) is left for the first ordinary sync.
+- **Never half a vault.** The vault is built in `restore-staging/<vault id>/` inside the vault's
+  folder and moved into place only once the run ended with every listed file of the index's profiles
+  here: by renames written down first (`move.json`), `vault.json` the last. A move cut short — the
+  app quit, the power lost — is finished at the app's next start, before it looks for a vault
+  (`VaultRestore.finishInterruptedMoves`).
+- **Nothing here is written over.** Refused where this Mac has a vault; refused, with the names,
+  where the vault's folder holds a vault's files without their `vault.json`, before the download
+  and again before the move. What else the folder holds (`account.json`) is not touched.
+- **Not from the beginning again.** The staging keeps the engine's own `sync-state.bin`: after a
+  lost connection, the person's Stop or a quit, the same restore asked again fetches only what is
+  not here yet. A master password changed on another Mac meanwhile is the one that opens it then.
+  What an unfinished restore downloaded goes only by the person's own Discard on that screen
+  (`VaultRestore.discardStagingBecauseThePersonAsked`; docs/DESTRUCTIVE_PATHS.md) — not by a failed
+  run, not by a vault created instead, not at the app's start.
+- **Room on the disk.** Asked for before it begins: the folder's size where the place is a folder,
+  and 64 MiB to spare (a server says no size before the objects come); a disk that fills during the
+  run is said as that, and what came is kept.
+- **A newer version's vault** is refused before the password (its header) and during the run (any
+  file of it): nothing is moved into place, and what came is kept for after the update.
+- **The place changing under the run** — its data deleted, or put back from a copy — is said, with
+  what came kept. The records the restore leaves are of the place and of the server's generation it
+  read (CONTRACT §16.2), so the first sync after it goes on from them and starts nothing over.
+- **This Mac goes on with that vault.** The place is this Mac's sync target from the start, in the
+  restored `settings.bin`; the profiles count as synced ones (`SyncProfileToken`), one place of the
+  license's each, on every device of the vault.
+- **What the place did not have is named.** A profile the index lists whose settings never reached
+  the place (refused as too large: the camera's video) is in the list and does not start; the last
+  screen names it and says what sends its settings.
+
+**What does not come**, because it is not synced: the website data other than cookies and the open
+tabs, proxies of the list that no profile uses (each profile's own proxy is in its settings, and is
+taken into the list at the first unlock), scenarios, warm-up plans, virtual machines, this Mac's own
+settings.
+
+**Two Macs on one vault.** Supported by the engine and tested as two devices throughout
+(`SyncEngine`'s merges; the server counts a profile synced on several devices once, CONTRACT §6.2).
+What is not built is the lease of decision 2: nothing keeps one profile from running on two Macs at
+once, and its cookies then follow the Mac that stopped last (*Limitations*). Sync stays on demand.
+The master password's screen says exactly this before the vault is brought.
+
+`SyncEngine.bootstrap` remains for the tests and tools that set a second device up in place; the app
+does not use it: it writes the header into the vault's folder before the first sync, and a run that
+then failed left an empty vault that looked like a real one.
 
 ## Limitations
 
-- No rollback protection across devices. A server can serve an older complete set of
-  blobs with their original revisions. Fixing this needs a signed, monotonic manifest,
-  or a counter kept on a trusted device.
+- No rollback protection across devices against a server that hides it. A server can serve an
+  older complete set of blobs with their original revisions. An honest server that goes back — the
+  Lumen server after its database is restored from a copy — says so with a new generation, and a
+  set older than the device's records is noticed by its revisions (Engine algorithm, step 0); a
+  server set on deceiving cannot be caught without a signed, monotonic manifest, or a counter kept
+  on a trusted device.
 - `LocalDirectorySyncTransport` CAS is atomic only within one process. File-syncing
   services can still produce conflict copies, which the transport ignores.
 - A master-password change wraps the same VMK anew and counts the change in the header

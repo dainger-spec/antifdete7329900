@@ -9,6 +9,8 @@ struct RootView: View {
     /// on at once, and under Reduce Motion (or with the animations off) it is not shown at all
     /// (the owner, 1 November: a second twenty times a day is a price too).
     @State private var showsProfiles = false
+    /// The launch screen is opening: the window's screens come in over it (WelcomeSplash).
+    @State private var welcomeOpening = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let minimumHeight: CGFloat = 560
@@ -16,6 +18,90 @@ struct RootView: View {
     static let openPause: UInt64 = 400_000_000
 
     var body: some View {
+        ZStack {
+            if let welcome = model.welcome, !model.welcomeFinished, welcome.firstLaunch {
+                // The first launch: the launch screen, before the first screen (WelcomeSplash). Its
+                // button opens it; when that is over it goes.
+                welcomeSplash(welcome)
+            }
+            if showsScreens {
+                // At the first launch, over the launch screen while it opens, as the prototype has it.
+                screens
+                    .scaleEffect(screensUnderWelcome && !welcomeOpening && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
+                    .transition(welcomeArriving)
+                    .zIndex(1)
+            }
+            if let welcome = model.welcome, !model.welcomeFinished, !welcome.firstLaunch {
+                // A start with a vault: the lock screen is there from the start, under the launch
+                // screen, its password's field holding the keyboard. The launch screen takes no
+                // focus: a key opens it and goes on to the field, so a password typed at once is
+                // typed whole (it swallowed the first key). It opens by itself, at a key or a
+                // click, fading off the lock screen as that scales in from 98 %.
+                welcomeSplash(welcome)
+                    .zIndex(2)
+            }
+        }
+        .onAppear { showsProfiles = model.phase == .unlocked }
+        .onChange(of: model.phase) { _, phase in
+            guard phase == .unlocked else {
+                showsProfiles = false
+                return
+            }
+            guard !Motion.isReduced(reduceMotion) else {
+                showsProfiles = true
+                return
+            }
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: Self.openPause)
+                if model.phase == .unlocked { showProfiles() }
+            }
+        }
+        .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: Self.minimumHeight)
+        .background(Theme.surface)
+        // Every sheet of the window takes the size it asks for, but never more than this room.
+        .providesSheetRoom()
+        .tint(Theme.accentFill)
+        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
+                                                       set: { if !$0 { model.errorMessage = nil } })) {
+            Button(L("common.ok"), role: .cancel) {}
+        } message: {
+            Text(model.errorMessage ?? "")
+        }
+    }
+
+    /// The launch screen of this start, before the window's screens or over them.
+    private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
+        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+                      opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
+                      overScreens: !welcome.firstLaunch)
+            // Its window closed meanwhile: a window opened again starts at the first screen.
+            .onDisappear { model.welcomeFinished = true }
+    }
+
+    /// The window's screens are in: with no launch screen or once it has gone; at the first launch
+    /// once it opens; on a start with a vault from the start, under it.
+    private var showsScreens: Bool {
+        guard let welcome = model.welcome, !model.welcomeFinished else { return true }
+        return !welcome.firstLaunch || welcomeOpening
+    }
+
+    /// The launch screen is over the window's screens now (a start with a vault).
+    private var screensUnderWelcome: Bool {
+        guard let welcome = model.welcome else { return false }
+        return !welcome.firstLaunch && !model.welcomeFinished
+    }
+
+    private var lockPhase: EclipseLight.Phase {
+        if model.phase == .unlocked { return .open }
+        return model.isWorking ? .busy : .idle
+    }
+
+    private func showProfiles() {
+        if model.phase == .unlocked { showsProfiles = true }
+    }
+
+    /// The window's screens: the first launch's, the lock screen, "Vault open", the profiles.
+    private var screens: some View {
         ZStack {
             if model.phase == .unlocked && showsProfiles {
                 ProfileListView().transition(.opacity)
@@ -46,41 +132,22 @@ struct RootView: View {
         }
         .animation(Theme.appearAnimation, value: model.phase)
         .animation(.easeOut(duration: 0.25), value: showsProfiles)
-        .onAppear { showsProfiles = model.phase == .unlocked }
-        .onChange(of: model.phase) { _, phase in
-            guard phase == .unlocked else {
-                showsProfiles = false
-                return
-            }
-            guard !Motion.isReduced(reduceMotion) else {
-                showsProfiles = true
-                return
-            }
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: Self.openPause)
-                if model.phase == .unlocked { showProfiles() }
-            }
-        }
-        .frame(minWidth: ProfilesScreen.minimumWindowWidth, minHeight: Self.minimumHeight)
-        .background(Theme.surface)
-        // Every sheet of the window takes the size it asks for, but never more than this room.
-        .providesSheetRoom()
-        .tint(Theme.accentFill)
-        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
-                                                       set: { if !$0 { model.errorMessage = nil } })) {
-            Button(L("common.ok"), role: .cancel) {}
-        } message: {
-            Text(model.errorMessage ?? "")
+    }
+
+    /// The opening (the owner's "then it opens smoothly"): the launch screen eases up and fades by
+    /// itself while the window's first screen scales in from 98 % and fades in over it, 0.6 s on the
+    /// design's entry curve; under Reduce Motion a cross-fade.
+    private func openFromWelcome() {
+        let animation: Animation = Motion.isReduced(reduceMotion)
+            ? .easeOut(duration: WelcomeTiming.reducedOpening) : Motion.entry(duration: WelcomeTiming.opening)
+        withAnimation(animation) {
+            welcomeOpening = true
         }
     }
 
-    private var lockPhase: EclipseLight.Phase {
-        if model.phase == .unlocked { return .open }
-        return model.isWorking ? .busy : .idle
-    }
-
-    private func showProfiles() {
-        if model.phase == .unlocked { showsProfiles = true }
+    private var welcomeArriving: AnyTransition {
+        if Motion.isReduced(reduceMotion) { return .opacity }
+        return .asymmetric(insertion: AnyTransition.scale(scale: 0.98).combined(with: .opacity), removal: .identity)
     }
 }
 
@@ -115,13 +182,12 @@ struct ProfileListView: View {
     @State private var editing: ProfileEditorView.Target?
     @State private var passwordsFor: ProfileSummary?
     @State private var importingCookiesFor: ProfileSummary?
-    @State private var warmingUp: ProfileSummary?
+    /// "New warm-up" asked for from the list (a profile's menu, the selection's bar): the Warm-up
+    /// section opens with these profiles ticked.
+    @State private var warmUpRequest: WarmUpNewRequest?
     @State private var restoringFor: ProfileSummary?
     @State private var duplicating: ProfileSummary?
     @State private var whatSitesSeeFor: ProfileSummary?
-    @State private var warmingUpSeveral = false
-    /// The profiles the warm-up queue opens with ticked (the selection's bar).
-    @State private var queuePreselection: Set<UUID> = []
     @State private var exporting: ProfileSummary?
     @State private var exportingCookies: ProfileSummary?
     @State private var importingProfile = false
@@ -143,6 +209,10 @@ struct ProfileListView: View {
     @State private var section: ProfilesSection = .profiles
     @State private var proxySelection: Set<UUID> = []
     @State private var assigningProxies: ProxyAssignView.Request?
+    /// The selection whose tags are being changed (`ProfileTagsView`).
+    @State private var tagging: ProfileTagsView.Request?
+    /// The order of the list's rows, as the person left it.
+    @AppStorage("profiles.order") private var order: ProfileListOrder = .created
     /// Profiles of the selection waiting for the one confirmation that deletes them all.
     @State private var pendingBulkDelete: [UUID] = []
     /// The inspector at the window's right, as the person left it.
@@ -155,7 +225,6 @@ struct ProfileListView: View {
             .sheet(item: $editing) { target in ProfileEditorView(target: target).environment(\.tagColors, model.tagColors) }
             .sheet(item: $passwordsFor) { profile in PasswordListView(profile: profile) }
             .sheet(item: $importingCookiesFor) { profile in CookieImportView(profile: profile) }
-            .sheet(item: $warmingUp) { profile in WarmUpView(profile: profile) }
             // What it changes reaches the inspector through the journal (`AppModel.recordInJournal`).
             .sheet(item: $restoringFor) { profile in RestorePointsView(profile: profile) }
             .sheet(item: $duplicating) { profile in DuplicateProfileView(profile: profile) }
@@ -164,7 +233,6 @@ struct ProfileListView: View {
                                                                             launch: { await model.launch($0) }),
                                  // The profile's check, on the same snapshot: the panel opens on it.
                                  check: { taken in ProfileCheckRun(profileID: profile.id, snapshot: taken, model: { [weak model] in model }) },
-                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS,
                                  showProxy: model.details[profile.id]?.proxyIdentity == nil ? nil : {
                                      let identity = model.details[profile.id]?.proxyIdentity
                                      let entry = identity.flatMap { identity in
@@ -173,7 +241,6 @@ struct ProfileListView: View {
                                      showProxies(selecting: entry.map { [$0.id] } ?? [])
                                  })
             }
-            .sheet(isPresented: $warmingUpSeveral) { WarmUpQueueView(preselected: queuePreselection) }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
@@ -239,7 +306,10 @@ struct ProfileListView: View {
                 model.proxiesRequest = false
                 showProxies(selecting: [])
             }
+            // File › Scenarios, from any window: this one's section.
+            .onChange(of: model.scenariosRequested) { _, _ in section = .scenarios }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }
+            .sheet(item: $tagging) { request in ProfileTagsView(request: request).environment(\.tagColors, model.tagColors) }
             // ⌘K.
             .sheet(isPresented: $model.showingPalette) {
                 CommandPaletteView(commands: paletteCommands, onClose: { model.showingPalette = false })
@@ -344,6 +414,9 @@ struct ProfileListView: View {
                        section: $section, proxyCount: proxyCount,
                        proxies: AnyView(ProxyListView(selection: $proxySelection)),
                        virtualMachines: VMCenter.isOffered ? AnyView(VirtualMachinesView(openAccount: actions.openAccount)) : nil,
+                       scenarios: AnyView(ScenariosSection()),
+
+                       warmUp: AnyView(WarmUpSectionView(request: $warmUpRequest, openProxies: { showProxies(selecting: []) })),
                        indexNotice: model.indexNotice, revealVault: { model.revealVaultFolder() },
                        keptDeleted: model.keptDeletedProfiles,
                        bringBack: { id in Task { await model.bringBackDeletedProfile(id) } },
@@ -351,6 +424,7 @@ struct ProfileListView: View {
                        revealKeptDeleted: { model.revealProfileFolder($0) },
                        proxyAlerts: proxyAlerts,
                        showsInspector: $showsInspector,
+                       order: $order,
                        inspectorInfo: { id in
                            let details = model.details[id]
                            // The proxy list's last check of the profile's proxy: its city and latency.
@@ -419,8 +493,8 @@ struct ProfileListView: View {
 
     /// Warm-up of several profiles (the selection's bar): the warm-up queue, with them ticked.
     private func warmUpSeveral(_ ids: [UUID]) {
-        queuePreselection = Set(ids)
-        warmingUpSeveral = true
+        warmUpRequest = WarmUpNewRequest(profiles: ids)
+        withAnimation(Theme.appearAnimation) { section = .warmUp }
     }
 
     /// "Northwind, Harbor, Atlas and 2 more".
@@ -457,8 +531,15 @@ struct ProfileListView: View {
     /// with its flag, when it is known — from the profile's last launch through its proxy, else from
     /// the proxy list's last check of that proxy; otherwise the proxy's address, with why its country
     /// is not known; without a proxy, "Direct".
+    ///
+    /// The window draws at every change of the model, the manager, the license and the proxy list
+    /// (each result of a check of the list), and this runs each time: what it needs of the whole
+    /// list of proxies and of all the profiles is found once here — the list by proxy, the
+    /// profiles that open only for export — not once per row.
     private func rows(with proxyEntries: [ProxyListEntry]) -> [ProfileRowItem] {
-        model.profiles.map { profile in
+        let listed = ProxyList.entriesByIdentity(proxyEntries)
+        let exportOnly = model.license.exportOnlyTest()
+        return model.profiles.map { profile in
             let running = model.isRunning(profile.id)
             let busy = model.isBusy(profile.id)
             let details = model.details[profile.id]
@@ -467,16 +548,18 @@ struct ProfileListView: View {
             let activity: ProfileRowItem.Activity = changingIP ? .starting
                 : busy ? (running ? .starting : .sealing) : (running ? .running : .stopped)
             let warmUp = model.manager?.warmUpStatus(of: profile.id)
+            let warmth = model.warmUps?.warmth(of: profile.id)
             let problem = model.proxyProblems.first { $0.profileID == profile.id }
             // No details: its settings could not be read (`AppModel.refresh`) — not "Direct" (R1).
             var exit = ProfileExit.unreadable
             var exitNote: String?
+            // Its proxy did not answer: at the profile's last launch, or at the list's last check of it.
+            var proxyFailed = problem != nil
             let lookupFailed = model.manager?.proxyLocationUnknown.contains(profile.id) ?? false
             if let details {
                 if let endpoint = details.proxyEndpoint {
-                    let check = details.proxyIdentity.flatMap { identity in
-                        proxyEntries.first { ProxyList.identity(of: $0.proxy) == identity }?.lastCheck
-                    }
+                    let check = details.proxyIdentity.flatMap { listed[$0]?.lastCheck }
+                    if check?.isAlive == false { proxyFailed = true }
                     let country = details.exitCountryCode ?? (check?.isAlive == true ? check?.countryCode : nil)
                     exit = .proxy(endpoint: endpoint, countryCode: country)
                     if country == nil { exitNote = ProfileRowItem.unknownCountryNote(check: check, lookupFailed: lookupFailed) }
@@ -497,6 +580,8 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                warmedAt: warmth.flatMap { $0.isWarmed ? $0.date : nil },
+                neverWarmed: warmth == .never,
                 exitUnconfirmed: lookupFailed,
                 exitNote: exitNote,
                 tags: details?.tags ?? [], notes: details?.notes ?? "", avatar: details?.avatar,
@@ -504,9 +589,9 @@ struct ProfileListView: View {
                     String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
                            $0.proxy.displayAddress)
                 },
-                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
-                exportOnly: model.license.isExportOnly(profile.id),
-                directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil)
+                exportOnly: exportOnly(profile.id),
+                directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil,
+                proxyFailed: proxyFailed)
         }
     }
 
@@ -550,7 +635,7 @@ struct ProfileListView: View {
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
-            warmUp: { id in warmingUp = summary(id) },
+            warmUp: { id in warmUpSeveral([id]) },
             restorePoints: { id in restoringFor = summary(id) },
             duplicate: { id in duplicating = summary(id) },
             whatSitesSee: { id in whatSitesSeeFor = summary(id) },
@@ -569,7 +654,7 @@ struct ProfileListView: View {
                 openSettings()
             },
             changePassword: { changingPassword = true },
-            warmUpQueue: { queuePreselection = []; warmingUpSeveral = true },
+            warmUpQueue: { withAnimation(Theme.appearAnimation) { section = .warmUp } },
             openProxies: { showProxies(selecting: []) },
             showProxy: { id in
                 // Looked up, never added: the list is only read here.
@@ -584,9 +669,14 @@ struct ProfileListView: View {
             warmUpSeveral: { ids in warmUpSeveral(ids) },
             assignProxies: { ids in assigningProxies = ProxyAssignView.Request(profileIDs: Set(ids), proxyIDs: []) },
             deleteSeveral: { ids in pendingBulkDelete = ids },
+            tagSeveral: { ids in tagging = ProfileTagsView.Request(profileIDs: ids) },
             setTagColor: { tag, color in model.setTagColor(color, for: tag) },
             openPalette: { model.showingPalette = true },
-            openScenarios: { openWindow(id: "scenarios") },
+            openScenarios: { section = .scenarios },
+            scenarioSeveral: { ids in
+                model.scenarioProfilesRequest = ids
+                section = .scenarios
+            },
             openHelp: { openWindow(id: "help") })
     }
 }
@@ -605,6 +695,11 @@ enum ProfilesSection: Equatable {
     case profiles
     case proxies
     case virtualMachines
+    /// The scenarios: the person's own, the templates, the runs, the schedules (`ScenariosSection`).
+    case scenarios
+
+    /// The warm-ups: the profiles by where they stand with them, the templates, the history.
+    case warmUp
 }
 
 // MARK: - What the screen shows
@@ -626,6 +721,10 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// When its last warm-up went through; nil: never warmed up, or not wholly (`WarmUpWarmth`).
+    var warmedAt: Date?
+    /// Never warmed up on this Mac: the sidebar's "Not warmed up" gathers such profiles.
+    var neverWarmed = false
     /// At its last launch no geolocation service answered through its proxy: where it exits is
     /// not confirmed (`ProfileManager.proxyLocationUnknown`).
     var exitUnconfirmed = false
@@ -638,14 +737,15 @@ struct ProfileRowItem: Identifiable {
     /// Why it did not start, when its last launch failed (a proxy that did not answer): the row is
     /// among "Need attention" and says so.
     var problem: String?
-    /// The device it presents as, by its symbol, when not a Mac ("iphone", "ipad").
-    var deviceSymbol: String?
     /// The license lets it open only for export (CONTRACT §8.4, the owner's decision of 1 November):
     /// the row says "Export only" where a stopped profile's state is; an open one keeps working.
     var exportOnly = false
     /// A profile with no proxy: the country its own connection exits in, once a launch looked it up
     /// (the lead, 7 November: a direct connection is an exit like a proxy's).
     var directCountry: String?
+    /// Its proxy did not answer — at its last launch (`problem`), or at the proxy list's last check
+    /// of that proxy: the sidebar's "Proxy not working" gathers such profiles.
+    var proxyFailed = false
 
     var isRunning: Bool { activity == .running }
     /// "Starting…", or "Changing IP…" while its proxy gets a new IP first.
@@ -657,6 +757,28 @@ struct ProfileRowItem: Identifiable {
     var isActive: Bool { activity != .stopped }
     var usesProxy: Bool { if case .proxy = exit { return true } else { return false } }
     var connectsDirectly: Bool { exit == .direct }
+    /// What the search finds the profile by, beside its name, tags and notes: where it exits — its
+    /// proxy's address and the country as the row names it, or "Direct" — so that "which profile is
+    /// on this proxy" and "the ones in Germany" are one search each.
+    var exitSearchTexts: [String] {
+        switch exit {
+        case .direct:
+            return [L("profiles.exit.direct")] + (directCountry.map { [CountryNames.name(for: $0)] } ?? [])
+        case let .proxy(endpoint, code):
+            return [endpoint] + (code.map { [CountryNames.name(for: $0)] } ?? [])
+        case .unreadable:
+            return []
+        }
+    }
+    /// The exit's country as two letters ("DE"): found only by exactly that, not by every word
+    /// with those letters in it.
+    var exitCountryCode: String? {
+        switch exit {
+        case .direct: return directCountry
+        case let .proxy(_, code): return code
+        case .unreadable: return nil
+        }
+    }
     /// Under the profile's commands in the palette (⌘K): the country it exits in, then its tags.
     var paletteDetail: String {
         var parts: [String] = []
@@ -664,16 +786,6 @@ struct ProfileRowItem: Identifiable {
         return (parts + tags).joined(separator: " · ")
     }
 
-    /// The symbol of the device the profile presents as, when not a Mac.
-    static func deviceSymbol(_ generation: DeviceGeneration) -> String? {
-        switch generation.platform {
-        case .macOS: return nil
-        case .iOS: return "iphone"
-        case .iPadOS: return "ipad"
-        }
-    }
-
-    /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
     /// Why a proxy's country is not known: the lookup at its last launch got no answer, the proxy
     /// was never checked (and no launch looked it up), its last check failed, or the check that
     /// passed got no country for its address.
@@ -687,14 +799,8 @@ struct ProfileRowItem: Identifiable {
     /// settings pin, else this Mac's own Safari — what its User-Agent declares
     /// (`DeviceGeneration.userAgent(hostSafariVersion:)`); the catalog's "26" went stale on a Mac
     /// whose Safari is 27 (the owner, 1 November: "Mac · Safari 26" beside a page measuring 27.0.1).
-    /// Mobile views declare a fixed Safari, their catalog's.
     static func appearsAs(_ generation: DeviceGeneration, safariVersion: String? = nil, hostSafariVersion: String) -> String {
-        let device: String
-        switch generation.platform {
-        case .macOS: device = L("profiles.device.mac")
-        case .iOS: device = L("profiles.device.iphone")
-        case .iPadOS: device = L("profiles.device.ipad")
-        }
+        let device = L("profiles.device.mac")
         var version = generation.osVersionLabel
         if generation.matchesEngine {
             let declared = safariVersion.flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil } ?? hostSafariVersion
@@ -718,6 +824,11 @@ enum ProfileExit: Equatable {
 
 enum ProfileFilter: Hashable {
     case all, running, proxied, direct, ephemeral
+    /// The profiles whose proxy did not answer (`ProfileRowItem.proxyFailed`): what to give
+    /// another proxy to.
+    case proxyFailing
+    /// The profiles never warmed up (`ProfileRowItem.neverWarmed`).
+    case notWarmed
     /// The profiles with this tag, whatever its case.
     case tag(String)
 
@@ -728,6 +839,8 @@ enum ProfileFilter: Hashable {
         case .proxied: return L("profiles.filter.proxied")
         case .direct: return L("profiles.filter.direct")
         case .ephemeral: return L("profiles.filter.ephemeral")
+        case .proxyFailing: return L("profiles.filter.proxyFailing")
+        case .notWarmed: return L("profiles.filter.notWarmed")
         case .tag(let tag): return tag
         }
     }
@@ -739,6 +852,8 @@ enum ProfileFilter: Hashable {
         case .proxied: return "globe"
         case .direct: return "arrow.right"
         case .ephemeral: return "hourglass"
+        case .proxyFailing: return "exclamationmark.triangle"
+        case .notWarmed: return "flame"
         case .tag: return "number"
         }
     }
@@ -750,6 +865,8 @@ enum ProfileFilter: Hashable {
         case .proxied: return row.usesProxy
         case .direct: return row.connectsDirectly
         case .ephemeral: return row.ephemeral
+        case .proxyFailing: return row.proxyFailed
+        case .notWarmed: return row.neverWarmed
         case .tag(let tag): return ProfileTags.contains(row.tags, tag)
         }
     }
@@ -820,12 +937,16 @@ struct ProfileActions {
     var assignProxies: ([UUID]) -> Void = { _ in }
     /// Asks once, naming how many, before deleting.
     var deleteSeveral: ([UUID]) -> Void = { _ in }
+    /// Tags added to and removed from all of them (`ProfileTagsView`).
+    var tagSeveral: ([UUID]) -> Void = { _ in }
     /// A tag's colour for the whole vault (`TagColors`); nil takes it away.
     var setTagColor: (String, Int?) -> Void = { _, _ in }
     /// The sidebar's own rows (the owner, 10 November: in the interface, not behind a menu): the
     /// command palette (⌘K), the scenario editor's window, the app's help.
     var openPalette: () -> Void = {}
     var openScenarios: () -> Void = {}
+    /// A scenario for the selected profiles: the Scenarios section, with them chosen for its next run.
+    var scenarioSeveral: ([UUID]) -> Void = { _ in }
     var openHelp: () -> Void = {}
 }
 
@@ -851,6 +972,11 @@ struct ProfilesScreen: View {
     /// The virtual machines as a section of the window (`VirtualMachinesView`); nil: this build
     /// carries no machines (`VMCenter.isOffered`), and the sidebar has no such item.
     var virtualMachines: AnyView?
+    /// Nil: the window has no Scenarios section (the snapshots of the other sections).
+    var scenarios: AnyView?
+
+    /// The warm-ups as a section of the window (`WarmUpSectionView`); nil: no such item.
+    var warmUp: AnyView?
     /// The vault's profile index missing or unreadable, or profile folders it does not list
     /// (AppModel.indexNotice): said above the list, with the vault's folder in the Finder.
     var indexNotice: AppModel.IndexNotice?
@@ -866,6 +992,9 @@ struct ProfilesScreen: View {
     /// button: beside the list when the window has room for both, over the list's right side when
     /// it has not (the rows keep their columns).
     var showsInspector: Binding<Bool> = .constant(false)
+    /// The order of the rows inside each group (`ProfileListOrder`): the ⋯ menu's "Sort by", and a
+    /// click on the Name or the State column's title.
+    var order: Binding<ProfileListOrder> = .constant(.created)
     /// What the inspector shows of a profile beyond its row.
     var inspectorInfo: (UUID) -> InspectorInfo = { _ in InspectorInfo() }
     /// A profile is inspected: what it keeps is counted (`AppModel.loadInspectorCounts`).
@@ -936,17 +1065,23 @@ struct ProfilesScreen: View {
 
     var body: some View {
         GeometryReader { geometry in
-            // Beside the list only when the rows keep their columns.
-            let inspectorFits = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth >= ProfileColumns.minimumContentWidth
+            // Beside the list, to the window's top, only when the rows keep their columns; with less
+            // room beside the list under the header, the list compact; with too little for that,
+            // over the list.
+            let room = geometry.size.width - Self.sidebarWidth - Self.inspectorWidth
+            let inspectorFits = room >= ProfileColumns.minimumContentWidth
+            let inspectorDocks = !inspectorFits && room >= ProfileColumns.minimumCompactWidth
             HStack(spacing: 0) {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
+                                showsScenarios: scenarios != nil, showsWarmUp: warmUp != nil,
                                 actions: actions, rights: rights)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
                     .opacity(appeared ? 1 : 0)
-                main(inspectorOver: inspectorShown && !inspectorFits)
+                main(inspectorOver: inspectorShown && !inspectorFits && !inspectorDocks,
+                     inspectorDocked: inspectorShown && inspectorDocks)
                 if inspectorShown && inspectorFits {
                     inspector(top: Self.inspectorTop)
                         .opacity(appeared ? 1 : 0)
@@ -978,27 +1113,28 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The list (or the proxies), under the header. `inspectorOver`: the window has no room for the
-    /// inspector beside the list, so it lies over the list's right side — the list's only: the
-    /// header and the banners above it, with their buttons, stay within reach.
-    private func main(inspectorOver: Bool) -> some View {
+    /// The list (or the proxies), under the header. `inspectorDocked`: the window has no room for
+    /// the inspector beside the whole list, so it stands beside the list under the header, and the
+    /// list is compact (`ProfileColumns.compact`): nothing of a row is under it. `inspectorOver`:
+    /// not even that — it lies over the list's right side, opaque. Either way the header and the
+    /// banners above, with their buttons, stay within reach.
+    private func main(inspectorOver: Bool, inspectorDocked: Bool) -> some View {
         Group {
             if section.wrappedValue == .proxies, let proxies {
                 proxies
             } else if section.wrappedValue == .virtualMachines, let virtualMachines {
                 virtualMachines
+            } else if section.wrappedValue == .scenarios, let scenarios {
+                scenarios
+
+            } else if section.wrappedValue == .warmUp, let warmUp {
+                warmUp
             } else {
                 VStack(spacing: 0) {
                     header
                     bannerStack
-                    content
-                        .overlay(alignment: .trailing) {
-                            if inspectorOver {
-                                inspector(top: 8)
-                                    .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
-                                    .transition(.move(edge: .trailing).combined(with: .opacity))
-                            }
-                        }
+                    HStack(spacing: 0) {
+                    content(compact: inspectorDocked)
                         .overlay(alignment: .bottom) {
                             // Floating over the list's foot, while several are selected.
                             if selectedRows.count >= 2 {
@@ -1010,6 +1146,18 @@ struct ProfilesScreen: View {
                                     .transition(.move(edge: .bottom).combined(with: .opacity))
                             }
                         }
+                        if inspectorDocked {
+                            inspector(top: 8, docked: true)
+                                .transition(.opacity)
+                        }
+                    }
+                    .overlay(alignment: .trailing) {
+                        if inspectorOver {
+                            inspector(top: 8, opaque: true)
+                                .shadow(color: .black.opacity(0.55), radius: 30, x: -6)
+                                .transition(.move(edge: .trailing).combined(with: .opacity))
+                        }
+                    }
                     if let guardNotice {
                         GuardNoticeBar(notice: guardNotice, open: openGuardSettings, hide: hideGuardNotice)
                             .padding(.top, 10)
@@ -1137,7 +1285,23 @@ struct ProfilesScreen: View {
 
     /// `top`: where its content starts — under the title bar's band beside the list
     /// (`inspectorTop`), just under the header over it.
-    private func inspector(top: CGFloat) -> some View {
+    /// `docked`: beside the list under the header — its top-left corner rounded, a hairline along
+    /// its top and left. `opaque`: over the list, so no row shows through it.
+    private func inspector(top: CGFloat, docked: Bool = false, opaque: Bool = false) -> some View {
+        let shape = UnevenRoundedRectangle(topLeadingRadius: docked ? 14 : 0, style: .continuous)
+        return inspectorContent
+        .frame(width: Self.inspectorWidth)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .padding(.top, top)
+        .background(shape.fill(opaque ? Theme.sidebar : Theme.sidebar.opacity(docked ? 0.86 : 0.8)))
+        .overlay { if docked { shape.strokeBorder(Theme.hairline, lineWidth: 1) } }
+        .overlay(alignment: .leading) { if !docked { Rectangle().fill(Theme.divider).frame(width: 1) } }
+        .clipShape(shape)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(L("inspector.title"))
+    }
+
+    private var inspectorContent: some View {
         Group {
             if selectedRows.count == 1, let row = selectedRows.first {
                 ProfileInspectorView(row: row, info: inspectorInfo(row.id), actions: actions,
@@ -1149,13 +1313,6 @@ struct ProfilesScreen: View {
                 EmptyInspectorView()
             }
         }
-        .frame(width: Self.inspectorWidth)
-        .frame(maxHeight: .infinity, alignment: .top)
-        .padding(.top, top)
-        .background(Theme.sidebar.opacity(0.8))
-        .overlay(alignment: .leading) { Rectangle().fill(Theme.divider).frame(width: 1) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(L("inspector.title"))
     }
 
     /// The window comes in: the sidebar fades in, the list rises 10 pt (the design's 0.9 s); under
@@ -1185,9 +1342,11 @@ struct ProfilesScreen: View {
     }
 
     private var groups: [RowGroup] {
-        [RowGroup(kind: .attention, rows: visibleRows.filter(\.needsAttention)),
-         RowGroup(kind: .running, rows: visibleRows.filter { !$0.needsAttention && $0.isActive }),
-         RowGroup(kind: .ready, rows: visibleRows.filter { !$0.needsAttention && !$0.isActive })]
+        // In the order chosen, inside each group: the groups themselves stay.
+        let visible = order.wrappedValue.sorted(visibleRows, name: { $0.name }, lastUsed: { $0.lastUsed })
+        return [RowGroup(kind: .attention, rows: visible.filter(\.needsAttention)),
+                RowGroup(kind: .running, rows: visible.filter { !$0.needsAttention && $0.isActive }),
+                RowGroup(kind: .ready, rows: visible.filter { !$0.needsAttention && !$0.isActive })]
             .filter { !$0.rows.isEmpty }
     }
 
@@ -1203,11 +1362,15 @@ struct ProfilesScreen: View {
         }
     }
 
-    /// The search finds a profile by its name, one of its tags or its notes.
+    /// The search finds a profile by its name, one of its tags or its notes — and by where it
+    /// exits: its proxy's address, the country's name as the row shows it or its two letters
+    /// alone ("DE"), "Direct" (`ProfileRowItem.exitSearchTexts`).
     static func matches(_ row: ProfileRowItem, _ query: String) -> Bool {
-        row.name.localizedCaseInsensitiveContains(query)
-            || row.tags.contains { $0.localizedCaseInsensitiveContains(query) }
-            || row.notes.localizedCaseInsensitiveContains(query)
+        if row.name.localizedCaseInsensitiveContains(query) { return true }
+        if row.tags.contains(where: { $0.localizedCaseInsensitiveContains(query) }) { return true }
+        if row.notes.localizedCaseInsensitiveContains(query) { return true }
+        if row.exitSearchTexts.contains(where: { $0.localizedCaseInsensitiveContains(query) }) { return true }
+        return row.exitCountryCode?.caseInsensitiveCompare(query) == .orderedSame
     }
 
     private var header: some View {
@@ -1242,6 +1405,12 @@ struct ProfilesScreen: View {
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
             MoreMenu {
+                Picker(L("profiles.sort"), selection: order) {
+                    Text(L("profiles.sort.created")).tag(ProfileListOrder.created)
+                    Text(L("profiles.sort.name")).tag(ProfileListOrder.name)
+                    Text(L("profiles.sort.lastUsed")).tag(ProfileListOrder.lastUsed)
+                }
+                Divider()
                 Button(L("profiles.menu.import"), action: actions.importProfile)
                 Divider()
                 Button(L("profiles.menu.sync"), action: actions.openSync)
@@ -1277,14 +1446,16 @@ struct ProfilesScreen: View {
             : String(format: L("profiles.count"), rows.count)
     }
 
+    /// `compact`: the inspector stands beside the list (`main`).
     @ViewBuilder
-    private var content: some View {
+    private func content(compact: Bool) -> some View {
         if rows.isEmpty, let indexNotice, indexNotice.kind != .unlisted {
             // Not "no profiles yet": the index that lists them is missing or unreadable (the notice
             // above says so), and their folders are kept.
             Color.clear.frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if rows.isEmpty {
-            EmptyProfilesView(onNew: actions.newProfile)
+            EmptyProfilesView(onNew: actions.newProfile, onImport: actions.importProfile,
+                              onProxies: proxyCount == nil ? nil : actions.openProxies)
         } else if visibleRows.isEmpty {
             NoMatchesView(query: search.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 withAnimation(Theme.appearAnimation) {
@@ -1294,15 +1465,21 @@ struct ProfilesScreen: View {
             }
         } else {
             GeometryReader { geometry in
-                let columns = ProfileColumns(contentWidth: geometry.size.width)
+                let columns = ProfileColumns(contentWidth: geometry.size.width, compact: compact)
+                // The column titles stay above the list as it scrolls: at 200 profiles they said which
+                // column is which only on the first screen.
+                VStack(spacing: 0) {
+                columnHeader(columns)
+                    .padding(.horizontal, columns.margin)
                 ScrollView {
                     listStack(columns)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, columns.margin)
                         // The last row stays above the floating bar.
                         .padding(.bottom, selectedRows.count >= 2 ? 88 : 24)
                 }
                 .scrollIndicators(.automatic)
                 .animation(Motion.isReduced(reduceMotion) ? nil : Motion.reflow, value: displayOrder.map(\.id))
+                }
             }
             .transition(.opacity)
         }
@@ -1327,7 +1504,6 @@ struct ProfilesScreen: View {
 
     @ViewBuilder
     private func listItems(_ columns: ProfileColumns) -> some View {
-        columnHeader(columns)
         ForEach(groups) { group in
             // One group alone has no caption: "Ready to launch 50" under the column titles read as
             // a second header, and the count is the header's own ("Profiles: 50").
@@ -1338,14 +1514,25 @@ struct ProfilesScreen: View {
 
     private func columnHeader(_ columns: ProfileColumns) -> some View {
         HStack(spacing: ProfileColumns.gap) {
-            Text(L("profiles.column.name")).lumenCaps().frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, ProfileColumns.nameInset)
-            Text(L("profiles.column.exit")).lumenCaps().frame(width: ProfileColumns.exit, alignment: .leading)
+            SortableColumnTitle(title: L("profiles.column.name"), sorted: order.wrappedValue == .name, ascending: true,
+                                help: L(order.wrappedValue == .name ? "profiles.sort.name.on" : "profiles.sort.name.help")) {
+                order.wrappedValue = order.wrappedValue == .name ? .created : .name
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.leading, ProfileColumns.nameInset)
+            Text(L(columns.compact ? "inspector.exit" : "profiles.column.exit")).lumenCaps().frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 Text(L("profiles.column.appearsAs")).lumenCaps().frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
-            Text(L("profiles.column.state")).lumenCaps().frame(width: columns.state, alignment: .leading)
-            Color.clear.frame(width: ProfileColumns.actions, height: 1)
+            // The State column says when a stopped profile was last launched: its title sorts by that.
+            SortableColumnTitle(title: L("profiles.column.state"), sorted: order.wrappedValue == .lastUsed, ascending: false,
+                                help: L(order.wrappedValue == .lastUsed ? "profiles.sort.lastUsed.on" : "profiles.sort.lastUsed.help")) {
+                order.wrappedValue = order.wrappedValue == .lastUsed ? .created : .lastUsed
+            }
+            // Over the states' words, past their marks' slot.
+            .padding(.leading, ProfileColumns.stateMark + 7)
+            .frame(width: columns.state, alignment: .leading)
+            if !columns.compact { Color.clear.frame(width: ProfileColumns.actions, height: 1) }
         }
         .lineLimit(1)
         .padding(.horizontal, ProfileColumns.rowPadding)
@@ -1355,7 +1542,9 @@ struct ProfilesScreen: View {
 
     private func groupView(_ kind: GroupKind, _ rows: [ProfileRowItem], _ columns: ProfileColumns,
                            showsCaption: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // Found once for the group, not for each of its rows.
+        let selected = selectedRows
+        return VStack(alignment: .leading, spacing: 0) {
             if showsCaption {
                 HStack(spacing: 8) {
                     Text(groupTitle(kind)).lumenCaps(kind == .attention ? Theme.danger : Theme.textTertiary)
@@ -1372,8 +1561,10 @@ struct ProfilesScreen: View {
             }
             ForEach(rows) { row in
                 ProfileRow(row: row, columns: columns, actions: actions, isSelected: selection.contains(row.id),
-                           showsCheckbox: selectedRows.count >= 2, height: appearance.density.rowHeight,
+                           showsCheckbox: selected.count >= 2, height: appearance.density.rowHeight,
                            countryBackdrop: appearance.countryBackdrop,
+                           // One of several selected: its context menu is the selection's.
+                           selection: selected.count >= 2 && selection.contains(row.id) ? selected : [],
                            onClick: { click in selection.click(row.id, click, order: displayOrder.map(\.id)) },
                            // A double click is what a person opens a thing with: the profile is
                            // launched, and stays the chosen one.
@@ -1416,9 +1607,18 @@ struct ProfileColumns {
     /// The narrowest it gets.
     static let minimumState: CGFloat = 132
     static let actions: CGFloat = 68
+    /// The slot of a state's mark, before its words.
+    static let stateMark: CGFloat = 14
     /// The name's slot (its letters' circle included).
     static let minimumName: CGFloat = 200
 
+    /// The list beside the inspector under the header: the name, the exit as its flag and code (or
+    /// its sign alone), the state — no "Appears as", no buttons, narrower page margins.
+    let compact: Bool
+    /// The exit column: wide enough for "Settings cannot be read", or for a flag and a code.
+    let exitWidth: CGFloat
+    /// The list's margin at each side.
+    let margin: CGFloat
     let showsAppearsAs: Bool
     /// The state column: full, or narrower in a narrow window rather than leaving the name a few
     /// letters ("Mar…", "N…" at the narrowest window: CI run 555's profiles-narrow).
@@ -1428,10 +1628,20 @@ struct ProfileColumns {
     /// page margins and the rows' own padding on both sides, the columns, the narrowest name.
     static let minimumContentWidth: CGFloat = 2 * 20 + 2 * Self.rowPadding + Self.exit + Self.fullState + Self.actions + 3 * Self.gap + Self.minimumName
 
-    init(contentWidth: CGFloat) {
-        showsAppearsAs = contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
+    static let compactExit: CGFloat = 48
+    static let compactState: CGFloat = 162
+    static let compactMargin: CGFloat = 12
+    /// The narrowest compact list: its margins and padding, the checkbox, a name of 120 pt beside its
+    /// circle, the exit, the state.
+    static let minimumCompactWidth: CGFloat = 2 * Self.compactMargin + 2 * Self.rowPadding + Self.nameInset + 120 + Self.compactExit + Self.compactState + 2 * Self.gap
+
+    init(contentWidth: CGFloat, compact: Bool = false) {
+        self.compact = compact
+        exitWidth = compact ? Self.compactExit : Self.exit
+        margin = compact ? Self.compactMargin : 20
+        showsAppearsAs = !compact && contentWidth >= Self.minimumContentWidth + Self.appearsAs + Self.gap
         let short = max(0, Self.minimumContentWidth - contentWidth)
-        state = max(Self.minimumState, Self.fullState - short)
+        state = compact ? Self.compactState : max(Self.minimumState, Self.fullState - short)
     }
 }
 
@@ -1448,6 +1658,11 @@ private struct ProfilesSidebar: View {
     var proxyAlerts = 0
     /// The window has the Virtual machines section (the build carries them).
     var showsVirtualMachines = false
+    /// The window has the Scenarios section; without it the row opens what `actions` has.
+    var showsScenarios = false
+
+    /// The window has the Warm-up section.
+    var showsWarmUp = false
     let actions: ProfileActions
     var rights: RightsLine?
 
@@ -1455,7 +1670,7 @@ private struct ProfilesSidebar: View {
         VStack(alignment: .leading, spacing: 2) {
             // The window's traffic lights sit in this band.
             Color.clear.frame(height: 44)
-            LumenLockup.sidebar
+            LumenBrandLockup.sidebar
                 .padding(.leading, 8)
                 .padding(.bottom, 16)
             paletteButton
@@ -1463,9 +1678,16 @@ private struct ProfilesSidebar: View {
             item(.all, title: L("profiles.title"))
             if let proxyCount { proxiesItem(proxyCount) }
             if showsVirtualMachines { virtualMachinesItem }
+            if showsWarmUp {
+                SidebarItem(symbol: "flame", title: L("warm.title"), count: nil, selected: section == .warmUp) {
+                    withAnimation(Theme.appearAnimation) { section = .warmUp }
+                }
+            }
             // What was behind a menu, in the interface (the owner, 10 November): the scenario
             // editor, the automation API's settings, the app's help.
-            toolItem(symbol: "play.rectangle", title: L("scenarios.title"), action: actions.openScenarios)
+            SidebarItem(symbol: "play.rectangle", title: L("scenarios.title"), count: nil, selected: showsScenarios && section == .scenarios) {
+                if showsScenarios { withAnimation(Theme.appearAnimation) { section = .scenarios } } else { actions.openScenarios() }
+            }
             toolItem(symbol: "terminal", title: L("settings.section.automation"), action: actions.openAutomation)
             toolItem(symbol: "book", title: L("sidebar.help"), action: actions.openHelp)
             // The collections and the tags take what the window has left and scroll within it:
@@ -1477,17 +1699,38 @@ private struct ProfilesSidebar: View {
                     caption(L("profiles.filters"))
                     item(.running)
                     item(.proxied)
+                    // Only while there are such profiles (or it is the list shown): then in red, as
+                    // the count beside Proxies.
+                    let failing = rows.filter(ProfileFilter.proxyFailing.includes).count
+                    if failing > 0 || (section == .profiles && filter == .proxyFailing) {
+                        sidebarButton(symbol: ProfileFilter.proxyFailing.symbol, title: ProfileFilter.proxyFailing.title,
+                                      count: failing, alert: failing > 0,
+                                      selected: section == .profiles && filter == .proxyFailing) {
+                            filter = .proxyFailing
+                            section = .profiles
+                        }
+                        .help(L("profiles.filter.proxyFailing.help"))
+                    }
                     item(.direct)
                     item(.ephemeral)
+                    // Only while there are such profiles, or it is the list shown.
+                    if showsWarmUp, rows.contains(where: \.neverWarmed) || (section == .profiles && filter == .notWarmed) {
+                        item(.notWarmed)
+                    }
                     let tags = ProfileFilter.tags(of: rows)
                     if !tags.isEmpty {
                         caption(L("profiles.tags"))
                         ForEach(tags, id: \.self) { tag in tagItem(tag) }
                     }
                 }
+                // Room for the last row to come clear of the fade below.
+                .padding(.bottom, 20)
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)
+            // The rows go out over the last 24 pt instead of being cut flat by the foot.
+            .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
+                                 startPoint: .top, endPoint: .bottom))
             .padding(.bottom, 12)
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
@@ -1535,6 +1778,8 @@ private struct ProfilesSidebar: View {
                     .font(.lumenBody)
                     .foregroundStyle(Theme.textSecondary)
                     .lineLimit(1)
+                    // "Commands and Search" was cut to "Commands and S…" beside its keys.
+                    .minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 KeyCap(keys: "⌘K", small: true) // l10n: not text
             }
@@ -1694,11 +1939,28 @@ private struct SyncStatusButton: View {
                     .font(.system(size: 12))
                     .foregroundStyle(sync == .failed ? Theme.warning : Theme.textTertiary)
                     .frame(width: 18)
-                Text(text)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                if case .synced(let date) = sync {
+                    // Two even lines — what, and when — instead of one sentence broken where it
+                    // happens to break ("Синхронизировано 4 / минуты назад").
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(L("profiles.sync.synced.title"))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                        Text(date.shownRelative)
+                            .font(.lumenCaption)
+                            .foregroundStyle(Theme.textTertiary)
+                            .monospacedDigit()
+                    }
+                    .lineLimit(1)
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(text)
+                } else {
+                    Text(text)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(sync == .failed ? Theme.warning : Theme.textSecondary)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 10)
@@ -1748,6 +2010,10 @@ private struct ProfileRow: View {
     var height: CGFloat = 52
     /// Settings › Appearance: the exit country's flag fading behind the row (`CountryBackdrop`).
     var countryBackdrop = false
+    /// The selected rows, when this row is one of several: a right click on it then offers what
+    /// can be done to all of them (`SelectionMenuItems`), as the Finder does — not this row's own
+    /// menu, which would act on one profile while thirty are selected.
+    var selection: [ProfileRowItem] = []
     /// A click on the row itself (not on its buttons or menu): selects it (`ProfileSelection`).
     var onClick: (ProfileSelection.Click) -> Void = { _ in }
     var onDoubleClick: () -> Void = {}
@@ -1760,17 +2026,22 @@ private struct ProfileRow: View {
             nameCell
                 .shadow(color: backdropCountry == nil ? .clear : Color.black.opacity(0.6), radius: 2.5, y: 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-            exitCell.frame(width: ProfileColumns.exit, alignment: .leading)
+            exitCell.frame(width: columns.exitWidth, alignment: .leading)
             if columns.showsAppearsAs {
                 seenCell.frame(width: ProfileColumns.appearsAs, alignment: .leading)
             }
             stateCell.frame(width: columns.state, alignment: .leading)
-            actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing)
+            // Beside the inspector the row has no buttons of its own: the inspector has them, and
+            // the context menu.
+            if !columns.compact { actionsCell.frame(width: ProfileColumns.actions, alignment: .trailing) }
         }
         .padding(.horizontal, ProfileColumns.rowPadding)
         .frame(height: height)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous)
             .fill(isSelected ? Theme.rowSelected : (hovered ? Theme.rowHover : Color.clear)))
+        // A selected row is lit: a hairline round it, in the tone of a field's edge.
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous)
+            .strokeBorder(isSelected ? Theme.hairline : Color.clear, lineWidth: 1))
         .background(alignment: .leading) {
             if let code = backdropCountry {
                 CountryBackdrop(code: code)
@@ -1793,8 +2064,13 @@ private struct ProfileRow: View {
         }
         .onHover { hovered = $0 }
         .animation(Motion.hover(hovered), value: hovered)
-        .opacity(row.activity == .sealing ? 0.6 : 1)
-        .contextMenu { ProfileMenuItems(row: row, actions: actions) }
+        .contextMenu {
+            if selection.count >= 2 {
+                SelectionMenuItems(rows: selection, actions: actions)
+            } else {
+                ProfileMenuItems(row: row, actions: actions)
+            }
+        }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(row.name))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
@@ -1835,7 +2111,8 @@ private struct ProfileRow: View {
             ProfileAvatar(name: row.name, id: row.id, size: 30, style: row.avatar, running: row.isRunning)
             HStack(spacing: 8) {
                 Text(row.name)
-                    .font(.lumenLabel)
+                    // Semibold: the name is what a row is read by, among 200 of them.
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Theme.textPrimary)
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -1846,20 +2123,43 @@ private struct ProfileRow: View {
                         .foregroundStyle(Theme.textTertiary)
                         .accessibilityLabel(L("profiles.row.hasNotes"))
                 }
-                if !row.tags.isEmpty || row.ephemeral {
-                    TagLine.text(row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : []), colors: tagColors)
-                        .font(.lumenSecondary)
+                if let warmedAt = row.warmedAt {
+                    Image(systemName: "flame")
+                        .font(.system(size: 10))
                         .foregroundStyle(Theme.textTertiary)
-                        .lineLimit(1)
+                        .help(String(format: L("profiles.row.warmed"), warmedAt.shownRelative))
+                        .accessibilityLabel(String(format: L("profiles.row.warmed"), warmedAt.shownRelative))
+                }
+                if !row.tags.isEmpty || row.ephemeral {
+                    // Whole tags, as many as the column has room for, then "+N" — never a cut one
+                    // ("●clien…", a lone "…": CI run 555's profiles-narrow).
+                    let tags = row.tags + (row.ephemeral ? [L("profiles.row.ephemeralTag")] : [])
+                    ViewThatFits(in: .horizontal) {
+                        ForEach(Array(stride(from: tags.count, through: 0, by: -1)), id: \.self) { shown in
+                            tagLine(tags, shown: shown)
+                        }
+                    }
+                    .accessibilityLabel(tags.joined(separator: ", "))
                 }
             }
         }
         .help(row.notes)
     }
 
+    /// The first `shown` tags and how many more there are.
+    private func tagLine(_ tags: [String], shown: Int) -> some View {
+        let rest = tags.count - shown
+        let more = rest > 0 ? Text(verbatim: (shown > 0 ? "  +" : "+") + "\(rest)") : Text(verbatim: "")
+        return (TagLine.text(Array(tags.prefix(shown)), colors: tagColors) + more)
+            .font(.lumenSecondary)
+            .foregroundStyle(Theme.textTertiary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
     private var exitCell: some View {
         HStack(spacing: 6) {
-            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry)
+            ExitLabel(exit: row.exit, note: row.exitNote, directCountry: row.directCountry, signOnly: columns.compact)
             if row.exitUnconfirmed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
@@ -1872,12 +2172,6 @@ private struct ProfileRow: View {
 
     private var seenCell: some View {
         HStack(spacing: 6) {
-            if let symbol = row.deviceSymbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                    .accessibilityHidden(true)
-            }
             Text(row.appearsAs)
                 .font(.lumenBody)
                 .foregroundStyle(Theme.textSecondary)
@@ -1885,10 +2179,56 @@ private struct ProfileRow: View {
         }
     }
 
-    @ViewBuilder
+    /// The state: its mark in a slot of its own, then its words — so that the words of every row
+    /// start on one edge and a state is told by its mark's shape before it is read.
     private var stateCell: some View {
+        HStack(spacing: 7) {
+            stateMark.frame(width: ProfileColumns.stateMark)
+            stateWords
+        }
+    }
+
+    @ViewBuilder
+    private var stateMark: some View {
         if row.exportOnly, row.activity == .stopped {
-            Label(L("contract.profile.export_only.badge"), systemImage: "square.and.arrow.up")
+            Image(systemName: "square.and.arrow.up").font(.system(size: 11)).foregroundStyle(Theme.warning)
+                .accessibilityHidden(true)
+        } else if row.problem != nil, row.activity == .stopped {
+            Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 11)).foregroundStyle(Theme.danger)
+                .accessibilityHidden(true)
+        } else {
+            switch row.activity {
+            case .starting:
+                ProgressView().controlSize(.mini)
+            case .sealing:
+                Image(systemName: "lock").font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
+                    .accessibilityHidden(true)
+            case .running:
+                if let warmUp = row.warmUp {
+                    // A ring that fills as the warm-up goes.
+                    ZStack {
+                        Circle().stroke(Color.white.opacity(0.16), lineWidth: 1.8)
+                        Circle().trim(from: 0, to: max(0.04, warmUp.fraction))
+                            .stroke(Theme.textPrimary, style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 10, height: 10)
+                    .accessibilityHidden(true)
+                } else if row.warmUpQueued {
+                    Color.clear
+                } else {
+                    RunningDot()
+                }
+            case .stopped:
+                Color.clear
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var stateWords: some View {
+        if row.exportOnly, row.activity == .stopped {
+            Text(L("contract.profile.export_only.badge"))
                 .font(.lumenBody)
                 .foregroundStyle(Theme.warning)
                 .lineLimit(1)
@@ -1912,7 +2252,6 @@ private struct ProfileRow: View {
                     secondaryLine(L("profiles.row.warmUpQueued"))
                 } else {
                     HStack(spacing: 8) {
-                        RunningDot()
                         Text(L("profiles.row.running")).font(.lumenBody).foregroundStyle(Theme.textPrimary)
                         if let since = row.lastUsed {
                             Text(Self.runningFor(since))
@@ -1953,10 +2292,7 @@ private struct ProfileRow: View {
     }
 
     private func busyLine(_ text: String) -> some View {
-        HStack(spacing: 7) {
-            ProgressView().controlSize(.mini)
-            secondaryLine(text)
-        }
+        secondaryLine(text)
     }
 
     private var lastUsed: String {
@@ -2052,6 +2388,65 @@ private struct ProfileMenuItems: View {
     }
 }
 
+/// The context menu of a row that is one of several selected: what the selection's bar does, for
+/// all of them — launch the stopped ones, stop the running ones, warm them up, give them proxies,
+/// change their tags, delete them (asked once, naming how many).
+private struct SelectionMenuItems: View {
+    let rows: [ProfileRowItem]
+    let actions: ProfileActions
+
+    var body: some View {
+        let ids = rows.map(\.id)
+        // Settings that cannot be read do not start (R1): not counted among those to launch.
+        let stopped = rows.filter { $0.activity == .stopped && $0.exit != .unreadable }.map(\.id)
+        let running = rows.filter(\.isRunning).map(\.id)
+        Button(stopped.isEmpty ? L("profiles.bulk.launch") : String(format: L("inspector.launchSome"), stopped.count)) {
+            actions.launchSeveral(stopped)
+        }
+        .disabled(stopped.isEmpty)
+        Button(running.isEmpty ? L("profiles.bulk.stop") : String(format: L("inspector.stopSome"), running.count)) {
+            actions.stopSeveral(running)
+        }
+        .disabled(running.isEmpty)
+        Divider()
+        Button(L("profiles.bulk.warmUp")) { actions.warmUpSeveral(ids) }
+        Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(ids) }
+        Button(L("profiles.bulk.tags")) { actions.tagSeveral(ids) }
+        Divider()
+        Button(String(format: L("profiles.selection.delete"), rows.count), role: .destructive) { actions.deleteSeveral(ids) }
+    }
+}
+
+/// A column's title that sorts the list by that column: a click sorts, another click goes back to
+/// the list's own order. Sorted, it is a tone brighter with an arrow beside it — up for A to Z,
+/// down for the latest first.
+struct SortableColumnTitle: View {
+    let title: String
+    let sorted: Bool
+    var ascending = true
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Text(title).lumenCaps(sorted ? Theme.textSecondary : Theme.textTertiary)
+                if sorted {
+                    Image(systemName: ascending ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 7, weight: .bold))
+                        .foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityHint(help)
+        .accessibilityAddTraits(sorted ? .isSelected : [])
+    }
+}
+
 /// Where a profile exits: the proxy's country with its flag, the proxy's address while its
 /// country is unknown, or "Direct".
 struct ExitLabel: View {
@@ -2063,6 +2458,10 @@ struct ExitLabel: View {
     var note: String?
     /// With no proxy: the country the profile's own connection exits in, when a launch found it.
     var directCountry: String?
+    /// The list beside the inspector: where there is no country to say in two letters — no proxy,
+    /// a proxy whose country is unknown, settings that cannot be read — the sign alone, with its
+    /// words on hover and for VoiceOver.
+    var signOnly = false
 
     var body: some View {
         HStack(spacing: 8) {
@@ -2087,11 +2486,15 @@ struct ExitLabel: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
+                    .help(signOnly ? L("profiles.exit.direct") : "")
+                    .accessibilityLabel(L("profiles.exit.direct"))
                 // No country yet: "Direct" and why on hover — never an empty cell, never a guess.
-                Text(L("profiles.exit.direct"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(note ?? L("inspector.exit.directNotYet"))
+                if !signOnly {
+                    Text(L("profiles.exit.direct"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(note ?? L("inspector.exit.directNotYet"))
+                }
             case let .proxy(endpoint, code?):
                 // The flag to find it by eye, the words to say what it is — a flag alone tells the
                 // Netherlands from France poorly, and nothing to VoiceOver (the owner, 1 November).
@@ -2114,20 +2517,28 @@ struct ExitLabel: View {
                     .font(.system(size: 12))
                     .foregroundStyle(Theme.textTertiary)
                     .frame(width: flagSize)
-                Text(endpoint)
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textPrimary)
-                    .truncationMode(.middle)
-                    .help(note ?? L("profiles.exit.unknownCountry"))
+                    .help(signOnly ? endpoint : "")
+                    .accessibilityLabel(endpoint)
+                if !signOnly {
+                    Text(endpoint)
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textPrimary)
+                        .truncationMode(.middle)
+                        .help(note ?? L("profiles.exit.unknownCountry"))
+                }
             case .unreadable:
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 11))
                     .foregroundStyle(Theme.warning)
                     .frame(width: flagSize)
-                Text(L("profiles.exit.unreadable"))
-                    .font(.lumenBody)
-                    .foregroundStyle(Theme.textSecondary)
-                    .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                    .help(signOnly ? L("profiles.exit.unreadable") : "")
+                    .accessibilityLabel(L("profiles.exit.unreadable"))
+                if !signOnly {
+                    Text(L("profiles.exit.unreadable"))
+                        .font(.lumenBody)
+                        .foregroundStyle(Theme.textSecondary)
+                        .help(String(format: L("profiles.exit.unreadable.help"), L("profiles.menu.syncNow"), L("profiles.menu.more")))
+                }
             }
         }
         .lineLimit(1)
@@ -2646,28 +3057,39 @@ struct GuardNoticeBar: View {
     }
 }
 
+/// No profile yet: what the window is for, and the three ways a first profile comes — made here,
+/// brought from another Mac or a backup (Import), or made for the proxies of a list pasted into
+/// Proxies first (docs/ROADMAP.md §1.7: a person who has not seen the app makes a profile with a
+/// proxy without being told where).
 private struct EmptyProfilesView: View {
     let onNew: () -> Void
+    var onImport: () -> Void = {}
+    /// Nil: the window has no Proxies section.
+    var onProxies: (() -> Void)?
 
     var body: some View {
-        VStack(spacing: 0) {
-            LumenGlyph(size: 44, color: Theme.textTertiary.opacity(0.55))
-                .padding(.bottom, 20)
-            Text(L("profiles.empty.title"))
-                .font(.lumenSheetTitle)
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 6)
-            Text(L("profiles.empty.subtitle"))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 320)
-                .padding(.bottom, 20)
-            Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
-                .buttonStyle(.lumenPrimary)
+        LumenEmptyState(title: L("profiles.empty.title"), text: L("profiles.empty.subtitle")) {
+            VStack(spacing: 0) {
+                Button(action: onNew) { Label(L("profiles.action.new"), systemImage: "plus") }
+                    .buttonStyle(.lumenPrimary)
+                HStack(spacing: 4) {
+                    Button(L("profiles.menu.import"), action: onImport)
+                        .buttonStyle(.lumenGhost)
+                    if let onProxies {
+                        Button(L("profiles.empty.proxies"), action: onProxies)
+                            .buttonStyle(.lumenGhost)
+                    }
+                }
+                .padding(.top, 10)
+                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 380)
+                    .padding(.top, 14)
+            }
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -2678,22 +3100,12 @@ private struct NoMatchesView: View {
     let onShowAll: () -> Void
 
     var body: some View {
-        VStack(spacing: 0) {
-            Text(L("profiles.noMatches"))
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Theme.textPrimary)
-                .padding(.bottom, 8)
-            Text(query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query))
-                .font(.lumenBody)
-                .foregroundStyle(Theme.textSecondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 340)
-                .padding(.bottom, 18)
+        LumenEmptyState(title: L("profiles.noMatches"),
+                        text: query.isEmpty ? L("profiles.noMatches.filter") : String(format: L("profiles.noMatches.query"), query),
+                        small: true) {
             Button(L("profiles.showAll"), action: onShowAll)
                 .buttonStyle(.lumenSecondary)
         }
-        .padding(40)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .contain)
     }
 }

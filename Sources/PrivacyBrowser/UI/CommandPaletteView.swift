@@ -16,7 +16,11 @@ struct CommandPaletteView: View {
         var group: Group = .actions
         /// Its keys, at the row's end ("⌘N").
         var shortcut: String?
-        let run: () -> Void
+        /// A command that is not listed before anything is typed, and is found only when the words
+        /// typed are really in this text — a single setting (`SettingsSearch.paletteCommands`):
+        /// fifty of them would bury the list, and letters in order are found in any of their names.
+        var foundBy: String?
+        var run: () -> Void
     }
 
     let commands: [Command]
@@ -24,6 +28,9 @@ struct CommandPaletteView: View {
     @State private var query: String
     @State private var selected = 0
     @FocusState private var searching: Bool
+    /// The app's model, where the palette is the app's own and not a picture of it (`AppPalette`).
+    @Environment(\.appModelForCommands) private var appModel
+    @Environment(\.openSettings) private var openSettings
 
     static let size = CGSize(width: 560, height: 420)
 
@@ -33,18 +40,28 @@ struct CommandPaletteView: View {
         _query = State(initialValue: query)
     }
 
-    var results: [Command] { Self.rank(commands, query: query) }
+    /// What it was given, and the app's own commands with it: their keys, Check for Updates, every
+    /// single setting.
+    private var offered: [Command] {
+        guard let appModel else { return commands }
+        let open = openSettings
+        return AppPalette.completed(commands, model: appModel, openSettings: { open() })
+    }
+
+    var results: [Command] { Self.rank(offered, query: query) }
 
     /// The commands that match `query`, best first; for none, all of them by group, in their order.
     static func rank(_ commands: [Command], query: String) -> [Command] {
         let text = query.trimmingCharacters(in: .whitespaces)
         guard !text.isEmpty else {
             return commands.enumerated()
+                .filter { $0.element.foundBy == nil }
                 .sorted { ($0.element.group.rawValue, $0.offset) < ($1.element.group.rawValue, $1.offset) }
                 .map(\.element)
         }
         return commands.enumerated()
             .compactMap { index, command -> (Int, Int, Command)? in
+                if let words = command.foundBy, !TextSearch.finds(text, in: words) { return nil }
                 guard let score = CommandSearch.score(text, command.title + " " + (command.detail ?? "")) else { return nil }
                 return (score, index, command)
             }

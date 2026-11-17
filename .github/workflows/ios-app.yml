@@ -26,11 +26,12 @@ on:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
       suite:
-        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); "ScreenshotTests" — the App Store's screenshots (iPhone 17 Pro Max, appstore/ in the artifact); both by hand only
+        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "DeviceTests" — the job "devices" alone (three iPhones in turn). "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); "ScreenshotTests" — the App Store's screenshots (iPhone 17 Pro Max, appstore/ in the artifact); both by hand only
         default: ""
 
 jobs:
   app:
+    if: ${{ inputs.suite != 'DeviceTests' }}
     # Six jobs side by side, each with its own simulator and testbed; each keeps the order — the
     # reds of its suite first, then its green run.
     strategy:
@@ -39,7 +40,7 @@ jobs:
         suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests,LanguageTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests", "AccountTests"]') }}
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       # The real account server, by hand only: the protocol first (a minute), then the app itself.
@@ -92,4 +93,44 @@ jobs:
             build/ios-app/screens
             build/ios-app/appstore
             build/ios-app/design
+          if-no-files-found: warn
+
+  devices:
+    # The iPhones testers carry, beyond the jobs above (iPhone 17 Pro, newest iOS, light, default
+    # text): DeviceTests — the path from the first launch through a page, the tabs, the settings, a
+    # proxy and the account, every control on the screen and touchable, the app dark — on the 4.7-inch
+    # SE on iOS 18 (the floor), the Pro Max in dark appearance, and the smallest iPhone at the largest
+    # accessibility text (ios/scripts/devices.sh). The two on the newest iOS in turn on one machine;
+    # the SE on iOS 18 on a macos-26 machine (Xcode 26), since Xcode 27 has no iOS 18 simulator (run
+    # 143: "iOS 18.6 is not available for download"). The app is iPhone only and portrait only, so no
+    # iPad and no landscape leg. With a suite asked for by hand it runs only for "DeviceTests".
+    if: ${{ !inputs.suite || inputs.suite == 'DeviceTests' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - legs: large-dark,small-largest
+            what: Pro Max · dark, smallest · largest text
+            os: ""
+          - legs: small-oldest
+            what: SE · iOS 18
+            os: macos-26
+    name: Lumen iOS — devices (${{ matrix.what }})
+    runs-on: ${{ matrix.os || inputs.os || 'xcode-27' }}
+    # 240: the SE leg downloads iOS 18.6, builds, and its simulator is slow (devices.sh gives a leg 80
+    # minutes, and a runner that never started one more try).
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - name: DeviceTests on ${{ matrix.legs }}
+        run: ios/scripts/devices.sh build/ios-devices "${{ matrix.legs }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-devices-${{ github.run_number }}-${{ strategy.job-index }}
+          path: |
+            build/ios-devices/*.txt
+            build/ios-devices/*.log
+            build/ios-devices/screens
+            build/ios-devices/diagnostics
           if-no-files-found: warn

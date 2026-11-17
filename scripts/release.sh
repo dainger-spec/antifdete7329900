@@ -138,6 +138,13 @@ TREE_CHANGES="$(git status --porcelain)"
 gate_status=0
 gate_line="$(python3 scripts/full_run_gate.py --sha "$HEAD_SHA")" || gate_status=$?
 echo "$gate_line"
+# The owner alone may waive the gate for one commit, by naming it in full: FULL_RUN_WAIVED=<the 40
+# characters of HEAD>. Any other value waives nothing. (15 November: the full run of d2d2f0f3 passed
+# every check but the snapshots' time limit; the commits after it change that limit and this.)
+if (( gate_status != 0 )) && [[ -n "${FULL_RUN_WAIVED:-}" && "${FULL_RUN_WAIVED}" == "$HEAD_SHA" ]]; then
+  echo "the full run's gate is waived by the owner for ${HEAD_SHA:0:12} (FULL_RUN_WAIVED)"
+  gate_status=0
+fi
 if [[ "$SIGN_IDENTITY" != "-" || -n "$PUBLISH" ]]; then
   if [[ -n "$TREE_CHANGES" ]]; then
     echo "error: the tree has changes beside commit ${HEAD_SHA:0:12} (git status below): a release is built from a commit the full pipeline passed, nothing else" >&2
@@ -190,6 +197,12 @@ if [[ -n "${PREVIOUS_APPCAST:-}" ]]; then
   for entry in "${TRUSTED[@]}"; do [[ -z "$entry" ]] || VERIFY_KEYS+=(--public-key "$entry"); done
   "$PBUPDATE" verify --appcast "$PREVIOUS_APPCAST" "${VERIFY_KEYS[@]}" \
     || { echo "error: $PREVIOUS_APPCAST does not check with this update key or UPDATE_EXTRA_PUBLIC_KEYS: its releases cannot be kept" >&2; exit 1; }
+  # BUILD is greater than every build published: the appcast lists a build once, so one listed
+  # already would take that release's place (its users then told they are up to date), and a lower
+  # one would offer the older release as an update to whoever has this one. pbupdate appcast
+  # refuses it too, at step 4; here it stops before the build.
+  "$PBUPDATE" verify --appcast "$PREVIOUS_APPCAST" "${VERIFY_KEYS[@]}" --new-build "$BUILD" --new-version "$VERSION" >/dev/null \
+    || { echo "error: BUILD $BUILD cannot follow the releases of $PREVIOUS_APPCAST (pbupdate's line above): give a build greater than every published one" >&2; exit 1; }
 fi
 
 # The account server and the keys of its documents of rights (the server's docs/CONTRACT.md §2,

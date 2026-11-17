@@ -105,6 +105,14 @@ final class GuardService: NSObject, NSXPCListenerDelegate, NetworkGuardControl, 
         reply((try? JSONEncoder().encode(diagnostics)) ?? Data())
     }
 
+    func udpSockets(onPort port: UInt16, reply: @escaping (Data) -> Void) {
+        guard port != 0, case .success(let sockets) = SocketTable.read(.udp) else {
+            reply(Data())
+            return
+        }
+        reply((try? JSONEncoder().encode(sockets.filter { $0.localPort == port })) ?? Data())
+    }
+
     // MARK: Processes
 
     /// Released when it exits: a pid the system gives again is never held by mistake.

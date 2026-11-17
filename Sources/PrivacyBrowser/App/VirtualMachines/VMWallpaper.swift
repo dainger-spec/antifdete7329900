@@ -4,10 +4,10 @@ import CoreText
 import Foundation
 
 /// Lumen's desktop picture for a virtual machine: the eclipse — a dark disc rising from the foot
-/// of the screen with light breaking out along its edge — and the word under it. Drawn here for
-/// the machine's own screen, pixel for pixel (no image is carried in the app), and handed to the
-/// guest through the folder it shares with the app, where the boot script sets it
-/// (Resources/VMGuest/lumen-guest.sh).
+/// of the screen with light breaking out along its edge (LumenHorizon, the launch screen's too) —
+/// and the word under it. Drawn here for the machine's own screen, pixel for pixel (no image is
+/// carried in the app), and handed to the guest through the folder it shares with the app, where
+/// the boot script sets it (Resources/VMGuest/lumen-guest.sh).
 enum VMWallpaper {
     /// The picture as a PNG, `pixelsWide` × `pixelsHigh`; nil where a picture cannot be made.
     static func png(pixelsWide: Int, pixelsHigh: Int) -> Data? {
@@ -20,45 +20,9 @@ enum VMWallpaper {
         context.translateBy(x: 0, y: height)
         context.scaleBy(x: 1, y: -1)
 
-        let backdrop: [CGFloat] = [8.0 / 255, 9.0 / 255, 11.0 / 255]
-        context.setFillColor(CGColor(srgbRed: backdrop[0], green: backdrop[1], blue: backdrop[2], alpha: 1))
-        context.fill(CGRect(x: 0, y: 0, width: width, height: height))
-
-        func gradient(_ stops: [(location: CGFloat, alpha: CGFloat)], white: Bool = true) -> CGGradient? {
-            var components: [CGFloat] = []
-            for stop in stops {
-                components += white ? [1, 1, 1, stop.alpha] : [backdrop[0], backdrop[1], backdrop[2], stop.alpha]
-            }
-            let locations = stops.map { $0.location }
-            return CGGradient(colorSpace: space, colorComponents: components, locations: locations, count: stops.count)
-        }
-
-        // The backdrop is a little lighter toward the light.
-        if let lift = gradient([(0, 0.045), (1, 0)]) {
-            let centre = CGPoint(x: width * 0.5, y: height * 0.62)
-            context.drawRadialGradient(lift, startCenter: centre, startRadius: 0, endCenter: centre, endRadius: width * 0.75, options: [])
-        }
-
-        // The dark disc: its top at 54 % of the height, its centre far below the screen.
-        let radius = width * 0.78
-        let top = height * 0.54
-        let centre = CGPoint(x: width * 0.5, y: top + radius)
-        // The light behind it: a disc a little smaller whose top stands a hair above the dark
-        // one's — so the light is a line at the top and thins out along the sides.
-        let lightRadius = radius * 0.992
-        let light = CGPoint(x: centre.x, y: centre.y - (radius - lightRadius) - radius * 0.0035)
-        let from: CGFloat = 0.90, to: CGFloat = 1.22
-        func at(_ fraction: CGFloat) -> CGFloat { (fraction - from) / (to - from) }
-        if let glow = gradient([(0, 0), (at(0.985), 0), (at(0.9995), 0.95), (at(1.0), 0.62), (at(1.006), 0.34),
-                                (at(1.02), 0.17), (at(1.06), 0.07), (at(1.13), 0.022), (1, 0)]) {
-            context.drawRadialGradient(glow, startCenter: light, startRadius: lightRadius * from,
-                                       endCenter: light, endRadius: lightRadius * to, options: [])
-        }
-        // The dark disc over it, its edge soft over a pixel or two.
-        if let disc = gradient([(0, 1), (0.999, 1), (1, 0)], white: false) {
-            context.drawRadialGradient(disc, startCenter: centre, startRadius: radius * 0.9, endCenter: centre, endRadius: radius,
-                                       options: [.drawsBeforeStartLocation])
-        }
+        // The horizon, as the launch screen has it too (LumenHorizon).
+        let horizon = LumenHorizon.draw(in: context, width: width, height: height)
+        let centre = horizon.centre, top = horizon.top
 
         // The word, letter-spaced, under the light.
         let size = (width * 0.0125).rounded()

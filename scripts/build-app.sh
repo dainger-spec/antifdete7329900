@@ -184,6 +184,8 @@ rm -rf "$ICON_DIR"
 cp Resources/fingerprint_probe.js "$APP/Contents/Resources/fingerprint_probe.js"
 # "What sites see" runs the probe and these, the scripts of CI's live comparison (scripts/live_compare.py).
 cp -R Resources/SiteProbes "$APP/Contents/Resources/SiteProbes"
+# The licences of what the app carries of others' work (the launch screen's letters: Pacifico, SIL OFL 1.1).
+cp Resources/ThirdPartyNotices.txt "$APP/Contents/Resources/ThirdPartyNotices.txt"
 
 # Localized strings into Bundle.main, where the app looks them up (see Localization.swift).
 for lang in en ru; do

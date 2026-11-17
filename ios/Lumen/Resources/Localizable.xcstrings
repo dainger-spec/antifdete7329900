@@ -147,6 +147,36 @@
         }
       }
     },
+    "«%@»: Mac не принял изменения имени, описания или меток.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”: your Mac did not accept the changed name, description or tags."
+          }
+        }
+      }
+    },
+    "«%@»: имя длиннее %@ символов, изменения не ушли на Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”: the name is longer than %@ characters, so the changes were not sent to your Mac."
+          }
+        }
+      }
+    },
+    "«%@»: описание длиннее %@ символов, изменения не ушли на Mac.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "“%@”: the description is longer than %@ characters, so the changes were not sent to your Mac."
+          }
+        }
+      }
+    },
     "Адрес или запрос": {
       "localizations": {
         "en": {
@@ -297,6 +327,16 @@
         }
       }
     },
+    "В приложении она откроется вне этой сессии и её прокси: с собственного адреса этого iPhone и под аккаунтом, с которым вы вошли в %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "In the app it opens outside this session and its proxy: from this iPhone’s own address, with the account you are signed in to in %@."
+          }
+        }
+      }
+    },
     "Введите адрес или запрос.": {
       "localizations": {
         "en": {
@@ -323,6 +363,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Enter the password again"
+          }
+        }
+      }
+    },
+    "Вернуть удалённые профили": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Bring Back Deleted Profiles"
           }
         }
       }
@@ -403,6 +453,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Sign In"
+          }
+        }
+      }
+    },
+    "Вход на %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign In to %@"
           }
         }
       }
@@ -687,6 +747,36 @@
         }
       }
     },
+    "Имя пользователя": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "User Name"
+          }
+        }
+      }
+    },
+    "Имя пользователя или пароль не подошли.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The user name or password was not accepted."
+          }
+        }
+      }
+    },
+    "Имя — до %@ символов, описание — до %@; меток — до %@, каждая до %@ символов.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Name: up to %@ characters; description: up to %@; up to %@ tags of up to %@ characters each."
+          }
+        }
+      }
+    },
     "Имя, описание, метка, прокси": {
       "localizations": {
         "en": {
@@ -897,6 +987,16 @@
         }
       }
     },
+    "Место для синхронизации по тарифу закончилось: изменения, которым нужно больше места, не синхронизируются. Сколько занято, видно в кабинете на сайте.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The plan’s sync space is full: changes that need more space are not synced. How much is used is on your account page."
+          }
+        }
+      }
+    },
     "Метки через запятую": {
       "localizations": {
         "en": {
@@ -983,6 +1083,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Not checked"
+          }
+        }
+      }
+    },
+    "Не сохраняется: после перезапуска приложения сайт спросит снова.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Not saved: after the app restarts, the site asks again."
           }
         }
       }
@@ -1103,6 +1213,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "New Proxy"
+          }
+        }
+      }
+    },
+    "ОК": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "OK"
           }
         }
       }
@@ -1243,6 +1363,46 @@
           "stringUnit": {
             "state": "translated",
             "value": "Open Without a Proxy?"
+          }
+        }
+      }
+    },
+    "Открыть": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open"
+          }
+        }
+      }
+    },
+    "Открыть в новой вкладке": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in New Tab"
+          }
+        }
+      }
+    },
+    "Открыть в приложении": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open in the App"
+          }
+        }
+      }
+    },
+    "Открыть здесь": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Open Here"
           }
         }
       }
@@ -1737,6 +1897,16 @@
         }
       }
     },
+    "Профили с Mac, удалённые на этом iPhone, сюда больше не приходят: %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Profiles from your Mac deleted on this iPhone no longer come here: %@."
+          }
+        }
+      }
+    },
     "Профили: %@": {
       "localizations": {
         "en": {
@@ -1793,6 +1963,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "From Mac"
+          }
+        }
+      }
+    },
+    "Сайт пишет: «%@»": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The site says: “%@”"
           }
         }
       }
@@ -1873,6 +2053,26 @@
           "stringUnit": {
             "state": "translated",
             "value": "The Lumen server isn’t responding. Check your connection and try again."
+          }
+        }
+      }
+    },
+    "Сервер Lumen не принял вход этого iPhone для синхронизации. Выйдите из аккаунта и войдите снова; сессии на этом iPhone остались как были.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Lumen server did not accept this iPhone’s sign-in for sync. Sign out of the account and sign in again; the sessions on this iPhone stay as they were."
+          }
+        }
+      }
+    },
+    "Сервер Lumen ответил ошибкой (%@) и синхронизацию не провёл. Попробуйте позже; сессии на этом iPhone остались как были.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The Lumen server answered with an error (%@) and did not sync. Try again later; the sessions on this iPhone stay as they were."
           }
         }
       }
@@ -2007,6 +2207,36 @@
         }
       }
     },
+    "Синхронизация на этом устройстве откроется %@: на почту аккаунта ушло письмо о новом устройстве.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync opens on this device on %@: the account’s mailbox got a letter about the new device."
+          }
+        }
+      }
+    },
+    "Синхронизация на этом устройстве откроется позже: на почту аккаунта ушло письмо о новом устройстве.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sync opens on this device later: the account’s mailbox got a letter about the new device."
+          }
+        }
+      }
+    },
+    "Синхронизация не прошла. Сессии на этом iPhone остались как были.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The sync did not go through. The sessions on this iPhone stay as they were."
+          }
+        }
+      }
+    },
     "Синхронизация с Mac": {
       "localizations": {
         "en": {
@@ -2017,12 +2247,12 @@
         }
       }
     },
-    "Синхронизация с Mac — в пробном и платном тарифе. Профили на этом iPhone остаются как есть.": {
+    "Синхронизация с Mac — в платных тарифах. Профили на этом iPhone остаются как есть.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
-            "value": "Sync with your Mac comes with a trial or a paid plan. The profiles on this iPhone stay as they are."
+            "value": "Sync with your Mac comes with a paid plan. The profiles on this iPhone stay as they are."
           }
         }
       }
@@ -2067,6 +2297,16 @@
         }
       }
     },
+    "Скопировать ссылку": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Copy Link"
+          }
+        }
+      }
+    },
     "Скрыть": {
       "localizations": {
         "en": {
@@ -2087,6 +2327,36 @@
         }
       }
     },
+    "Слишком большой объект для синхронизации: он ждёт, остальное синхронизировано.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "An object is too large to sync: it waits, and the rest was synced."
+          }
+        }
+      }
+    },
+    "Слишком много запросов синхронизации к серверу Lumen: попробуйте позже.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many sync requests to the Lumen server: try again later."
+          }
+        }
+      }
+    },
+    "Слишком много запросов синхронизации к серверу Lumen: попробуйте через %@.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Too many sync requests to the Lumen server: try again in %@."
+          }
+        }
+      }
+    },
     "Слишком много попыток.": {
       "localizations": {
         "en": {
@@ -2103,6 +2373,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Save"
+          }
+        }
+      }
+    },
+    "Ссылку может открыть приложение %@": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The %@ app can open this link"
           }
         }
       }
@@ -2153,6 +2433,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "A proxy’s address has no path after the port."
+          }
+        }
+      }
+    },
+    "У аккаунта уже наибольшее число хранилищ синхронизации. Лишние можно удалить в кабинете на сайте; сессии на этом iPhone остались как были.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "The account already has as many sync vaults as it may. Extra ones can be deleted on your account page; the sessions on this iPhone stay as they were."
           }
         }
       }
@@ -2237,6 +2527,16 @@
         }
       }
     },
+    "Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This deletes the session’s cookies, storage, cache, tabs and history on this iPhone. The profile stays on your Mac but no longer comes here; you can bring it back on the Sync screen."
+          }
+        }
+      }
+    },
     "Удаляются куки, хранилище, кэш, вкладки и история этой сессии.": {
       "localizations": {
         "en": {
@@ -2267,6 +2567,16 @@
         }
       }
     },
+    "Хранилища Mac на сервере нет: синхронизация на Mac выключена или её данные удалены в кабинете. Сессии на этом iPhone остались как были.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Your Mac’s vault is not on the server: sync is off on the Mac, or its data was deleted on your account page. The sessions on this iPhone stay as they were."
+          }
+        }
+      }
+    },
     "Хранилище": {
       "localizations": {
         "en": {
@@ -2293,6 +2603,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Vault connected"
+          }
+        }
+      }
+    },
+    "Хранятся посещения за последние %@ дней.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Visits from the last %@ days are kept."
           }
         }
       }
@@ -2377,12 +2697,32 @@
         }
       }
     },
+    "Эта страница": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This page"
+          }
+        }
+      }
+    },
     "Это не адрес прокси: нужен адрес и порт.": {
       "localizations": {
         "en": {
           "stringUnit": {
             "state": "translated",
             "value": "This is not a proxy’s address: it needs a host and a port."
+          }
+        }
+      }
+    },
+    "Это хранилище Mac синхронизируется другим аккаунтом Lumen: войдите в аккаунт, с которым синхронизируется Mac. Ничего не отправлено и не изменено.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "This Mac’s vault is synced by another Lumen account: sign in with the account your Mac syncs with. Nothing was sent or changed."
           }
         }
       }

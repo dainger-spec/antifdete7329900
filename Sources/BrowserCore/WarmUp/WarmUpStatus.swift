@@ -37,9 +37,25 @@ public struct WarmUpStatus: Codable, Equatable, Sendable {
     /// until the last count has come back (a run stopped mid-page gets it a moment later).
     public var sites: [WarmUpCookieSite]?
     /// Why a run that did not finish stopped, or why a running one waits: "byUser",
-    /// "profileStopped", "tabClosed", "pageNeedsAttention", "waitingForTab". Nil otherwise (and from
-    /// a profile process of an older build).
+    /// "profileStopped", "tabClosed", "pageNeedsAttention", "tabNotShown", "waitingForTab". Nil
+    /// otherwise (and from a profile process of an older build).
     public var stopReason: String?
+    /// When the run began, where the robot ran.
+    public var startedAt: Date?
+    /// What the robot is doing on the page now: "search", "result", "read", "scroll", "link",
+    /// "back", "consent", "pause". Text: a later version's step is shown as nothing.
+    public var step: String?
+    /// The plan's site being gone through, counted from 1, and how many it has (searches apart).
+    public var siteNumber: Int?
+    public var siteCount: Int?
+    /// Pages that loaded so far, the pages links led to among them; searches typed; cookie
+    /// banners answered.
+    public var pagesRead: Int?
+    public var searchesTyped: Int?
+    public var consents: Int?
+    /// What the run did site by site (`WarmUpSiteVisit`): the last few while it runs — the screen's
+    /// "what it did" — and all of them, with their cookies, once it is over.
+    public var siteVisits: [WarmUpSiteVisit]?
 
     public init(phase: Phase, visited: Int, total: Int, failed: Int = 0, cookies: Int = 0,
                 secondsRemaining: TimeInterval? = nil, currentHost: String? = nil, sites: [WarmUpCookieSite]? = nil,

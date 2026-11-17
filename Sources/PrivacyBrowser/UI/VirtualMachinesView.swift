@@ -28,6 +28,9 @@ private struct VirtualMachinesScreen: View {
 
     @State private var editing: VMEditorView.Draft?
     @State private var deleting: VMProfile?
+    /// The machine whose network panel is open; and the sleeping one the person asked to start anew.
+    @State private var networkOf: VMProfile?
+    @State private var startingAnew: VMProfile?
     @State private var showingStorage = false
     @State private var error: String?
 
@@ -40,6 +43,7 @@ private struct VirtualMachinesScreen: View {
         switch VMCenter.availability {
         case .notAppleSilicon: return .unavailable(L("vm.unavailable.intel"))
         case .sandboxed, .notInThisBuild: return .unavailable(L("vm.unavailable.build"))
+        case .insideVirtualMachine: return .unavailable(L("vm.unavailable.insideVM"))
         case .available: break
         }
         if license.isConfigured, !license.record.isSignedIn { return .signedOut }
@@ -73,6 +77,19 @@ private struct VirtualMachinesScreen: View {
         }
         .sheet(isPresented: $showingStorage) {
             VMStorageView(center: center)
+        }
+        .sheet(item: $networkOf) { profile in
+            VMNetworkView(center: center, profile: profile)
+        }
+        .confirmationDialog(startingAnew.map { String(format: L("vm.startAnew.title"), $0.name) } ?? "",
+                            isPresented: Binding(get: { startingAnew != nil }, set: { if !$0 { startingAnew = nil } }),
+                            titleVisibility: .visible) {
+            Button(L("vm.startAnew.confirm"), role: .destructive) {
+                if let profile = startingAnew { center.startAnewBecauseThePersonAsked(profile.id) }
+                startingAnew = nil
+            }
+        } message: {
+            Text(L("vm.startAnew.message"))
         }
         .confirmationDialog(deleting.map { String(format: L("vm.delete.title"), $0.name) } ?? "",
                             isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }),
@@ -164,6 +181,8 @@ private struct VirtualMachinesScreen: View {
                        actionEnabled: !center.requirements.contains(where: VMRequirements.stops),
                        footnote: L("vm.hero.note"), facts: facts,
                        problems: center.requirements, error: center.setupError, width: width,
+                       secondaryTitle: L("vm.import.choose"), secondaryHelp: L("vm.import.choose.help"),
+                       secondaryAction: { VMImageFilePanel.choose(for: center) },
                        action: { center.continueSetup() })
             } else {
                 VMSetupPanel(center: center, width: width)
@@ -221,6 +240,11 @@ private struct VirtualMachinesScreen: View {
             if center.runningCount >= VMRequirements.runningLimit {
                 VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
             }
+            if let taken = center.memoryTakenIfTight {
+                // Each machine fits on its own; two at once on a Mac with 8 GB take all of it.
+                VMNote(String(format: L("vm.memory.tight"), VMText.memory(Int64(clamping: ProcessInfo.processInfo.physicalMemory)),
+                              VMText.memory(taken)), tone: .warning, symbol: "memorychip")
+            }
             if center.profiles.isEmpty {
                 VStack(spacing: 14) {
                     LumenEmptyHint(symbol: "macwindow.on.rectangle", text: L("vm.empty"))
@@ -237,12 +261,19 @@ private struct VirtualMachinesScreen: View {
                         VMRow(profile: profile, state: center.running[profile.id], problem: center.problems[profile.id],
                               exit: center.exits[profile.id], guest: center.guests[profile.id],
                               disk: center.diskUsage[profile.id],
+                              asleep: center.asleep.contains(profile.id), wakeNote: center.wakeNotes[profile.id],
                               canStart: allowed && center.runningCount < VMRequirements.runningLimit,
                               startRefusal: allowed ? nil : L("vm.error.notInPlan"),
                               start: { center.start(profile.id) }, stop: { center.stop(profile.id) },
                               forceStop: { center.forceStop(profile.id) },
+                              shutDown: { center.shutDown(profile.id) },
+                              startAnew: { startingAnew = profile },
+                              network: { networkOf = profile },
+                              guestFullScreen: { center.toggleGuestFullScreen(profile.id) },
                               edit: { editing = VMEditorView.Draft(profile: profile, isNew: false) },
-                              delete: { deleting = profile })
+                              delete: { deleting = profile },
+                              canDuplicate: center.loadError == nil && allowed && center.isReady,
+                              duplicate: { newMachine(like: profile) })
                     }
                 }
             }
@@ -303,7 +334,17 @@ private struct VirtualMachinesScreen: View {
         let memory = VMRequirements.recommendedMemoryGB(hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
         // And scroll bars as the Mac its screen is has them: a MacBook's show only while scrolling.
         editing = VMEditorView.Draft(profile: VMProfile(name: name, memoryGB: memory, accent: VMAccent.random().rawValue,
-                                                        scrollBars: VMScrollBars.standard(for: .standard)?.rawValue), isNew: true)
+                                                        scrollBars: VMScrollBars.standard(for: .standard)?.rawValue,
+                                                        keyboard: VMKeyboardLayout.automatic), isNew: true)
+    }
+
+    /// A new machine with another's settings: the editor opens with them under a name of its own,
+    /// for the person to change what differs — the proxy, as a rule. It is another Mac
+    /// (`VMProfile.duplicate`): nothing of the first machine's disk is in it.
+    private func newMachine(like profile: VMProfile) {
+        error = nil
+        let name = VMProfile.nameForDuplicate(of: profile.name, taken: Set(center.profiles.map(\.name)))
+        editing = VMEditorView.Draft(profile: profile.duplicate(named: name), isNew: true, likeName: profile.name)
     }
 
     /// The person's Delete, confirmed: the one caller of the machines' one deletion path.
@@ -328,6 +369,11 @@ enum VMText {
 
     static func bytes(_ value: UInt64) -> String {
         bytes(Int64(clamping: value))
+    }
+
+    /// Memory as macOS says it: in binary units, so that a Mac with 8 GB reads "8 GB", not "8.59 GB".
+    static func memory(_ value: Int64) -> String {
+        value.formatted(.byteCount(style: .memory).locale(Localization.locale))
     }
 
     /// "about 12 min left", from what is still to fetch and how fast it comes.
@@ -390,14 +436,25 @@ private struct VMRow: View {
     let exit: ProxyCheckResult?
     let guest: VMGuestStatus?
     let disk: Int64?
+    /// The machine sleeps: a saved state waits for its next start (instant wake).
+    var asleep = false
+    /// Why it was started anew at this start instead of woken.
+    var wakeNote: VMWakeRefusal?
     let canStart: Bool
     /// Why Start is off, when it is not Apple's limit (the plan has no machines).
     var startRefusal: String?
     let start: () -> Void
     let stop: () -> Void
     let forceStop: () -> Void
+    var shutDown: () -> Void = {}
+    var startAnew: () -> Void = {}
+    var network: () -> Void = {}
+    var guestFullScreen: () -> Void = {}
     let edit: () -> Void
     let delete: () -> Void
+    /// A new machine can be made now (the base system is there, the plan has machines).
+    var canDuplicate = true
+    var duplicate: () -> Void = {}
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
@@ -452,6 +509,33 @@ private struct VMRow: View {
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                if let wakeNote, state?.phase == .running {
+                    // A machine with instant wake that started its macOS anew: why.
+                    Text(L("vm.row.notWoken.\(wakeNote.rawValue)"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(wakeNote == .unsupported ? Theme.warning : Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                if let guest, state?.phase == .running {
+                    // What the machine's macOS has, read back by its script, where it is not what
+                    // was asked for: said, not assumed.
+                    let differences = guest.differences(from: VMGuestSettings(profile: profile))
+                    if !differences.isEmpty {
+                        Text(String(format: L("vm.row.differs"), differences.map { difference in
+                            String(format: L("vm.row.differs.\(difference.what.rawValue)"), difference.has, difference.asked)
+                        }.joined(separator: "; ")))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.warning)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    if let note = nextStartNote {
+                        Text(note)
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
                 if let trouble = state?.trouble, state?.phase == .running {
                     // A machine without a proxy that reaches nothing: why, in the person's words.
                     Label(L("vm.row.trouble.\(trouble.rawValue)"), systemImage: "wifi.exclamationmark")
@@ -472,6 +556,13 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
+                if let udp = udpNote {
+                    // Whether HTTP/3 and WebRTC (UDP) leave the machine in this run, and why not.
+                    Label(udp.text, systemImage: udp.carried ? "checkmark.circle" : "nosign")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(udp.carried ? Theme.textTertiary : Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 10)
             if let state, state.phase == .running {
@@ -491,6 +582,32 @@ private struct VMRow: View {
         .card(padding: 0)
     }
 
+    /// What the row says of the machine's UDP while it runs: with a proxy, whether the proxy carries
+    /// it (the check before this start); without one, only that it is off while this Mac's own
+    /// settings name a proxy — otherwise it goes as the machine's TCP does, which needs no word.
+    private var udpNote: (text: String, carried: Bool)? {
+        guard let state, state.phase == .running, let udp = state.udp else { return nil }
+        if udp == .direct {
+            return state.viaSystemProxy ? (L("vm.row.udp.directViaSystemProxy"), false) : nil
+        }
+        return (L("vm.row.udp.\(udp.rawValue)"), udp.carriesUDP)
+    }
+
+    /// The keyboard's layouts, or browser mode's menu bar, were written in the machine's macOS at
+    /// its last start, and macOS takes them only at its next (`VMGuestStatus.waitsForTheNextStart`).
+    private var keyboardWaits: Bool { profile.keyboard != nil && guest?.keyboardFromNextStart == true }
+    private var menuBarWaits: Bool { guest?.menuBarFromNextStart == true }
+
+    /// With instant wake a machine put to sleep is woken, never started: it is shut down this once,
+    /// and its button says so. (A machine macOS cannot save is shut down when closed anyway.)
+    private var closeShutsDown: Bool { profile.instantWake && wakeNote != .unsupported && (keyboardWaits || menuBarWaits) }
+
+    /// What waits for the machine's next start, said while it runs.
+    private var nextStartNote: String? {
+        if closeShutsDown { return L(keyboardWaits ? "vm.row.keyboard.next.wake" : "vm.row.menuBar.next.wake") }
+        return keyboardWaits ? L("vm.row.keyboard.next") : nil
+    }
+
     private var country: String? {
         guard profile.proxy != nil || profile.localeFollowsConnection else { return nil }
         return (exit?.countryCode ?? profile.countryCode)?.uppercased()
@@ -500,9 +617,9 @@ private struct VMRow: View {
         switch state?.phase {
         case .checkingProxy?: return L(profile.proxy == nil ? "vm.row.checkingConnection" : "vm.row.checkingProxy")
         case .starting?: return L("vm.row.starting")
-        case .running?: return L("vm.row.running")
-        case .stopping?: return L("vm.row.stopping")
-        case nil: return nil
+        case .running?: return L(state?.woke == true ? "vm.row.running.woke" : "vm.row.running")
+        case .stopping?: return L(profile.instantWake && state?.shuttingDown != true ? "vm.row.sleeping" : "vm.row.stopping")
+        case nil: return asleep ? L("vm.row.asleep") : nil
         }
     }
 
@@ -534,21 +651,30 @@ private struct VMRow: View {
     private var action: some View {
         switch state?.phase {
         case nil:
-            Button(action: start) { Label(L("vm.row.start"), systemImage: "play.fill") }
+            // One mark for both: a sleeping machine's row already says "opens at once" beside its name
+            // (the owner, 15 November: no lightning on Open).
+            Button(action: start) { Label(L(asleep ? "vm.row.wake" : "vm.row.start"), systemImage: "play.fill") }
                 .buttonStyle(.lumenSecondary)
                 .disabled(!canStart)
-                .help(canStart ? L("vm.row.start.help")
+                .help(canStart ? L(asleep ? "vm.row.wake.help" : "vm.row.start.help")
                     : startRefusal ?? String(format: L("vm.limit.reached"), VMRequirements.runningLimit))
         case .checkingProxy?, .starting?:
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
-                Button(L("vm.row.stop"), action: stop)
+                // A sleeping machine being woken is closed as it is: put back to sleep once awake.
+                Button(L(profile.instantWake && asleep ? "vm.row.sleep" : "vm.row.stop"), action: stop)
                     .buttonStyle(.lumenGhost)
             }
         case .running?:
-            Button(L("vm.row.stop"), action: stop)
-                .buttonStyle(.lumenGhost)
-                .help(L("vm.row.stop.help"))
+            if closeShutsDown {
+                Button(L("vm.row.stop"), action: shutDown)
+                    .buttonStyle(.lumenGhost)
+                    .help(L("vm.row.stop.help"))
+            } else {
+                Button(L(profile.instantWake ? "vm.row.sleep" : "vm.row.stop"), action: stop)
+                    .buttonStyle(.lumenGhost)
+                    .help(L(profile.instantWake ? "vm.row.sleep.help" : "vm.row.stop.help"))
+            }
         case .stopping?:
             ProgressView().controlSize(.small)
         }
@@ -556,7 +682,21 @@ private struct VMRow: View {
 
     private var menu: some View {
         MoreMenu {
+            if state?.phase == .running {
+                Button(L("vm.row.network"), action: network)
+                Button(L("vm.row.guestFullScreen"), action: guestFullScreen)
+                Divider()
+            }
             Button(L("vm.row.edit"), action: edit)
+            Button(L("vm.row.duplicate"), action: duplicate)
+                .disabled(!canDuplicate)
+            if state?.phase == .running, profile.instantWake {
+                Button(L("vm.row.shutDown"), action: shutDown)
+            }
+            if state == nil, asleep {
+                Button(L("vm.row.startAnew"), action: startAnew)
+                    .disabled(!canStart)
+            }
             if state != nil {
                 Button(L("vm.row.forceStop"), action: forceStop)
             }
@@ -566,6 +706,38 @@ private struct VMRow: View {
         }
         .help(L("profiles.menu.more"))
         .accessibilityLabel(L("profiles.menu.more"))
+    }
+}
+
+/// The machines' rows as they say what happened, with sample machines — for
+/// `--render-ui-snapshots`, which has no vault and runs no machine: running, asleep, a proxy that
+/// did not pass the start's check, a disk that is nearly full, a start macOS refused, a machine
+/// shut down instead of kept.
+struct VMListPreview: View {
+    struct Sample: Identifiable {
+        var profile: VMProfile
+        var state: VMCenter.Running?
+        var problem: String?
+        var exit: ProxyCheckResult?
+        var guest: VMGuestStatus?
+        var disk: Int64?
+        var asleep = false
+        var id: UUID { profile.id }
+    }
+
+    let samples: [Sample]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(samples) { sample in
+                VMRow(profile: sample.profile, state: sample.state, problem: sample.problem, exit: sample.exit,
+                      guest: sample.guest, disk: sample.disk, asleep: sample.asleep, canStart: true,
+                      start: {}, stop: {}, forceStop: {}, edit: {}, delete: {})
+            }
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.surface)
     }
 }
 
@@ -610,6 +782,8 @@ struct VMEditorView: View {
     struct Draft: Identifiable {
         var profile: VMProfile
         var isNew: Bool
+        /// The machine whose settings a new one starts from ("New Machine with These Settings…").
+        var likeName: String?
         var id: UUID { profile.id }
     }
 
@@ -632,6 +806,7 @@ struct VMEditorView: View {
     /// 0: as a Mac has them.
     @State private var cores: Int
     @State private var soundEnabled: Bool
+    @State private var sleepsScreenWhenHidden: Bool
     /// "": as the base system has it.
     @State private var appearance: String
     @State private var accent: String
@@ -641,12 +816,15 @@ struct VMEditorView: View {
     @State private var startURL: String
     @State private var morePages: String
     @State private var startsFullScreen: Bool
+    @State private var instantWake: Bool
+    @State private var browserMode: Bool
     @State private var macAddress: String
     @State private var blockedHosts: String
     @State private var regionCode: String
     @State private var hourCycle: String
     @State private var firstWeekday: Int
     @State private var scrollBars: String
+    @State private var keyboard: String
     @State private var dockPosition: String
     /// "", "show" or "hide": as the base has it, always shown, hiding itself.
     @State private var dockHiding: String
@@ -680,6 +858,7 @@ struct VMEditorView: View {
         _memoryGB = State(initialValue: profile.memoryGB)
         _cores = State(initialValue: profile.cores ?? 0)
         _soundEnabled = State(initialValue: profile.soundEnabled)
+        _sleepsScreenWhenHidden = State(initialValue: profile.sleepsScreenWhenHidden)
         _appearance = State(initialValue: profile.appearance ?? "")
         _accent = State(initialValue: profile.accent ?? "")
         _computerName = State(initialValue: profile.computerName ?? "")
@@ -688,12 +867,15 @@ struct VMEditorView: View {
         _startURL = State(initialValue: profile.startURL ?? "")
         _morePages = State(initialValue: profile.moreStartURLs.joined(separator: "\n"))
         _startsFullScreen = State(initialValue: profile.startsFullScreen)
+        _instantWake = State(initialValue: profile.instantWake)
+        _browserMode = State(initialValue: profile.browserMode)
         _macAddress = State(initialValue: profile.macAddress)
         _blockedHosts = State(initialValue: profile.blockedHosts.joined(separator: "\n"))
         _regionCode = State(initialValue: profile.regionCode ?? "")
         _hourCycle = State(initialValue: profile.hourCycle ?? "")
         _firstWeekday = State(initialValue: profile.firstWeekday ?? 0)
         _scrollBars = State(initialValue: profile.scrollBars ?? "")
+        _keyboard = State(initialValue: profile.keyboard ?? "")
         _dockPosition = State(initialValue: profile.dockPosition ?? "")
         _dockHiding = State(initialValue: profile.dockAutohide.map { $0 ? "hide" : "show" } ?? "")
         _dockSize = State(initialValue: profile.dockSize ?? "")
@@ -745,6 +927,10 @@ struct VMEditorView: View {
                         subtitle: L("vm.editor.subtitle"))
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
+                    if let likeName = draft.likeName {
+                        // Made like another machine: what it is, and what it is not.
+                        note(String(format: L("vm.editor.duplicate.note"), likeName))
+                    }
                     section(L("vm.editor.section.machine")) { machineFields }
                     section(L("vm.editor.section.network")) { networkFields }
                     section(L("vm.editor.section.region")) { localeFields }
@@ -767,7 +953,7 @@ struct VMEditorView: View {
             .frame(minHeight: 360, maxHeight: 620)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(draft.isNew ? L("vm.editor.create") : L("common.save"), action: save)
                     .buttonStyle(.lumenPrimary)
@@ -854,10 +1040,27 @@ struct VMEditorView: View {
             .labelsHidden()
             .fixedSize()
             note(proxyChoice.isEmpty ? L("vm.editor.proxy.direct.note") : L("vm.editor.proxy.note"), warns: proxyChoice.isEmpty)
+            note(udpNote)
             if proxies.isEmpty {
                 note(L("vm.editor.proxy.empty"))
             }
         }
+    }
+
+    /// What the machine's UDP (HTTP/3, WebRTC) does with the proxy chosen, as far as its last check
+    /// said; it is checked again at every start.
+    private var udpNote: String {
+        let route: VMUDPRoute
+        switch proxyChoice {
+        case "":
+            route = .direct
+        case "current":
+            route = VMUDPRoute.expected(for: draft.profile.proxy, check: center.exits[draft.profile.id])
+        default:
+            guard let entry = chosenEntry else { return L("vm.editor.udp.unknown") }
+            route = VMUDPRoute.forProxy(entry.proxy, check: entry.lastCheck)
+        }
+        return L("vm.editor.udp.\(route.rawValue)")
     }
 
     // MARK: Where it says it is
@@ -927,6 +1130,19 @@ struct VMEditorView: View {
             ])
             note(L("vm.editor.weekday.note"))
         }
+        EditorField(L("vm.editor.keyboard")) {
+            Picker(L("vm.editor.keyboard"), selection: $keyboard) {
+                Text(L("vm.editor.asBase")).tag("")
+                Text(L("vm.editor.keyboard.auto")).tag(VMKeyboardLayout.automatic)
+                Divider()
+                ForEach(VMKeyboardLayout.allCases, id: \.rawValue) { layout in
+                    Text(L("vm.editor.keyboard.\(layout.rawValue)")).tag(layout.rawValue)
+                }
+            }
+            .labelsHidden()
+            .fixedSize()
+            note(L("vm.editor.keyboard.note"))
+        }
     }
 
     // MARK: The Mac it is
@@ -956,7 +1172,14 @@ struct VMEditorView: View {
                     .map { (value: $0, title: String(format: L("vm.editor.cores.count"), $0)) })
             note(cores == 0 ? L("vm.editor.cores.note") : L("vm.editor.cores.fewer"), warns: cores != 0)
         }
-        EditorToggle(L("vm.editor.sound"), detail: L("vm.editor.sound.detail"), isOn: $soundEnabled)
+        EditorToggle(L("vm.editor.sound"), detail: L(instantWake ? "vm.editor.sound.asleep" : "vm.editor.sound.detail"),
+                     isOn: Binding(get: { soundEnabled && !instantWake }, set: { soundEnabled = $0 }))
+            .disabled(instantWake)
+        EditorToggle(L("vm.editor.screenSleep"), detail: L("vm.editor.screenSleep.detail"), isOn: $sleepsScreenWhenHidden)
+        if sleepsScreenWhenHidden, center.guests[draft.profile.id]?.screenSleepWouldLock == true {
+            // The machine said so when it was last asked: its display was left on.
+            note(L("vm.editor.screenSleep.locks"), warns: true)
+        }
     }
 
     // MARK: How its system looks
@@ -1019,17 +1242,24 @@ struct VMEditorView: View {
 
     @ViewBuilder
     private var startFields: some View {
-        EditorToggle(L("vm.editor.opensSafari"), detail: L("vm.editor.opensSafari.detail"), isOn: $opensSafari)
+        EditorToggle(L("vm.editor.instantWake"), detail: L("vm.editor.instantWake.detail"), isOn: $instantWake)
+        if instantWake {
+            note(String(format: L("vm.editor.instantWake.note"), memoryGB))
+        }
+        EditorToggle(L("vm.editor.browserMode"), detail: L("vm.editor.browserMode.detail"), isOn: $browserMode)
+        EditorToggle(L("vm.editor.opensSafari"), detail: L("vm.editor.opensSafari.detail"),
+                     isOn: Binding(get: { opensSafari || browserMode }, set: { opensSafari = $0 }))
+            .disabled(browserMode)
         EditorField(L("vm.editor.start")) {
             TextField(L("vm.editor.start"), text: $startURL, prompt: Text(verbatim: ""))
                 .lumenField("https://", isEmpty: startURL.isEmpty)
         }
-        .disabled(!opensSafari)
+        .disabled(!(opensSafari || browserMode))
         EditorField(L("vm.editor.start.more")) {
             lines($morePages, placeholder: "https://", height: 64)
             note(String(format: L("vm.editor.start.more.note"), VMProfile.moreStartURLsLimit))
         }
-        .disabled(!opensSafari || startURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        .disabled(!(opensSafari || browserMode) || startURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         EditorToggle(L("vm.editor.fullScreen"), detail: L("vm.editor.fullScreen.detail"), isOn: $startsFullScreen)
     }
 
@@ -1079,14 +1309,18 @@ struct VMEditorView: View {
         profile.memoryGB = memoryGB
         profile.cores = cores == 0 ? nil : cores
         profile.soundEnabled = soundEnabled
+        profile.sleepsScreenWhenHidden = sleepsScreenWhenHidden
         profile.appearance = appearance.isEmpty ? nil : appearance
         profile.accent = accent.isEmpty ? nil : accent
-        profile.opensSafari = opensSafari
+        profile.opensSafari = opensSafari || browserMode
         profile.lumenWallpaper = lumenWallpaper
         profile.startsFullScreen = startsFullScreen
+        profile.instantWake = instantWake
+        profile.browserMode = browserMode
         profile.hourCycle = hourCycle.isEmpty ? nil : hourCycle
         profile.firstWeekday = firstWeekday == 0 ? nil : firstWeekday
         profile.scrollBars = scrollBars.isEmpty ? nil : scrollBars
+        profile.keyboard = keyboard.isEmpty ? nil : keyboard
         profile.dockPosition = dockPosition.isEmpty ? nil : dockPosition
         profile.dockAutohide = dockHiding.isEmpty ? nil : dockHiding == "hide"
         profile.dockSize = dockSize.isEmpty ? nil : dockSize

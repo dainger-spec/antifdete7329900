@@ -330,7 +330,7 @@ differ from walk to walk (the record leaves them out).
 | View › Show Reading List Sidebar | ⌃⌘2 | nothing seen | nothing seen | **keep** |
 | View › Show Reader | ⇧⌘R | nothing seen | nothing seen | **keep** |
 | View › Show Tab Overview | ⇧⌘\ | changes the window | changes the window | **keep** |
-| View › Show Downloads | ⌥⌘L | disabled | disabled | **keep** |
+| View › Show Downloads | ⌥⌘L | disabled | disabled | **ours** since 15 November (the columns are run 520's; recorded as our alert, not walked yet): was disabled — Safari's downloads go through services a profile is refused, and a download did nothing; the item lists the profile's own downloads, where each file went and how it ended (`HostedDownloads`) |
 | View › Stop | ⌘. | disabled | disabled | **keep** |
 | View › Reload Page | ⌘R | disabled | disabled | **keep** |
 | View › Reload Page From Origin | ⌥⌘R | disabled | disabled | **keep** |
@@ -349,7 +349,7 @@ differ from walk to walk (the record leaves them out).
 | History › Home | ⇧⌘H | nothing seen | nothing seen | **fixed**: (the owner's decision) the profile's start page, Safari's own home page setting in the process's argument domain; Safari's default (apple.com/startpage) for a profile without one |
 | History › Return to Search Results | ⌥⌘S | disabled | disabled | **keep** |
 | History › Reopen Last Closed Window or Tab | ⇧⌘T | nothing seen | nothing seen | **keep** |
-| History › Reopen All Windows from Last Session | - | disabled | disabled | **keep** |
+| History › Reopen All Windows from Last Session | - | disabled | disabled | **keep**: Safari's saved session has no place in a profile; what a profile left open comes back by its own Restore tabs (`SafariTabs`, Settings → Startup) |
 | Bookmarks › Show Start Page | - | changes the window | changes the window | **keep** |
 | Bookmarks › Show Bookmarks | - | nothing seen | changes the window | **keep** |
 | Bookmarks › Edit Bookmarks | ⌥⌘B | changes the window | changes the window | **keep** |

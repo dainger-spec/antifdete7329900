@@ -114,7 +114,12 @@ final class HostileInputTests: XCTestCase {
         let frames = HostileFrames.valid()
         var now = 1.0
         freshConnections(now)
-        var replies = 0, segments = 0
+        var replies = 0, segments = 0, datagrams = 0
+        var relayingConfiguration = Wire.configuration(upstream: .socks5(host: "127.0.0.1", port: 1080, username: nil, password: nil),
+                                                       blocked: ["blocked.example"])
+        relayingConfiguration.relaysUDP = true
+        var relaying = LinkResponder(configuration: relayingConfiguration, dnsPoolCapacity: 50)
+        var relayCounters = VMNetCounters()
         for round in 0..<120_000 {
             now += 0.001
             let frame = HostileFrames.next(from: frames, &random)
@@ -145,6 +150,20 @@ final class HostileInputTests: XCTestCase {
                     }
                     _ = TCPConnection.resetFrame(answering: segment, from: packet.destination, to: packet.source,
                                                  guestMAC: Wire.guestMAC, gatewayMAC: Wire.gatewayMAC, scratch: scratch)
+                case .udp:
+                    XCTFail("UDP handed over by a network that does not relay it")
+                }
+                // The same frame to a network that relays UDP: what it hands over is unicast, to a
+                // port that may be relayed, and wraps into a SOCKS5 datagram whatever its payload.
+                if case .udp(_, let packet, let datagram) = relaying.handle(bytes, now: now, counters: &relayCounters) {
+                    datagrams += 1
+                    XCTAssertTrue(UDPRelayRules.isRelayable(port: datagram.destinationPort))
+                    XCTAssertFalse(packet.destination.isIn(0xE000_0000, 4))
+                    XCTAssertNotEqual(packet.destination, .broadcast)
+                    XCTAssertNotEqual(packet.source, .unspecified)
+                    XCTAssertLessThanOrEqual(datagram.payload.count, packet.payload.count)
+                    let wrapped = SOCKSDatagram.wrap(datagram.payload, to: .name("example.com", port: datagram.destinationPort))
+                    XCTAssertEqual(wrapped?.count, 7 + 11 + datagram.payload.count)
                 }
             }
             // Every frame the connections sent is a well-formed TCP segment.
@@ -158,6 +177,7 @@ final class HostileInputTests: XCTestCase {
         }
         XCTAssertGreaterThan(replies, 1_000)
         XCTAssertGreaterThan(segments, 1_000)
+        XCTAssertGreaterThan(datagrams, 100)
         XCTAssertLessThanOrEqual(responder.dns.pool.count, 50)
     }
 

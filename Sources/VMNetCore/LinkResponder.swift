@@ -1,10 +1,11 @@
 import Foundation
 
 /// Everything on the guest's wire that the stack answers by itself, without a connection: ARP for
-/// the gateway, a ping of the gateway, DHCP, DNS, and "nothing is there" for other UDP. TCP
-/// segments are sorted out and handed back for `NetworkLoop` to end at the proxy.
+/// the gateway, a ping of the gateway, DHCP, DNS, the time (NTP), and "nothing is there" for other
+/// UDP. TCP segments are sorted out and handed back for `NetworkLoop` to end at the proxy.
 ///
-/// No sockets and no clock of its own: a frame goes in with the time, frames come out.
+/// No sockets: a frame goes in with the time, frames come out. The one clock it reads is the
+/// calendar's (`wallClock`), for the guest's question what time it is.
 struct LinkResponder {
     /// What a frame from the guest asks of the stack.
     enum Verdict {
@@ -14,6 +15,10 @@ struct LinkResponder {
         case reply([UInt8])
         /// A TCP segment for the terminator, with who sent it.
         case tcp(source: VMNetMAC, packet: IPv4Packet, segment: TCPSegment)
+        /// A datagram the proxy's UDP relay may carry (`VMNetConfiguration.relaysUDP`), with who
+        /// sent it: unicast, to a port that is not this machine's or its network's. Where it may
+        /// go is the loop's to decide (`DestinationPolicy`), as for a connection.
+        case udp(source: VMNetMAC, packet: IPv4Packet, datagram: UDPDatagram)
     }
 
     /// How many "port unreachable" answers a second, and how many at once. Enough for a page
@@ -27,14 +32,29 @@ struct LinkResponder {
     private var identification = UInt16.random(in: 0...UInt16.max)
     private var unreachableTokens = LinkResponder.unreachableBurst
     private var unreachableRefilled = -Double.infinity
+    /// Seconds since 1970, as the guest is told the time; the tests give their own.
+    var wallClock: () -> Double = { Date().timeIntervalSince1970 }
 
     init(configuration: VMNetConfiguration, dnsPoolCapacity: Int = 60_000) {
         self.configuration = configuration
         dhcp = DHCPServer(guestMAC: configuration.guestMAC, guestAddress: configuration.guestAddress,
                           gatewayAddress: configuration.gatewayAddress, prefixLength: configuration.prefixLength,
                           mtu: configuration.effectiveMTU)
-        dns = DNSResponder(blockedHostSuffixes: configuration.blockedHostSuffixes, poolCapacity: dnsPoolCapacity)
+        dns = DNSResponder(blockedHostSuffixes: configuration.blockedHostSuffixes, poolCapacity: dnsPoolCapacity,
+                           knownNames: configuration.knownNames)
     }
+
+    /// Whether a name (lower case) is blocked, or under a blocked one.
+    func isBlocked(_ name: String) -> Bool { dns.isBlocked(name) }
+
+    /// Blocks a name and everything under it from now on.
+    mutating func block(_ suffix: String) { dns.block(suffix) }
+
+    /// The blocked name the guest last asked for, once.
+    mutating func takeBlockedName() -> String? { dns.takeBlockedName() }
+
+    /// Every name the guest was given a fake address for, with it.
+    var knownNames: [VMNetKnownName] { dns.knownNames }
 
     /// The host name a fake address stands for, when the guest connects to it.
     mutating func name(forFakeAddress address: VMNetIPv4) -> String? {
@@ -119,18 +139,53 @@ struct LinkResponder {
                                            destination: packet.source, destinationPort: datagram.sourcePort,
                                            payload: reply, identification: nextIdentification()))
         }
+        if datagram.destinationPort == TimeResponder.port, toGateway, isUnicast(packet.source), isUnicast(packet.destination),
+           let reply = TimeResponder.reply(to: datagram.payload, now: wallClock(), reference: packet.destination) {
+            // What time it is, whoever was asked: this Mac's clock, "from" the server asked.
+            counters.timeQueries += 1
+            return .reply(FrameBuilder.udp(destinationMAC: frame.source, sourceMAC: configuration.gatewayMAC,
+                                           source: packet.destination, sourcePort: TimeResponder.port,
+                                           destination: packet.source, destinationPort: datagram.sourcePort,
+                                           payload: reply, identification: nextIdentification()))
+        }
+        // Through the proxy's UDP relay, where the run has one: unicast only, and never to a port
+        // that is this machine's or its network's (DNS, the time, DHCP, mDNS…).
+        if configuration.relaysUDP, toGateway, isUnicast(packet.source), isUnicast(packet.destination),
+           UDPRelayRules.isRelayable(port: datagram.destinationPort) {
+            return .udp(source: frame.source, packet: packet, datagram: datagram)
+        }
         // Any other UDP has no way out. Said at once — "nothing listens there" — so that QUIC and
         // STUN give up now instead of after their timeouts. Not for broadcasts and multicast.
         counters.datagramsDropped += 1
-        guard toGateway, isUnicast(packet.source), isUnicast(packet.destination), takeUnreachableToken(now) else { return .ignore }
-        // The error quotes the datagram's IP header and its first eight bytes (RFC 792).
-        let quoted = Array(packet.header) + Array(packet.payload.prefix(8))
-        return quoted.withUnsafeBytes { quote in
-            .reply(FrameBuilder.icmp(destinationMAC: frame.source, sourceMAC: configuration.gatewayMAC,
-                                     source: packet.destination, destination: packet.source,
-                                     type: ICMPMessage.destinationUnreachable, code: ICMPMessage.portUnreachable, rest: 0,
-                                     payload: quote, identification: nextIdentification()))
+        guard toGateway, isUnicast(packet.source), isUnicast(packet.destination),
+              let reply = portUnreachable(to: frame.source, packet: packet, now: now) else { return .ignore }
+        return .reply(reply)
+    }
+
+    /// "Port unreachable" for a datagram the guest sent (`packet`), "from" where it was sent to;
+    /// nil when too many were said in the last moment. The error quotes the datagram's IP header
+    /// and its first eight bytes (RFC 792).
+    mutating func portUnreachable(to guestMAC: VMNetMAC, packet: IPv4Packet, now: Double) -> [UInt8]? {
+        portUnreachable(to: guestMAC, quoting: Array(packet.header) + Array(packet.payload.prefix(8)),
+                        from: packet.destination, to: packet.source, now: now)
+    }
+
+    /// The same, for a datagram kept since (`quote`: its IP header and first eight bytes).
+    mutating func portUnreachable(to guestMAC: VMNetMAC, quoting quote: [UInt8], from source: VMNetIPv4, to destination: VMNetIPv4,
+                                  now: Double) -> [UInt8]? {
+        guard takeUnreachableToken(now) else { return nil }
+        return quote.withUnsafeBytes { quoted in
+            FrameBuilder.icmp(destinationMAC: guestMAC, sourceMAC: configuration.gatewayMAC, source: source, destination: destination,
+                              type: ICMPMessage.destinationUnreachable, code: ICMPMessage.portUnreachable, rest: 0,
+                              payload: quoted, identification: nextIdentification())
         }
+    }
+
+    /// A datagram from the proxy's relay, for the guest: "from" the address and port it sent to.
+    mutating func datagram(to guestMAC: VMNetMAC, from source: VMNetIPv4, port sourcePort: UInt16, to destination: VMNetIPv4,
+                           port destinationPort: UInt16, payload: UnsafeRawBufferPointer) -> [UInt8] {
+        FrameBuilder.udp(destinationMAC: guestMAC, sourceMAC: configuration.gatewayMAC, source: source, sourcePort: sourcePort,
+                         destination: destination, destinationPort: destinationPort, payload: payload, identification: nextIdentification())
     }
 
     private mutating func takeUnreachableToken(_ now: Double) -> Bool {

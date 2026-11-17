@@ -34,6 +34,10 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     /// The name, description and tags the vault had at the last run: what differs from them now was
     /// changed here, and goes to the vault at the next run (step 5).
     public var syncedState: SyncedState?
+    /// When the person last changed the name, description or tags of a session made from the vault,
+    /// since the last run: the time that decides between that change and one the Mac made to the
+    /// same field (step 5). Nil: not changed here since.
+    public var syncedEditedAt: Date?
 
     public init(id: UUID = UUID(), storeID: UUID = UUID(), name: String, notes: String = "", tags: [String] = [],
                 proxyID: UUID? = nil, settings: SessionSettings = SessionSettings(), createdAt: Date = Date(),
@@ -51,7 +55,8 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy, syncedProfileID, syncedState
+        case id, storeID, name, notes, tags, proxyID, settings, createdAt, lastOpenedAt, boundToProxy, syncedProfileID, syncedState,
+             syncedEditedAt
     }
 
     /// A session saved before `boundToProxy` existed is bound if it has a proxy.
@@ -69,6 +74,7 @@ public struct Session: Codable, Identifiable, Equatable, Sendable {
         boundToProxy = try c.decodeIfPresent(Bool.self, forKey: .boundToProxy) ?? (proxyID != nil)
         syncedProfileID = try c.decodeIfPresent(UUID.self, forKey: .syncedProfileID)
         syncedState = try c.decodeIfPresent(SyncedState.self, forKey: .syncedState)
+        syncedEditedAt = try c.decodeIfPresent(Date.self, forKey: .syncedEditedAt)
     }
 }
 
@@ -176,6 +182,11 @@ public struct ProxyEntry: Codable, Identifiable, Equatable, Sendable {
 
     /// What the list shows when the entry has no name of its own.
     public var displayName: String { name.isEmpty ? "\(host):\(port)" : name }
+
+    /// The same proxy to connect to: kind, address and login (the password is in the Keychain).
+    public func sameConnection(as other: ProxyEntry) -> Bool {
+        kind == other.kind && host == other.host && port == other.port && username == other.username
+    }
 }
 
 /// What the last check of a proxy found.

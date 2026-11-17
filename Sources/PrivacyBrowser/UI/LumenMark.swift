@@ -338,3 +338,33 @@ struct LumenLockup: View {
     /// New Tab page and launch screen: mark 36, wordmark 22, gap 14.
     static let large = LumenLockup(markSize: 36, wordmarkHeight: 22, gap: 14)
 }
+
+/// The logo as the website now shows it (the owner, 15 November 2026: «вот наш новый лого … надо в
+/// приложении сверху слева где старый поменять на этот»): the split disc alone, no tile, and the
+/// name "Lumen" in the system's bold — not the caps logotype. The disc stands as high as the
+/// name's capitals, centred on them.
+struct LumenBrandLockup: View {
+    var glyphSize: CGFloat
+    var fontSize: CGFloat
+    var gap: CGFloat
+    var color: Color = Theme.textPrimary
+
+    var body: some View {
+        HStack(alignment: .center, spacing: gap) {
+            LumenGlyph(size: glyphSize, color: Theme.markGlyph)
+            Text(verbatim: "Lumen")
+                .font(.system(size: fontSize, weight: .bold))
+                .tracking(-fontSize * 0.02)
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: "Lumen"))
+    }
+
+    /// Sidebar, top left: disc 19, name 17 pt, gap 7.
+    static let sidebar = LumenBrandLockup(glyphSize: 19, fontSize: 17, gap: 7)
+    /// New Tab page: disc 34, name 31 pt, gap 11.
+    static let large = LumenBrandLockup(glyphSize: 34, fontSize: 31, gap: 11)
+}

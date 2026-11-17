@@ -1,12 +1,12 @@
 import AppKit
 
-/// The menu bar of a profile's process whose window is our own (an iPhone view, or the simplified
-/// mode): without Safari's chrome nothing gave that process a menu bar at all, so ⌘T, ⌘W, ⌘L and
-/// the rest did nothing, and an iPhone view could not open a second tab (the owner, 8 November).
+/// The menu bar of a profile's process whose window is our own (the simplified mode): without
+/// Safari's chrome nothing gave that process a menu bar at all, so ⌘T, ⌘W, ⌘L and the rest did
+/// nothing, and such a window could not open a second tab (the owner, 8 November).
 /// The browser's commands go down the responder chain to the key window's `BrowserWindowController`:
 /// what a person does in Safari's window — edit, find on the page, zoom, print, save, share, history,
 /// bookmarks, downloads, full screen — does the same here (the owner, 8 November: text would not
-/// paste in an iPhone view; the self-test's "window actions" group presses each key).
+/// paste in our window; the self-test's "window actions" group presses each key).
 @MainActor
 enum OwnWindowMenu {
     static func install() {
@@ -67,7 +67,6 @@ enum OwnWindowMenu {
             item(L("menu.back"), #selector(BrowserWindowController.backCommand(_:)), "["),
             item(L("menu.forward"), #selector(BrowserWindowController.forwardCommand(_:)), "]"),
             .separator(),
-            item(L("menu.showAllTabs"), #selector(BrowserWindowController.showAllTabsCommand(_:)), "\\"),
             item(L("menu.showNextTab"), #selector(BrowserWindowController.nextTabCommand(_:)), "}"),
             item(L("menu.showPreviousTab"), #selector(BrowserWindowController.previousTabCommand(_:)), "{"),
         ]))
@@ -99,7 +98,7 @@ enum OwnWindowMenu {
         return item
     }
 
-    /// ⌃⌘F, through the window's controller: an iPhone view has none (an iPhone has no full screen).
+    /// ⌃⌘F, through the window's controller.
     private static func fullScreenItem() -> NSMenuItem {
         item(L("menu.enterFullScreen"), #selector(BrowserWindowController.fullScreenCommand(_:)), "f", modifiers: [.command, .control])
     }

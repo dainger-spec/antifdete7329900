@@ -38,6 +38,10 @@ public struct ScenarioSchedule: Codable, Equatable, Sendable, Identifiable {
     public var lastRunAt: Date?
     /// How the last run that came due went.
     public var lastResult: Result?
+    /// How the run that was started last ended; nil while it is still going, before the first,
+    /// and for a warm-up (the warm-up screen says how that went). Written by a later version than
+    /// the first schedules: an older file has none, and an older version leaves it out.
+    public var lastEnd: End?
 
     public enum Result: String, Codable, Sendable {
         case started
@@ -47,6 +51,37 @@ public struct ScenarioSchedule: Codable, Equatable, Sendable, Identifiable {
         case missed
         /// The plan has no automation.
         case notInPlan
+    }
+
+    /// How a scenario's run that a schedule started ended: a schedule's row says it, since nobody
+    /// may have been looking when the run was made.
+    public struct End: Codable, Equatable, Sendable {
+        public enum Kind: String, Codable, Sendable {
+            case finished
+            /// A command failed, or the script threw: `reason` is the error's first line.
+            case failed
+            /// Stopped before its end: by the person, with its profile, or by the plan.
+            case stopped
+        }
+
+        public static let maximumReasonLength = 300
+
+        public var kind: Kind
+        /// Why it failed, in the run's own words (with the scenario's line, when the error has
+        /// one); for a stop, who stopped it (`byUser`, `profileStopped`, `rightsEnded`).
+        public var reason: String?
+        public var endedAt: Date
+        /// How long the run took, in seconds.
+        public var duration: TimeInterval
+
+        public init(kind: Kind, reason: String? = nil, endedAt: Date, duration: TimeInterval) {
+            self.kind = kind
+            // One line, of a length a row holds: an error's text can be a page's own.
+            let line = reason?.split(whereSeparator: \.isNewline).first.map(String.init)
+            self.reason = line.map { $0.count > Self.maximumReasonLength ? String($0.prefix(Self.maximumReasonLength)) + "…" : $0 }
+            self.endedAt = endedAt
+            self.duration = max(0, duration)
+        }
     }
 
     public init(id: UUID = UUID(), action: Action, profileID: UUID, when: When, jitterMinutes: Int = 15, isEnabled: Bool = true) {
@@ -137,8 +172,20 @@ public struct ScenarioSchedules: Codable, Equatable, Sendable {
                                 random: (ClosedRange<Int>) -> Int = { Int.random(in: $0) }) {
         guard let index = schedules.firstIndex(where: { $0.id == id }) else { return }
         schedules[index].lastResult = result
-        if result == .started { schedules[index].lastRunAt = now }
+        if result == .started {
+            schedules[index].lastRunAt = now
+            // A new run is under way: the end of the one before is no longer the last run's.
+            schedules[index].lastEnd = nil
+        }
         schedules[index].nextRunAt = schedules[index].nextRun(after: now, calendar: calendar, random: random)
+    }
+
+    /// The run schedule `id` started last has ended at `now`, `kind` (and why): kept for its row.
+    /// Its length is counted from when the run was started (`lastRunAt`). Nothing is kept for a
+    /// schedule that is gone, or one that has started no run.
+    public mutating func recordEnd(_ id: UUID, _ kind: ScenarioSchedule.End.Kind, reason: String? = nil, at now: Date) {
+        guard let index = schedules.firstIndex(where: { $0.id == id }), let started = schedules[index].lastRunAt else { return }
+        schedules[index].lastEnd = ScenarioSchedule.End(kind: kind, reason: reason, endedAt: now, duration: now.timeIntervalSince(started))
     }
 
     /// Its profile is busy now (running a scenario, starting, being sealed): looked at again then.

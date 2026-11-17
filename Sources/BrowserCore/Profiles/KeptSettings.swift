@@ -127,8 +127,11 @@ extension ProfileRepository {
 
     /// The person chose the kept version `file` for the profile's settings: it is saved as a new
     /// edit of them (the newest, so that sync takes it everywhere), and the settings it replaces
-    /// are kept in its file in its place — nothing is dropped. A version that does not open, or
-    /// that a newer version of the app wrote, is refused.
+    /// are kept as a version of their own — nothing is dropped. They are kept first, before
+    /// anything changes: a step that fails after it leaves a version twice, never one lost (the
+    /// replaced settings, proxy credentials included, went with a save that failed half-way: audit
+    /// 3, #20). The chosen version's file goes once its settings are the profile's. A version that
+    /// does not open, or that a newer version of the app wrote, is refused.
     public func useKeptSettings(_ file: String, for id: UUID, at time: Date = Date()) throws {
         guard Self.keptSettingsNumber(file) != nil else { throw CoreError.invalidConfiguration("not a kept version: \(file)") }
         let key = try profileKey(for: id)
@@ -138,9 +141,18 @@ extension ProfileRepository {
         let currentSealed = try SecureFile.read(configURL(for: id))
         var saved = chosen.keepingStoredState(of: current)
         saved.settingsModifiedAt = time
+        try saved.validate()
+        try keepSettingsVersion(currentSealed, origin: .replaced, for: id, at: time)
         try saveConfiguration(saved, for: id)
-        try SecureFile.write(currentSealed, to: url)
-        record(KeptSettingsRecord(file: file, origin: .replaced, device: PasswordVault.deviceName, keptAt: time), for: id)
+        try? FileManager.default.removeItem(at: url)
+        dropRecord(of: file, for: id)
+    }
+
+    /// The record of a kept version that is gone.
+    private func dropRecord(of file: String, for id: UUID) {
+        if let records = try? keptSettingsRecordsFile(for: id), let all = (try? records.load()) ?? nil {
+            try? records.save(all.filter { $0.file != file })
+        }
     }
 
     /// The person removes the kept version `file`, having looked at it. One that does not open is
@@ -152,8 +164,6 @@ extension ProfileRepository {
             throw CoreError.corruptData("\(file) cannot be read; it is kept as it is")
         }
         try FileManager.default.removeItem(at: directory(for: id).appendingPathComponent(file))
-        if let records = try? keptSettingsRecordsFile(for: id), let all = (try? records.load()) ?? nil {
-            try? records.save(all.filter { $0.file != file })
-        }
+        dropRecord(of: file, for: id)
     }
 }

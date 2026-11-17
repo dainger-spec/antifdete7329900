@@ -75,14 +75,67 @@ class LumenUITestCase: XCTestCase {
 
     /// Scrolls the open form until `element` can be touched, as a person scrolls to a row: a long
     /// form (a session's settings) keeps rows below the screen out of reach (CI run 5: "DuckDuckGo").
+    /// Back up the form when the element stands above what is shown — a field higher up, after one
+    /// further down was typed into (the proxy's form at the largest text: its name below the long
+    /// footer, then its line at the top) — or when it never came going down.
     @discardableResult
     func reveal(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
-        for _ in 0..<12 {
-            if element.exists && element.isHittable { return element }
-            app.swipeUp(velocity: .slow)
+        for attempt in 0..<16 {
+            if reachable(element) { return element }
+            // A form still sliding in: a moment before the first drag, which would otherwise go back
+            // and pull the sheet down.
+            if attempt == 0, element.exists {
+                usleep(700_000)
+                if reachable(element) { return element }
+            }
+            scroll(towardStart: isAbove(element) || (attempt >= 10 && !element.exists))
         }
-        XCTAssertTrue(element.exists && element.isHittable, what, file: file, line: line)
+        XCTAssertTrue(reachable(element), what, file: file, line: line)
         return element
+    }
+
+    /// `element` takes a touch where a person sees it: hittable, and not tucked under the bars at the
+    /// top. XCUITest calls a row hittable by the sliver of it left under the status bar (devices run
+    /// 150: the sign-out row, scrolled up behind the bars, "took a touch"; the touch opened nothing).
+    func reachable(_ element: XCUIElement) -> Bool {
+        element.exists && element.isHittable && !isAbove(element)
+    }
+
+    /// `element` is there, above the part of the screen below the bar.
+    func isAbove(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame, window = app.windows.firstMatch.frame
+        return !frame.isEmpty && !window.isEmpty && frame.midY < window.minY + window.height * 0.15
+    }
+
+    /// One drag of the open screen, as a person scrolls it: toward its end (up) or back (down). With
+    /// the keyboard up a person drags the part of the form the keyboard leaves free, beside its rows:
+    /// DeviceTests at the largest text (devices run 143) — the swipe from the screen's middle started
+    /// on the field being typed in, just above the keyboard, and twelve of them never moved the form;
+    /// the tags' field stayed under the keyboard. Back up, a shorter drag held at its end, so that a
+    /// sheet whose list has come back to its top is not pulled down and closed. Toward the end without
+    /// a keyboard, the swipe the other tests have always made.
+    func scroll(towardStart: Bool) {
+        let keyboard = app.keyboards.firstMatch
+        let window = app.windows.firstMatch.frame
+        let up = keyboard.exists
+        if !towardStart && !up || window.isEmpty {
+            towardStart ? app.swipeDown(velocity: .slow) : app.swipeUp(velocity: .slow)
+            return
+        }
+        let top = window.minY + window.height * 0.15                      // below the bar
+        // The keyboard's frame leaves out the bar above its keys (AutoFill's "Passwords", the word
+        // suggestions): devices run 147, a drag started on that bar and the sign-in form never moved.
+        let bottom = up ? min(window.maxY, keyboard.frame.minY - 56) : window.minY + window.height * 0.85
+        guard bottom - top > 80 else {
+            towardStart ? app.swipeDown(velocity: .slow) : app.swipeUp(velocity: .slow)
+            return
+        }
+        let screen = app.coordinate(withNormalizedOffset: .zero)
+        let x = window.minX + 12                                           // the form's margin, no field there
+        let at = { (share: CGFloat) in screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * share)) }
+        let (from, to) = towardStart ? (at(0.1), at(up ? 0.9 : 0.5)) : (at(0.9), at(0.1))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
     /// The one of the matching buttons a person can touch (iOS 27 shows a dialog's button twice in
@@ -124,9 +177,19 @@ class LumenUITestCase: XCTestCase {
             }
         }
         field.typeText(text)
-        var now = (field.value as? String) ?? ""
-        if now == (field.placeholderValue ?? "") { now = "" }
-        XCTAssertEqual(now, text, "the field holds what was typed", file: file, line: line)
+        // A slow simulator shows the text a moment later, or loses keys (the SE on iOS 18.6, devices
+        // run 154: the field held "http://" of the address just after the typing): waited for, and
+        // if keys were lost, typed once more from empty, as a person types it again.
+        let typed = NSPredicate(format: "value == %@", text)
+        if XCTWaiter.wait(for: [expectation(for: typed, evaluatedWith: field)], timeout: 10) != .completed {
+            let partial = held()
+            if !partial.isEmpty {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: partial.count + 2))
+            }
+            field.typeText(text)
+            _ = XCTWaiter.wait(for: [expectation(for: typed, evaluatedWith: field)], timeout: 10)
+        }
+        XCTAssertEqual(held(), text, "the field holds what was typed", file: file, line: line)
     }
 
     // MARK: Browser
@@ -305,28 +368,31 @@ class LumenUITestCase: XCTestCase {
         // An offer that came late, after the previous form (CI run 15), is caught here.
         XCTAssertFalse(passwordOffer.exists, "the password prompt: an offer to save a password is on the screen before adding \(name)")
         // A touch while the previous form is still closing is lost (CI run 10): touch again until it opens.
+        // The form is known by its first field, the line: the name's field is below a long note, at the
+        // largest text out of sight and not yet in the tree (devices run 146).
         let add = wait(app.buttons["newProxy"], "the list offers a new proxy")
-        let field = app.textFields["proxyName"]
-        for _ in 0..<3 where !field.exists {
+        let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
+        for _ in 0..<3 where !line.exists {
             if add.isHittable { add.tap() }
-            _ = field.waitForExistence(timeout: 5)
+            _ = line.waitForExistence(timeout: 5)
         }
-        wait(field, "the new proxy form opens (for \(name))")
-        typeInto(field, name)
-        // The proxy as one line, its type in the scheme — as a person pastes what a provider gave.
+        wait(line, "the new proxy form opens (for \(name))")
+        // Filled as a person fills it, from the top: the proxy as one line, its type in the scheme — as a
+        // person pastes what a provider gave —, then its name.
         let scheme = kind == "HTTP" ? "http" : "socks5"
         let credentials = user.isEmpty ? "" : "\(user):\(password)@"
-        let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
-        typeInto(wait(line, "the form takes the proxy as one line"), "\(scheme)://\(credentials)\(host):\(port)")
+        typeInto(line, "\(scheme)://\(credentials)\(host):\(port)")
         XCTAssertFalse(app.staticTexts["proxyLineProblem"].exists, "the line of \(name) is read as a proxy")
+        typeInto(app.textFields["proxyName"], name)
         // A touch while the keyboard still moves is lost (CI run 29: the form of the second proxy stayed
-        // open): if the form is still there after 5 s, its button is touched again.
+        // open): if the form is still there after 5 s, its button is touched again. The form is there
+        // while its bar's button is (its fields may have scrolled out of the tree).
         let save = app.buttons["saveProxy"]
         save.tap()
-        for _ in 0..<2 where !field.waitForNonExistence(timeout: 5) {
+        for _ in 0..<2 where !save.waitForNonExistence(timeout: 5) {
             if save.isHittable { save.tap() }
         }
-        waitGone(field, "the proxy form closes (\(name))")
+        waitGone(save, "the proxy form closes (\(name))")
         // iOS must not offer to keep the proxy's password among the person's own (CI runs 12, 13: its
         // "Save Password?" came a moment after the form closed, as a remote view app.alerts does
         // not list, and blocked the screen). After a moment the list must still take a touch.

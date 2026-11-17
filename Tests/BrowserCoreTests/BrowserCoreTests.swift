@@ -178,6 +178,23 @@ final class ProfileRepositoryTests: XCTestCase {
         XCTAssertThrowsError(try repo.create(name: "   ", configuration: ProfileConfiguration()))
     }
 
+    /// The editor's location fields: finite numbers only ("nan" stopped the app when the picker
+    /// drew it), the accuracy held to what the picker shows.
+    func testTheLocationFieldsAsTheEditorReadsThem() {
+        XCTAssertEqual(GeolocationSetting.number(fromField: " 55,75 "), 55.75)
+        XCTAssertEqual(GeolocationSetting.number(fromField: "-33.9"), -33.9)
+        for text in ["nan", "NaN", "-nan", "inf", "-infinity", "1e999", "", "abc"] {
+            XCTAssertNil(GeolocationSetting.number(fromField: text), text)
+            XCTAssertNil(GeolocationSetting.accuracy(fromField: text), text)
+        }
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "50"), 50)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "12,5"), 12.5)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "1000"), 500, "saved as the picker shows it")
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "1"), 5)
+        XCTAssertEqual(GeolocationSetting.accuracy(fromField: "-20"), 5)
+        XCTAssertEqual(GeolocationSetting.accuracyRange, 5...500)
+    }
+
     func testPasswordVault() throws {
         let profile = try repo.create(name: "P", configuration: ProfileConfiguration())
         let vault = try repo.passwordVault(for: profile.id)
@@ -306,6 +323,78 @@ final class ArchiveTests: XCTestCase {
         XCTAssertThrowsError(try EncryptedDirectoryArchive.unseal(from: archive, key: key, destinations: ["data": out]))
         XCTAssertNoThrow(try EncryptedDirectoryArchive.unseal(from: archive, key: key,
                                                               destinations: ["data": out, "cache": root.appendingPathComponent("oc")]))
+    }
+
+    /// A store of many small files — what WebKit's network cache is — comes back whole, whatever
+    /// the chunk size: every record's fields are read across chunk borders (a 64-byte chunk is
+    /// shorter than a file's path), and at the size the app seals with. The reader hands out
+    /// each field from where it stands in the chunk; it once copied the rest of the chunk for
+    /// every field (`EncryptedChunkReader.read`).
+    func testManySmallFilesComeBackWholeAtAnyChunkSize() throws {
+        let source = root.appendingPathComponent("src-many")
+        var expected: [String: Data] = [:]
+        for index in 0..<600 {
+            let folder = "Records/\(index % 7)/Resource"
+            try FileManager.default.createDirectory(at: source.appendingPathComponent(folder), withIntermediateDirectories: true)
+            // Sizes around the fields' own: empty, one byte, a few, and a few thousand.
+            let bytes = secureRandomBytes([0, 1, 7, 63, 64, 65, 500, 4097][index % 8] + index % 3)
+            let path = "\(folder)/\(String(format: "%04d", index))-blob"
+            try bytes.write(to: source.appendingPathComponent(path))
+            expected[path] = bytes
+        }
+        for chunkSize in [64, 4096, EncryptedDirectoryArchive.defaultChunkSize] {
+            let archive = root.appendingPathComponent("many-\(chunkSize).pbsa")
+            let sealed = try EncryptedDirectoryArchive.seal(roots: ["cache": source], to: archive, key: key, chunkSize: chunkSize)
+            XCTAssertEqual(sealed.files, expected.count)
+            let out = root.appendingPathComponent("out-many-\(chunkSize)")
+            let started = Date()
+            let restored = try EncryptedDirectoryArchive.unseal(from: archive, key: key, destinations: ["cache": out])
+            let milliseconds = Int(Date().timeIntervalSince(started) * 1000)
+            XCTAssertEqual(restored.files, expected.count)
+            XCTAssertEqual(restored.bytes, sealed.bytes)
+            for (path, bytes) in expected {
+                XCTAssertEqual(try Data(contentsOf: out.appendingPathComponent(path)), bytes, "\(path), chunks of \(chunkSize)")
+            }
+            print("archive: \(expected.count) small files (\(sealed.bytes) bytes) unsealed from chunks of \(chunkSize) in \(milliseconds) ms")
+        }
+    }
+
+    /// The reader's reads, whatever their sizes, give the stream's bytes in order, and its end is
+    /// still checked: nothing left unread, nothing after the last chunk.
+    func testTheReaderHandsOutTheStreamInOrder() throws {
+        let file = root.appendingPathComponent("stream.pbsa")
+        FileManager.default.createFile(atPath: file.path, contents: nil)
+        let plaintext = secureRandomBytes(10_000)
+        do {
+            let handle = try FileHandle(forWritingTo: file)
+            defer { try? handle.close() }
+            let writer = try EncryptedChunkWriter(handle: handle, key: key, chunkSize: 100)
+            try writer.write(plaintext)
+            try writer.finish()
+        }
+        func reader() throws -> (EncryptedChunkReader, FileHandle) {
+            let handle = try FileHandle(forReadingFrom: file)
+            return (try EncryptedChunkReader(handle: handle, key: key), handle)
+        }
+        // Sizes below, at and above a chunk, and none at all.
+        let (first, firstHandle) = try reader()
+        defer { try? firstHandle.close() }
+        var read = Data()
+        var sizes = [1, 2, 0, 99, 100, 101, 1, 250, 8, 3_000]
+        sizes.append(plaintext.count - sizes.reduce(0, +))
+        for size in sizes { read.append(try first.read(size)) }
+        XCTAssertEqual(read, plaintext)
+        XCTAssertNoThrow(try first.finish())
+        XCTAssertThrowsError(try first.read(1))
+        // An end asked for with bytes still unread is refused, as before.
+        let (second, secondHandle) = try reader()
+        defer { try? secondHandle.close() }
+        XCTAssertEqual(try second.read(9_990), plaintext.prefix(9_990))
+        XCTAssertThrowsError(try second.finish())
+        // More than the stream holds.
+        let (third, thirdHandle) = try reader()
+        defer { try? thirdHandle.close() }
+        XCTAssertThrowsError(try third.read(10_001))
     }
 
     func testSymlinksAreNotFollowed() throws {

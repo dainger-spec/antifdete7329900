@@ -78,7 +78,7 @@ final class ProxyListImportTests: XCTestCase {
             ftp://h.example:21
             h.example:99999
             h.example:port
-            1.2.3.4 1080
+            1.2.3.4:1080 5.6.7.8:1080
             a:b:c
             @h.example:80
             300.1.1.1:80
@@ -100,7 +100,8 @@ final class ProxyListImportTests: XCTestCase {
             .unreadable(.hasPath),
             .unreadable(.unterminatedIPv6),
         ])
-        XCTAssertEqual(report.problems[4].text, "1.2.3.4 1080")
+        // Two proxies on one line: not read as the first with the second for its login.
+        XCTAssertEqual(report.problems[4].text, "1.2.3.4:1080 5.6.7.8:1080")
         XCTAssertEqual(report.failures.count, 10)
     }
 
@@ -159,7 +160,9 @@ final class ProxyListImportTests: XCTestCase {
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4"), .problem(.missingPort))
         XCTAssertEqual(ProxyListImport.readField("h.example:99999"), .problem(.unreadable(.invalidPort("99999"))))
         XCTAssertEqual(ProxyListImport.readField("ftp://h.example:21"), .problem(.unreadable(.unsupportedScheme("ftp"))))
-        XCTAssertEqual(ProxyListImport.readField("1.2.3.4 1080"), .problem(.unreadable(.containsWhitespace)))
+        XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080 5.6.7.8:1080"), .problem(.unreadable(.containsWhitespace)))
+        // Its parts with a space between them, as a table gives them (`ProxyImportFormatsTests`).
+        XCTAssertEqual(proxy("1.2.3.4 1080")?.proxy, ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080))
         XCTAssertEqual(ProxyListImport.readField("1.2.3.4:1080\n5.6.7.8:1080"), .several(2))
         XCTAssertEqual(ProxyListImport.readField("# provider\n1.2.3.4:1080  # Berlin"),
                        .proxy(ProxyListImport.Line(line: 2, proxy: ProxySettings(kind: .socks5, host: "1.2.3.4", port: 1080),
@@ -291,6 +294,41 @@ final class ProxyListTests: XCTestCase {
         // A check that finishes after its proxy was removed does not bring it back.
         list.record(.dead(.noAnswer), for: ids[1])
         XCTAssertEqual(list.entries.map(\.id), [ids[0]])
+    }
+
+    /// A result is about the proxy as it was when its check began: an entry edited before it came
+    /// keeps what the edit left — not the old proxy's verdict, exit and type, which the profiles on
+    /// it would then take.
+    func testACheckOfTheProxyAsItWasIsNotKeptByAnEntryEditedSince() throws {
+        var list = ProxyList()
+        let ids = list.add(lines("socks5://a.example:1080\nhttp://u:p@b.example:3128")).added
+        let asChecked = try XCTUnwrap(list.entry(ids[0])?.proxy)
+        // The old server answers as SOCKS5 only, from Berlin.
+        var found = ProxyCheckResult.alive(location: ProxyLocation(timeZoneIdentifier: "Europe/Berlin", countryCode: "DE",
+                                                                   proxyEndpoint: "x", exitIP: "203.0.113.7"), latency: 0.1)
+        found.diagnosis = ProxyDiagnosis(verdict: .works, kinds: [.socks5])
+        // Meanwhile the line is replaced by another server, of another type.
+        _ = try list.update(ids[0], label: "", proxy: ProxySettings(kind: .httpConnect, host: "c.example", port: 3128))
+        let stale = list.record(found, for: ids[0], checked: asChecked)
+        XCTAssertFalse(stale.kept)
+        XCTAssertNil(stale.previous, "the profiles on it are not moved")
+        XCTAssertNil(list.entry(ids[0])?.lastCheck)
+        XCTAssertEqual(list.entry(ids[0])?.proxy.kind, .httpConnect, "the old server's type is not the new one's")
+        // A password fixed meanwhile: the old one's "credentials rejected" is not the new one's.
+        let second = try XCTUnwrap(list.entry(ids[1])?.proxy)
+        var fixed = second
+        fixed.password = "right"
+        _ = try list.update(ids[1], label: "", proxy: fixed)
+        XCTAssertFalse(list.record(.dead(.noAnswer), for: ids[1], checked: second).kept)
+        XCTAssertNil(list.entry(ids[1])?.lastCheck)
+        // The entry as it was checked: kept, as record(_:for:) keeps it.
+        let current = try XCTUnwrap(list.entry(ids[1])?.proxy)
+        XCTAssertTrue(list.record(found, for: ids[1], checked: current).kept)
+        XCTAssertEqual(list.entry(ids[1])?.lastCheck?.exitIP, "203.0.113.7")
+        // An entry removed meanwhile stays removed: nothing is kept, nothing brings it back.
+        list.remove([ids[1]])
+        XCTAssertFalse(list.record(found, for: ids[1], checked: current).kept)
+        XCTAssertNil(list.entry(ids[1]))
     }
 
     func testCheckResults() {
@@ -484,6 +522,47 @@ final class ProxyListTests: XCTestCase {
         let json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONCoding.encoder.encode(list)) as? [String: Any])
         XCTAssertTrue((json["entries"] as? [[String: Any]])?.allSatisfy { $0["changeIPURL"] == nil && $0["changesIPOnLaunch"] == nil } == true)
     }
+
+    /// The Profiles window finds every profile's proxy in the list each time it is drawn: through
+    /// `entriesByIdentity`, made once, it finds what going through the list for each profile found
+    /// — the first entry with the proxy's host (in any case), port and user name; none for a
+    /// proxy the list does not have. Two entries of one proxy (a list put together by hand, or by
+    /// an older build): the first, as before.
+    func testEntriesByIdentityFindWhatGoingThroughTheListFinds() {
+        var entries: [ProxyListEntry] = []
+        for index in 0..<300 {
+            let proxy = ProxySettings(kind: index % 2 == 0 ? .socks5 : .httpConnect, host: "Gate-\(index % 50).Example.com",
+                                      port: 1000 + index % 2, username: index % 3 == 0 ? nil : "user-\(index % 5)",
+                                      password: "p\(index)")
+            entries.append(ProxyListEntry(label: "entry \(index)", proxy: proxy,
+                                          lastCheck: index % 4 == 0 ? nil : ProxyCheckResult.alive(location: nil, latency: Double(index) / 1000)))
+        }
+        let list = ProxyList(entries: entries)
+        let byIdentity = ProxyList.entriesByIdentity(entries)
+        // Fewer identities than entries: the list above repeats proxies.
+        XCTAssertLessThan(byIdentity.count, entries.count)
+        var asked = entries.map(\.proxy)
+        // The same proxies as a profile may hold them: the host in another case, another password
+        // and type; and proxies the list does not have.
+        asked += entries.prefix(40).map { entry -> ProxySettings in
+            var proxy = entry.proxy
+            proxy.host = proxy.host.uppercased()
+            proxy.password = "another"
+            proxy.kind = .socks5
+            return proxy
+        }
+        asked.append(ProxySettings(kind: .socks5, host: "gate-1.example.com", port: 9))
+        asked.append(ProxySettings(kind: .socks5, host: "gate-1.example.com", port: 1001, username: "nobody"))
+        asked.append(ProxySettings(kind: .socks5, host: "elsewhere.example.com", port: 1001))
+        for proxy in asked {
+            let identity = ProxyList.identity(of: proxy)
+            let scanned = entries.first { ProxyList.identity(of: $0.proxy) == identity }
+            XCTAssertEqual(byIdentity[identity], scanned, identity)
+            XCTAssertEqual(byIdentity[identity], list.entry(for: proxy), identity)
+            XCTAssertEqual(byIdentity[identity]?.lastCheck, scanned?.lastCheck, identity)
+        }
+        XCTAssertTrue(ProxyList.entriesByIdentity([]).isEmpty)
+    }
 }
 
 final class ProxyIPChangeTests: XCTestCase {
@@ -652,6 +731,42 @@ final class ProxyAssignmentTests: XCTestCase {
         let edit = stored.assigning(bypassing, check: checked, at: now)
         XCTAssertEqual(edit.settingsModifiedAt, now)
         XCTAssertEqual(edit.lastProxyLocation, stored.lastProxyLocation)
+    }
+
+    /// The editor's Save of another proxy keeps what its check found through the new proxy, as
+    /// Assign does — not the old proxy's location, which no launch through the new one would use.
+    func testTheEditorsSaveOfAnotherProxyKeepsWhatItsCheckFound() {
+        let stored = configuration()
+        var edit = stored
+        edit.proxy = new
+        edit.lastProxyLocation = checked.location(for: new)
+        let saved = edit.savingEditorEdit(over: stored, at: now)
+        XCTAssertEqual(saved.proxy, new)
+        XCTAssertEqual(saved.settingsModifiedAt, now)
+        XCTAssertEqual(saved.rememberedProxyLocation?.timeZoneIdentifier, "Asia/Tokyo")
+        XCTAssertEqual(saved.rememberedProxyLocation?.countryCode, "JP")
+        XCTAssertNil(saved.lastProxyLocation?.exitIP, "the exit IP only with the warning")
+        XCTAssertEqual(saved.passwordNeverSaveSites, ["https://bank.example"])
+        var warned = edit
+        warned.warnOnProxyIPChange = true
+        XCTAssertEqual(warned.savingEditorEdit(over: configuration(warn: true), at: now).lastProxyLocation?.exitIP, "198.51.100.4")
+        // Not checked — the editor's copy of the location is still the one it opened with, the
+        // old proxy's: nothing of either is kept.
+        var unchecked = stored
+        unchecked.proxy = new
+        XCTAssertNil(unchecked.savingEditorEdit(over: stored, at: now).lastProxyLocation)
+        // The old way kept the old proxy's location, which a launch through the new one ignores.
+        XCTAssertNil(edit.savingEdit(over: stored, at: now).rememberedProxyLocation)
+        // The same proxy: what is stored stays, newer than the editor's copy as it may be.
+        var later = stored
+        later.lastProxyLocation?.timeZoneIdentifier = "Europe/Paris"
+        var sameProxy = stored
+        sameProxy.notes = "a note"
+        XCTAssertEqual(sameProxy.savingEditorEdit(over: later, at: now).lastProxyLocation?.timeZoneIdentifier, "Europe/Paris")
+        // The proxy removed: the old proxy's location goes too.
+        var direct = stored
+        direct.proxy = nil
+        XCTAssertNil(direct.savingEditorEdit(over: stored, at: now).lastProxyLocation)
     }
 
     func testAssigningThroughTheRepository() throws {

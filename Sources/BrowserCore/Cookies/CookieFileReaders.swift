@@ -220,16 +220,31 @@ enum JSONReader {
         return lines
     }
 
-    /// Reads the cookie objects of a file that is not valid JSON as a whole.
+    /// How deep in braces `recover` looks for cookie objects. A cookie object is one to four levels
+    /// down in every export (`[{…}]`, `{"cookies": [{…, "partitionKey": {…}}]}`, a wrapper or two
+    /// more), and each entry cut off before its closing brace puts the rest one level deeper: room
+    /// for a dozen of those. Deeper objects are not looked at one by one — nested without end, they
+    /// cost the reader time that grew with the square of the file (audit 3, #21).
+    static let deepestObject = 16
+    /// No cookie object is anywhere near this long (a browser keeps a cookie's name and value to
+    /// 4 KiB): a longer `{…}` is not read as one cookie, only the objects inside it are.
+    static let longestCookieObject = 64 * 1024
+
+    /// Reads the cookie objects of a file that is not valid JSON as a whole. Linear in the file's
+    /// length: each character is in at most `deepestObject` of the objects looked at, and each
+    /// object looked at is read (copied, parsed) only when it names a cookie and is no longer than
+    /// one can be.
     private static func recover(_ text: String, errorLine: Int?, problems: inout [CookieImportProblem]) -> [Candidate] {
         var candidates: [Candidate] = []
         var damageLine = errorLine
-        var stack: [(start: String.Index, line: Int)] = []
-        var line = 1, inString = false, escaped = false, entry = 0
+        var stack: [(start: String.Index, position: Int, line: Int)] = []
+        // Objects open beyond `deepestObject`: counted, not kept.
+        var deeper = 0
+        var line = 1, inString = false, escaped = false, entry = 0, position = 0
         var claimedUntil: String.Index?
         // Objects are read innermost first; a cookie object holding another object (a partition
         // key) is read whole, so only top-most cookie objects count.
-        var found: [(range: Range<String.Index>, line: Int)] = []
+        var found: [(range: Range<String.Index>, line: Int, length: Int)] = []
         var index = text.startIndex
         while index < text.endIndex {
             let character = text[index]
@@ -243,19 +258,25 @@ enum JSONReader {
             } else if character == "\"" {
                 inString = true
             } else if character == "{" {
-                stack.append((index, line))
-            } else if character == "}", let open = stack.popLast() {
-                found.append((open.start..<text.index(after: index), open.line))
+                if stack.count < deepestObject { stack.append((index, position, line)) } else { deeper += 1 }
+            } else if character == "}" {
+                if deeper > 0 {
+                    deeper -= 1
+                } else if let open = stack.popLast() {
+                    found.append((open.start..<text.index(after: index), open.line, position + 1 - open.position))
+                }
             }
             index = text.index(after: index)
+            position += 1
         }
         // Outermost first, by position.
         found.sort { $0.range.lowerBound < $1.range.lowerBound || ($0.range.lowerBound == $1.range.lowerBound && $0.range.upperBound > $1.range.upperBound) }
         for object in found {
             if let claimed = claimedUntil, object.range.lowerBound < claimed { continue }
+            // A wrapper ({"cookies": [...]}), or anything longer than a cookie, is not claimed: the
+            // cookie objects inside it are read one by one.
+            guard object.length <= longestCookieObject, looksLikeCookie(text[object.range]) else { continue }
             let body = String(text[object.range])
-            // A wrapper ({"cookies": [...]}) is not claimed: the cookie objects inside it are read one by one.
-            guard looksLikeCookie(body) else { continue }
             entry += 1
             claimedUntil = object.range.upperBound
             if let parsed = parseObject(body) {
@@ -270,13 +291,14 @@ enum JSONReader {
                 claimedUntil = text.index(after: object.range.lowerBound)
             }
         }
-        // Objects left open at the end: the file was cut off inside them.
+        // Objects left open at the end: the file was cut off inside them. What names the cookie is
+        // at its start.
         for open in stack {
-            let body = String(text[open.start...])
-            guard looksLikeCookie(body), claimedUntil.map({ open.start >= $0 }) ?? true else { continue }
+            let start = text[open.start...].prefix(longestCookieObject)
+            guard looksLikeCookie(start), claimedUntil.map({ open.start >= $0 }) ?? true else { continue }
             entry += 1
             damageLine = damageLine ?? open.line
-            problems.append(CookieImportProblem(location: .entry(entry, line: open.line), name: nameIn(body), reason: .cutOff))
+            problems.append(CookieImportProblem(location: .entry(entry, line: open.line), name: nameIn(String(start)), reason: .cutOff))
             claimedUntil = text.endIndex
         }
         if !candidates.isEmpty || entry > 0 {
@@ -285,19 +307,23 @@ enum JSONReader {
         return candidates
     }
 
-    /// An object that names a cookie at its own level (before any object or array inside it).
-    private static func looksLikeCookie(_ body: String) -> Bool {
-        var own = Substring(body.dropFirst())
+    /// An object that names a cookie at its own level (before any object or array inside it). Read
+    /// in place: the object is not copied to be looked at.
+    private static func looksLikeCookie(_ body: Substring) -> Bool {
+        var own = body.dropFirst()
         var inString = false, escaped = false
-        for (offset, character) in own.enumerated() {
+        var index = own.startIndex
+        while index < own.endIndex {
+            let character = own[index]
             if inString {
                 if escaped { escaped = false } else if character == "\\" { escaped = true } else if character == "\"" { inString = false }
             } else if character == "\"" {
                 inString = true
             } else if character == "{" || character == "[" {
-                own = own.prefix(offset)
+                own = own.prefix(upTo: index)
                 break
             }
+            index = own.index(after: index)
         }
         return own.range(of: #""name"\s*:"#, options: [.regularExpression, .caseInsensitive]) != nil
     }

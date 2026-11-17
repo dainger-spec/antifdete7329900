@@ -207,7 +207,10 @@ takes no arguments and makes no network request.
 3. waits until no process runs from the bundle — the app first of all — and **kills nothing**:
    after 10 minutes it gives up and keeps the archive for the next quit; a process of the bundle
    started after the request (the app opened again) ends the request at once, since that quit is
-   over and the next one asks again;
+   over and the next one asks again. It looks again right before the swap (step 6) and right after
+   it, at the old app's new place: the app opened again while steps 4 and 5 ran (a Dock click, a
+   link, a profile's file) ends the request the same way — the old app swapped back if need be,
+   nothing replaced, the archive kept — and never runs on from a bundle swapped away and deleted;
 4. checks the release again: newer than the installed build, for this macOS, the archive's
    length, SHA-256 and Ed25519 signature with a key the installed app carries;
 5. extracts it with `ditto` next to the app (same volume): exactly one app, the installed app's
@@ -266,9 +269,10 @@ in the self-test, which runs the app's own code for it):
 | `cookies-import.bin` | cookies queued for the next launch | no marker (an array); **deleted when it could not be read** | newer refused, not written, **not deleted**; unreadable: moved aside as `cookies-import.bin.unreadable`, never deleted (docs/DESTRUCTIVE_PATHS.md) |
 | `journal.bin`, `restore-points/<p>/point.bin` | the profile's history of events; a restore point's description | new: no marker, written the same way as `warmup-last.bin`. An event of a kind this version does not know is kept as written (the kind is text); a point of a kind it does not know is read as the person's own; a point whose description does not open is not listed and left as it is |
 | `warmup.bin`, `warmup-schedule.bin`, `warmup-last.bin` | the warm-up plan, its schedule, its last run | no marker (`warmup-last.bin`: new, written the same way); **an unreadable one was shown as none and written over** | `format` read (absent = 1); newer refused, never written; unreadable: said on the warm-up screen, moved aside at the next save (`.unreadable`) |
+| `warmup-history.bin` | a profile's last 50 warm-ups with their sites | new (November 2026) | written like `warmup-last.bin`; newer refused, never written over; unreadable: moved aside as `warmup-history.bin.unreadable` and a new history begun. A run's result, a site's outcome and arrival are text: a later version's value is kept as written and shown as the nearest known. A plan chosen from templates (`WarmUpChoice.source` "templates") is not readable by a version from before templates: such a version shows the profile's saved plan as unreadable and does not write over it. |
 | `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4. Format 2 once it holds a proxy given by Lumen's service (`ProxyOrigin`): a version from before origins would read that proxy as the user's own and write it back without its origin (R4); a list of the user's own proxies stays format 1, written as before. Nothing in this version gives a proxy from the service, so it writes format 1 only; the version that brings the service raises the vault's generation first (R3). Format 3 once a proxy holds an IP-change link or changes its IP at launch (`ProxyListEntry.changeIPURL`, `changesIPOnLaunch`): a version from before would write that proxy back without them (R4), so it refuses the list whole — this Mac's proxy list only, the profiles keep their own copies of their proxies; a list without links is written in format 1 (or 2) as before |
-| `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it. Unreadable for any other reason: said at unlock, the defaults shown, and at the first change the file is moved aside as `settings.bin.unreadable` (then `-2`, …), never written over |
-| `sync-state.bin` | what sync last saw | no marker (a map) | newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
+| `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it. Unreadable for any other reason: said at unlock, the defaults shown, and at the first change the file is moved aside as `settings.bin.unreadable` (then `-2`, …), never written over. Format 2 while the sync target is the **Lumen account** (`{"account": {}}`), a case a version from before it cannot read: that version refuses the file as a newer version's and leaves it as it is, rather than take it for damaged and move it aside; with any other target, format 1 as before |
+| `sync-state.bin` | what sync last saw, and the place it is of (a folder, a server and the vault) | no marker (a map) | the map (format 1, names no place) is still read: its records count as another place's, and the first sync after the update compares everything anew; format 2 (`{"format": 2, "items", "serverGeneration"}`) while a server generation is kept (the Lumen server, docs/SYNC_FORMAT.md, Engine algorithm, step 0), its server and vault the place — a version from before generations refuses it and does not sync, rather than take the server's older copies for newer; format 3 (`{"format": 3, "items", "place"}`) with a place and no generation (a folder, a server of one's own that keeps none) — a version from before places would keep those records for another folder or the account, and take that place's older copies for newer, so it refuses it (R4). Newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
 | `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` + version byte 1, anything else refused — **and a refused Safari home archive left an empty home behind, which the next unlock or an export of the profile sealed over the archive** | newer refused before anything is read from it; the profile does not start; no home is left; nothing is sealed over it. The same for a Safari home archive that cannot be restored for any other reason (damaged, a full disk): no home is left, and a home without a single file is never sealed over an archive |
 | `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | 2 since saved passwords have versions (a version that reads 1 would import a version kept after a conflict as an ordinary login, over the other); 1 still imported; newer: the newer-version message, nothing imported |
 | sync records | on the sync server | envelope `pbsync-1`, anything else refused | `pbsync-2` written since generation 2, `pbsync-1` still read, any other refused; the file inside a record is checked like the file itself, on the remote copy and on this device's: a newer one is neither pulled, nor merged, nor written over — the sync stops |
@@ -306,14 +310,20 @@ read before any vault is unlocked.
     stores' proxies, and the updater's session is not a data store.
 - **The switch.** "Check for updates automatically" off means off: no timer, no request at launch,
   nothing. "Check Now" is a request the user makes by pressing it. Default on in a build that has a
-  feed URL: the first check a minute after launch, then every 6 hours.
+  feed URL: the first check a few seconds after launch, then every hour — and when the person comes
+  back to Lumen (it is brought to the front, or the Mac wakes) with the last check older than 15
+  minutes, five seconds on. It was every 6 hours, and a Lumen left open found a release up to six
+  hours after it was out (the owner, 14 November, after publishing 0.1.13). The update scenarios
+  turn the coming-back check off: they count the feed's requests.
 - **The request itself** (`AppUpdater`): its own ephemeral `URLSession` — no cookies, no cache, no
   credentials — with the same two headers from every Mac (`User-Agent: Lumen`,
   `Accept-Language: en`), and the appcast refused above 1 MB. Its server trust is the system's; the
   one exception is the end-to-end scenarios' local feed, accepted by its certificate's hash only in
   their own mode (§8). The archive is downloaded by the same
   session into a temporary file and moved into the staging folder, where its length, SHA-256 and
-  Ed25519 signature are checked before it counts as downloaded.
+  Ed25519 signature are checked before it counts as downloaded. A release downloaded and never
+  installed — a newer one came out before a quit — goes when the newer one has checked; at each
+  launch the folder keeps no archive but the one staged and the one a request names.
 
 ## 6. Signing, notarization, `scripts/release.sh`
 
@@ -420,7 +430,12 @@ with curl's own S3 signing (nothing installed):
 - **Before anything is built**, the release's two names are checked free in the bucket (which
   also tries the keys), and the appcast published now is fetched from it, so that the new appcast
   keeps its releases (`PREVIOUS_APPCAST` still names another). A VERSION already published stops
-  the release there, not after notarization.
+  the release there, not after notarization; so does a BUILD that is not greater than every build of
+  that appcast (`pbupdate verify --new-build`; `pbupdate appcast` refuses it too). The appcast lists a
+  build once, so a build listed already would put the new release in place of the published one —
+  whose users would then be told they are up to date — and the app is offered the highest build, so
+  a lower one would never reach a Mac on the newer build, while a Mac with it would be offered the
+  older release, a downgrade (R3).
 - **At the end**, the zip and the image first, the appcast last — a feed never names a file not
   there yet. Each upload signs the file's SHA-256 (`x-amz-content-sha256`), so R2 itself refuses
   bytes that did not arrive as built; the object keeps it (`x-amz-meta-sha256`). The versioned
@@ -700,6 +715,7 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   - an older build is never offered (a feed of build 1 and 0.9 to build 1);
   - a stale appcast (validly signed, older than one accepted), a forged one (its list changed
     under the signature) and a changed archive (one byte) are refused, nothing kept;
+  - an archive nothing names any more (a release replaced before a quit) is removed at a launch;
   - the release is downloaded and checked; with a profile running in a window and another warming
     up without one — in the unsandboxed build, each in its own process — the gate does not pass
     and nothing is handed over: no request written, no installer running;

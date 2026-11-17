@@ -33,6 +33,12 @@ final class WebDriverService {
         self.repository = repository
     }
 
+    /// Whether a session drives profile `id` now, for what must not act on the profile beside it:
+    /// a schedule's run waits (the profile is busy), the API's scenario route refuses.
+    func hasSession(_ id: UUID) -> Bool {
+        manager.isRunning(id) && sessions.values.contains { $0.profileID == id }
+    }
+
     /// The id of the profile an address names (its id, or its exact name), whose WebDriver token
     /// the address must carry. Nil when it names none, or several.
     func profileID(_ reference: String) -> UUID? {

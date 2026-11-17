@@ -262,20 +262,27 @@ struct ProfileInspectorView: View {
         return nil
     }
 
-    /// As the editor says it (`ProfileEditorForm`): with a proxy, WebRTC goes only through the
-    /// relay, held there by the network guard, and only for SOCKS5; otherwise it is off.
+    /// What the profile's WebRTC comes to at its next launch, as the editor says it
+    /// (`WebRTCGate.outlook`), shorter.
     private func webRTCText(_ details: ProfileDetails) -> String {
-        if details.webRTCChoice == .disabled { return L("editor.webrtc.disabled") }
-        guard details.proxyEndpoint != nil else {
-            switch details.webRTCChoice {
-            case .disabled: return L("editor.webrtc.disabled")
-            case .relayOnly: return L("editor.webrtc.relay")
-            case .unrestricted: return L("editor.webrtc.unrestricted")
-            }
+        var proxy: ProxySettings?
+        if let kind = details.proxyKindValue {
+            proxy = ProxySettings(kind: kind, host: "proxy.invalid", port: 1,
+                                  excludedDomains: details.proxyBypassesSites ? ["bypassed.invalid"] : [])
         }
-        guard details.proxyCarriesUDP else { return L("inspector.webRTC.offHTTP") }
-        if guardReady { return L("inspector.webRTC.viaProxy") }
-        return BuildKind.carriesGuard ? L("inspector.webRTC.guardNotReady") : L("inspector.webRTC.noGuardInBuild")
+        let guardState: NetworkGuardState = guardReady ? .ready : (BuildKind.carriesGuard ? .notInstalled : .notInBuild)
+        switch WebRTCGate.outlook(mode: details.webRTCMode, proxy: proxy, ownProcess: ProfileProcess.isEnabled, guardState: guardState) {
+        case .native(.unrestricted): return L("inspector.webRTC.likeSafari")
+        case .native(.relayOnly): return L("editor.webrtc.relay")
+        case .native(.disabled), .silentByChoice: return L("inspector.webRTC.silent")
+        case .throughProxy: return L("inspector.webRTC.viaProxy")
+        case .silentHTTPProxy: return L("inspector.webRTC.silentHTTP")
+        case .removed(.guardNotInBuild?): return L("inspector.webRTC.noGuardInBuild")
+        case .removed(.notOwnProcess?): return L("inspector.webRTC.notOwnProcess")
+        case .removed(_?): return L("inspector.webRTC.guardNotReady")
+        case .removed(nil): return L("editor.webrtc.disabled")
+        case .removedBypass: return L("inspector.webRTC.bypass")
+        }
     }
 
     // MARK: Automation
@@ -576,6 +583,10 @@ struct SelectionInspectorView: View {
                         .buttonStyle(LumenButtonStyle(kind: .secondary, fullWidth: true))
                 }
                 Button(L("inspector.warmUpQueue")) { actions.warmUpSeveral(rows.map(\.id)) }
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
+                Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(rows.map(\.id)) }
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
+                Button(L("profiles.bulk.tags")) { actions.tagSeveral(rows.map(\.id)) }
                     .buttonStyle(LumenButtonStyle(kind: .ghost, fullWidth: true))
             }
             .padding(.top, 18)

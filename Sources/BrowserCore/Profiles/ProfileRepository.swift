@@ -124,8 +124,8 @@ public final class ProfileRepository: @unchecked Sendable {
     /// `indexState`, under `lock`.
     private var state: IndexState = .read
     /// With the index missing when the vault was unlocked: the SHA-256 of the `index.bin` this
-    /// repository wrote since (one put together from the profiles' key copies, or a profile
-    /// created). A file there with other bytes was put back by someone — a backup restored, as the
+    /// repository wrote last since (one put together from the profiles' key copies, a profile
+    /// created, any later change). A file there with other bytes was put back by someone — a backup restored, as the
     /// app tells a person to — and is never written over: the next unlock reads it.
     private var writtenWhileMissing: Data?
     /// The profiles the index was put together from, at unlock, out of their key copies: the index
@@ -678,6 +678,34 @@ public final class ProfileRepository: @unchecked Sendable {
         try warmUpRecordFile(for: id).save(record)
     }
 
+    // MARK: Warm-up history (this Mac only)
+
+    func warmUpHistoryURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("warmup-history.bin") }
+
+    func warmUpHistoryFile(for id: UUID) throws -> EncryptedDocumentFile<WarmUpHistory> {
+        EncryptedDocumentFile(url: warmUpHistoryURL(for: id),
+                              key: try profileKey(for: id).derive(info: "warm-up-history", salt: id.rawBytes),
+                              aad: "warm-up-history:v1:\(id.uuidString)")
+    }
+
+    /// The profile's warm-ups, the newest first (`WarmUpHistory`); none before the first was kept.
+    public func warmUpHistory(for id: UUID) throws -> WarmUpHistory {
+        try warmUpHistoryFile(for: id).load() ?? WarmUpHistory()
+    }
+
+    /// Adds a run to the profile's history. A history that cannot be read is moved aside as
+    /// `warmup-history.bin.unreadable`, never written over, and a new one begun.
+    public func addWarmUpRun(_ run: WarmUpRun, for id: UUID) throws {
+        var history = (try? warmUpHistory(for: id)) ?? WarmUpHistory()
+        history.add(run)
+        try warmUpHistoryFile(for: id).save(history)
+    }
+
+    /// Writes the profile's history as it is given (a run's late report amends its newest entry).
+    public func replaceWarmUpHistory(_ history: WarmUpHistory, for id: UUID) throws {
+        try warmUpHistoryFile(for: id).save(history)
+    }
+
     // MARK: Open tabs (this Mac only)
 
     func openTabsURL(for id: UUID) -> URL { directory(for: id).appendingPathComponent("tabs.bin") }
@@ -1005,7 +1033,15 @@ public final class ProfileRepository: @unchecked Sendable {
         let plaintext = try JSONCoding.encoder.encode(index)
         let sealed = try AEAD.seal(plaintext, key: vault.indexKey, aad: indexAAD)
         try SecureFile.write(sealed, to: indexURL)
-        if case .missing = state { writtenWhileMissing = Data(SHA256.hash(data: sealed)) }
+        // What this process wrote last, for as long as the check above applies: the index put
+        // together while it was missing is followed by this session's own writes, and each is
+        // compared with the one before it — not with the first, which every later write would then
+        // fail as "put back" (audit 3, #20).
+        if case .missing = state {
+            writtenWhileMissing = Data(SHA256.hash(data: sealed))
+        } else if writtenWhileMissing != nil {
+            writtenWhileMissing = Data(SHA256.hash(data: sealed))
+        }
     }
 
     var indexAAD: String { "profile-index:v1:\(vault.vaultID.uuidString)" }

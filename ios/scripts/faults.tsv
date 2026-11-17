@@ -6,6 +6,7 @@ searchIgnoresTags	core	LumenCoreTests.CatalogTests/testSearchByNameNotesTagsAndP
 tabsNotRestored	core	LumenCoreTests.CatalogTests/testTabsAndHistorySurviveARelaunch	
 settingsNotSaved	core	LumenCoreTests.CatalogTests/testSettingsSurviveARelaunch	
 searchEngineIgnored	core	LumenCoreTests.AddressTests/testAddressesAndSearches	
+appLinksAllowed	core	LumenCoreTests.LinkHandoffTests/testATappedLinkToAnotherHostOpensInTheSessionAndAnAppsHostIsWarnedOf	no app is known for it
 sessionsNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath	after a relaunch the renamed session is there
 renameIgnored	ui	LumenUITests/SessionsTests/testSessionListPersonPath	the renamed card is shown
 notesNotSaved	ui	LumenUITests/SessionsTests/testSessionListPersonPath	the card shows the new description

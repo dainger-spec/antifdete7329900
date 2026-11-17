@@ -229,6 +229,25 @@ enum LicenseSelfTest {
         let storedMode = stored.mode
         // Asked of the license alone: in FULL the gate would start the profile.
         let storedOpens = stored.refusalToOpen(profile.id) == nil
+        // The Profiles window's export-only mark is found once for all its rows (`exportOnlyTest`):
+        // with ten profiles more here than the plan allows, it marks the ten made last — the ones
+        // the gate refuses, asked one by one — and no other.
+        let allowedHere = stored.state?.allowedProfilesHere ?? 0
+        let many: [ProfileSummary] = (0..<(allowedHere + 10)).compactMap { index in
+            let json = "{\"id\":\"\(UUID().uuidString)\",\"name\":\"p\(index)\",\"createdAt\":\(700_000_000 + index),\"revision\":1}"
+            return try? JSONDecoder().decode(ProfileSummary.self, from: Data(json.utf8))
+        }
+        stored.profilesHere = { many }
+        let exportOnly = stored.exportOnlyTest()
+        let marks = many.map { exportOnly($0.id) }
+        let refusals = many.map { stored.refusalToOpen($0.id) != nil }
+        stored.profilesHere = { [profile] in [profile] }
+        check("the Profiles window's export-only mark, found once for all its rows, is the gate's answer for each profile: "
+              + "the ten past what the plan allows here, and no other",
+              storedMode == .full && allowedHere > 0 && many.count == allowedHere + 10 && marks == refusals
+              && marks.prefix(allowedHere).allSatisfy { !$0 } && marks.suffix(10).allSatisfy { $0 },
+              "mode \(String(describing: storedMode)), allowed here \(allowedHere), profiles \(many.count), "
+              + "marked \(marks.filter { $0 }.count), refused by the gate \(refusals.filter { $0 }.count)")
         let file = AccountFile(directory: folder)
         var changed = false
         if var record = try? file.load(), var envelope = record.entitlement,
@@ -508,6 +527,47 @@ enum LicenseSelfTest {
               && consequences == String(format: L("contract.signout.consequences"), LicenseText.duration(604_800)),
               "under the cooldown: \(String(describing: held)), still in: \(stillIn); after: \(String(describing: out)),"
               + " mode \(String(describing: coded.mode)); consequences: \(consequences)")
+
+        // Signed out while the vault is locked (Settings → Account works without it), and by the
+        // server with the vault open: the key the vault kept goes — at the next unlock, or at once. It
+        // stayed there for good (audit 3, #29). Kept while signed in, and while locked: the controls.
+        if let currentKey = AccountKey(typed: newKeyText) {
+            let (lockedOut, lockedOutFolder) = person("signed-out-while-locked")
+            lockedOut.useKey(currentKey)
+            let connected = await lockedOut.activate(label: "", vault: nil)
+            let lockedOutVault = try? MasterVault.create(in: lockedOutFolder.appendingPathComponent("vault"),
+                                                         password: "license-check-locked-out", iterations: 1_000)
+            if let lockedOutVault { lockedOut.vaultOpened(lockedOutVault) }
+            let keptWhileIn = lockedOutVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            lockedOut.vaultLocked()
+            let out = await lockedOut.signOut(vault: nil)
+            let keptWhileLocked = lockedOutVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            if let lockedOutVault { lockedOut.vaultOpened(lockedOutVault) }
+            let keptAfterUnlock = lockedOutVault.flatMap { try? AccountKeyVault.load(from: $0) } != nil
+            check("signed out with the vault locked: the key the vault kept goes at its next unlock — kept while signed in and while"
+                  + " locked (the controls)",
+                  (try? connected.get()) != nil && keptWhileIn && out == .signedOut(confirmed: true) && keptWhileLocked && !keptAfterUnlock,
+                  "connected \(connected), kept while in: \(keptWhileIn), sign-out \(String(describing: out)), kept while locked:"
+                  + " \(keptWhileLocked), after the unlock: \(keptAfterUnlock)")
+
+            let (revokedOpen, revokedFolder) = person("signed-out-by-the-server")
+            revokedOpen.useKey(currentKey)
+            let revokedConnected = await revokedOpen.activate(label: "", vault: nil)
+            let revokedVault = try? MasterVault.create(in: revokedFolder.appendingPathComponent("vault"),
+                                                       password: "license-check-revoked", iterations: 1_000)
+            if let revokedVault { revokedOpen.vaultOpened(revokedVault) }
+            let keptBeforeRevoked = revokedVault.map { (try? AccountKeyVault.load(from: $0)) == currentKey } == true
+            server.revoked = true
+            await revokedOpen.refresh()
+            server.revoked = false
+            let keptAfterRevoked = revokedVault.flatMap { try? AccountKeyVault.load(from: $0) } != nil
+            check("signed out by the server (device_revoked) with the vault open: the key the vault kept goes at once — it was kept (the control)",
+                  (try? revokedConnected.get()) != nil && keptBeforeRevoked && revokedOpen.mode == .notSignedIn && !keptAfterRevoked,
+                  "connected \(revokedConnected), kept before: \(keptBeforeRevoked), mode \(String(describing: revokedOpen.mode)),"
+                  + " kept after: \(keptAfterRevoked)")
+        } else {
+            check("signed out with the vault locked, or by the server: the key the vault kept goes", false, "the self-test's new key does not read")
+        }
 
         // The key replaced with the purchase code while this Mac cannot connect again at once: the
         // email is unlinked all the same (F3) — its session goes, and it is asked again whether one is

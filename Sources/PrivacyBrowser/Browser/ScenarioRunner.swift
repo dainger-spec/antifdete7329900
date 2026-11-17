@@ -1,3 +1,4 @@
+import BrowserCore
 import Foundation
 import JavaScriptCore
 import os
@@ -10,7 +11,8 @@ import WebKit
 ///
 /// What the script has: `page` (the core commands, each a promise), `log(...)`, `sleep(ms)` and
 /// `params` (the run's parameters). A command that fails rejects its promise with the reason, which
-/// the script may catch; one left uncaught ends the run with it.
+/// the script may catch; one left uncaught ends the run with it. An error names the scenario's
+/// line it came from ("… (line 12)"); what the script returns is the run's result (`Line.Kind.result`).
 @MainActor
 final class ScenarioRunner {
     enum StopReason: String, Equatable, Codable {
@@ -27,18 +29,28 @@ final class ScenarioRunner {
     }
 
     struct Line: Equatable, Codable {
-        enum Kind: String, Codable { case command, script, error, outcome }
+        enum Kind: String, Codable {
+            case command, script, error, outcome
+            /// What the script returned, as JSON text: the run's result (the API gives it as `result`).
+            case result
+        }
         var at: Date
         var kind: Kind
         var text: String
     }
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "Scenario")
+    /// The longest result a run keeps, in UTF-8 bytes of its JSON: it crosses to the app with the
+    /// log, and is given whole by the API.
+    static let maximumResultBytes = 512 * 1024
 
     let driver: PageDriver
     private(set) var lines: [Line] = []
     private(set) var outcome: Outcome?
     var isRunning: Bool { thread != nil && outcome == nil }
+    /// The script's thread has not ended yet. It ends with the run, unless the script loops without
+    /// calling anything of the run's (`stop`); the self-test reads it.
+    var scriptThreadIsAlive: Bool { thread.map { !$0.isFinished } ?? false }
     /// Told of each line of the run's log, and of its end.
     var onLine: ((Line) -> Void)?
     var onEnd: ((Outcome) -> Void)?
@@ -48,6 +60,10 @@ final class ScenarioRunner {
     private var thread: ScriptThread?
     private var stopRequest: StopReason?
     private var commandsInFlight = 0
+    /// Between the script's thread and this one: closed by Stop and by the run's end, after which
+    /// every command and `log` the script calls throws at once; and the commands asked for and not
+    /// answered yet, held to `ScriptGate.commandLimit`.
+    private let gate = ScriptGate()
 
     init(driver: PageDriver) {
         self.driver = driver
@@ -67,13 +83,18 @@ final class ScenarioRunner {
         thread.start()
         thread.waitUntilReady()
         let parametersJSON = (try? JSONSerialization.data(withJSONObject: parameters)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        let gate = self.gate
         thread.perform { [weak self] in
-            Self.run(source, parametersJSON: parametersJSON, on: thread, runner: self)
+            Self.run(source, parametersJSON: parametersJSON, on: thread, gate: gate, runner: self)
         }
     }
 
     /// Stops the run: a command under way finishes (a button pressed is let go), then the run
-    /// ends; a script between commands ends at once.
+    /// ends; a script between commands ends at once. From here on every command, `sleep` and `log`
+    /// the script calls throws "stopped" on its own thread, without reaching this one: a loop that
+    /// never awaits them ends with the run (it went on after Stop, each call a hop to the main
+    /// thread). A loop that calls none of them (`while (true) {}`) cannot be interrupted: its thread
+    /// stays busy until the profile's process ends.
     ///
     /// A command that is waiting — `sleep`, `waitFor`, a page still loading — stops waiting: it
     /// was let run to its end, and a script sleeping an hour kept its run "running", and its
@@ -82,6 +103,7 @@ final class ScenarioRunner {
     func stop(_ reason: StopReason = .byUser) {
         guard outcome == nil, thread != nil else { return }
         stopRequest = reason
+        gate.close()
         if reason != .rightsEnded { inFlight.values.forEach { $0.cancel() } }
         if commandsInFlight == 0 { end(.stopped(reason)) }
     }
@@ -104,6 +126,7 @@ final class ScenarioRunner {
     private func end(_ outcome: Outcome) {
         guard self.outcome == nil else { return }
         self.outcome = outcome
+        gate.close()
         switch outcome {
         case .finished: add(.outcome, "Finished")
         case .failed(let message): add(.outcome, "Failed: \(message)")
@@ -128,6 +151,7 @@ final class ScenarioRunner {
         if stopRequest != nil || outcome != nil { return .failure(Stopped()) }
         guard allowed() else {
             stopRequest = .rightsEnded
+            gate.close()
             if commandsInFlight == 0 { end(.stopped(.rightsEnded)) }
             return .failure(Stopped())
         }
@@ -170,6 +194,27 @@ final class ScenarioRunner {
             let state = PageDriver.LoadState(rawValue: arguments.first as? String ?? "load") ?? .load
             try await driver.waitForLoadState(state, timeout: timeout(1))
             return nil
+        case "waitForURL":
+            guard let pattern = ScenarioURLPattern(arguments.first), pattern.isReadable else {
+                throw PageDriver.Failure.script("waitForURL takes an address as text ('**/account': * within a part of the path, ** for any run) or a regular expression")
+            }
+            let state = PageDriver.LoadState(rawValue: options(1)["waitUntil"] as? String ?? "load") ?? .load
+            try await driver.waitForURL(pattern, waitUntil: state, timeout: timeout(1))
+            return nil
+        case "selectOption":
+            // One choice or several: each an option's value or label as text, or {value}, {label}, {index}.
+            let given: Any = arguments.count > 1 ? arguments[1] : NSNull()
+            var choices: [Any] = []
+            for choice in given as? [Any] ?? [given] {
+                if choice is String || choice is [String: Any] {
+                    choices.append(choice)
+                } else if let number = choice as? NSNumber {
+                    choices.append(number.stringValue)
+                } else {
+                    throw PageDriver.Failure.script("selectOption takes what to choose: an option's value or label as text, or {value: …}, {label: …}, {index: …}")
+                }
+            }
+            return try await driver.selectOption(try string(0), choices, timeout: timeout(2))
         case "waitFor":
             let state = PageDriver.ElementState(rawValue: options(1)["state"] as? String ?? "visible") ?? .visible
             try await driver.waitFor(try string(0), state: state, timeout: timeout(1))
@@ -181,13 +226,16 @@ final class ScenarioRunner {
         case "dblclick": try await driver.click(try string(0), clickCount: 2, timeout: timeout(1)); return nil
         case "hover": try await driver.hover(try string(0), timeout: timeout(1)); return nil
         case "type":
-            let delay = (options(2)["delay"] as? NSNumber).map { $0.doubleValue / 1000 }
-            try await driver.type(try string(0), try string(1), delay: delay.map { max(0, $0 * 0.6)...max(0.01, $0 * 1.4) } ?? 0.06...0.18)
+            let delay = (options(2)["delay"] as? NSNumber)?.doubleValue
+            try await driver.type(try string(0), try string(1), delay: ScenarioWait.keyDelay(milliseconds: delay))
             return nil
         case "press": try await driver.press(try string(0)); return nil
         case "scroll":
-            guard let delta = (arguments.first as? NSNumber)?.doubleValue else { throw PageDriver.Failure.script("scroll takes a number of points") }
-            try await driver.scroll(by: delta)
+            guard let delta = (arguments.first as? NSNumber)?.doubleValue, delta.isFinite else {
+                throw PageDriver.Failure.script("scroll takes a number of points")
+            }
+            // Far past any page; within what a whole number holds (its log line counts the points).
+            try await driver.scroll(by: min(max(delta, -1_000_000_000), 1_000_000_000))
             return nil
         case "textContent": return try await driver.textContent(try string(0))
         case "innerText": return try await driver.innerText(try string(0))
@@ -205,8 +253,11 @@ final class ScenarioRunner {
             let selector = arguments.first as? String
             return try await driver.screenshot(selector).base64EncodedString()
         case "pause":
-            let milliseconds = (arguments.first as? NSNumber)?.doubleValue ?? 0
-            try await Task.sleep(nanoseconds: UInt64(max(0, milliseconds) * 1_000_000))
+            // `sleep(Infinity)`, or longer than a year: until Stop, which cancels the wait.
+            let nanoseconds = ScenarioWait.nanoseconds(milliseconds: (arguments.first as? NSNumber)?.doubleValue ?? 0)
+            repeat {
+                try await Task.sleep(nanoseconds: nanoseconds ?? 3_600_000_000_000)
+            } while nanoseconds == nil
             return nil
         default:
             throw PageDriver.Failure.script("no command \(name)")
@@ -216,12 +267,13 @@ final class ScenarioRunner {
     // MARK: The script's side (its own thread)
 
     /// The commands the script's `page` has, by their names.
-    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "click", "dblclick", "hover",
-                                       "type", "press", "scroll", "textContent", "innerText", "inputValue", "getAttribute", "count",
-                                       "isVisible", "url", "title", "screenshot", "pause"]
+    private static let pageCommands = ["goto", "back", "forward", "reload", "waitForLoadState", "waitFor", "waitForURL", "click", "dblclick",
+                                       "hover", "selectOption", "type", "press", "scroll", "textContent", "innerText", "inputValue",
+                                       "getAttribute", "count", "isVisible", "url", "title", "screenshot", "pause"]
 
     /// Builds the script's world and runs `source` in it, on `thread`.
-    nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, runner owner: ScenarioRunner?) {
+    nonisolated private static func run(_ source: String, parametersJSON: String, on thread: ScriptThread, gate commands: ScriptGate,
+                                        runner owner: ScenarioRunner?) {
         weak var runner = owner
         let context = JSContext()!
         // Held by its thread, for as long as the run's thread lives; the script's functions hold it
@@ -233,6 +285,16 @@ final class ScenarioRunner {
                 MainActor.assumeIsolated {
                     guard let runner else { return }
                     if ok {
+                        // What the script returned (JSON text; none for nothing returned) is the
+                        // run's result — unless the run was stopped meanwhile, or it is too large
+                        // to carry, which the log says.
+                        if !message.isEmpty, runner.stopRequest == nil, runner.outcome == nil {
+                            if message.utf8.count <= Self.maximumResultBytes {
+                                runner.add(.result, message)
+                            } else {
+                                runner.add(.error, "The result is larger than \(Self.maximumResultBytes / 1024) KB and is left out: return less")
+                            }
+                        }
                         runner.end(.finished)
                     } else if let reason = runner.stopRequest {
                         runner.end(.stopped(reason))
@@ -248,6 +310,11 @@ final class ScenarioRunner {
         // waiting, the rest are counted, not queued, and the log says how many it left out.
         let gate = LogGate()
         let logged: @convention(block) (String) -> Void = { text in
+            // Stopped, or ended: said to the script, not to the log.
+            guard !commands.isClosed else {
+                Self.throwInScript("stopped")
+                return
+            }
             guard gate.take() else { return }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
@@ -259,9 +326,25 @@ final class ScenarioRunner {
                 }
             }
         }
+        // A script that asks for commands in a loop without awaiting them queued a hop to the main
+        // thread, a task and a promise for each, without end: the process's memory grew until the
+        // profile stopped. Past `ScriptGate.commandLimit` asked for and not answered, the call
+        // throws, saying to await them; after Stop, or once the run has ended, every call throws
+        // "stopped" at once — on this thread, so that such a loop ends with the run.
         let command: @convention(block) (String, JSValue) -> JSValue = { [weak context] name, arguments in
+            switch commands.takeCommand() {
+            case .closed:
+                return Self.throwInScript("stopped")
+            case .full:
+                return Self.throwInScript("\(ScriptGate.commandLimit) page commands are waiting to run: write await before each one, as in await page.click('#login')")
+            case .taken:
+                break
+            }
             let values = arguments.toArray() ?? []
-            guard let context else { return JSValue(undefinedIn: JSContext.current()) }
+            guard let context else {
+                commands.commandAnswered()
+                return JSValue(undefinedIn: JSContext.current())
+            }
             return JSValue(newPromiseIn: context) { resolve, reject in
                 let resolve = resolve, reject = reject
                 DispatchQueue.main.async {
@@ -274,6 +357,7 @@ final class ScenarioRunner {
                         let result = await runner.perform(name, values)
                         runner.inFlight[id] = nil
                         thread.perform {
+                            commands.commandAnswered()
                             switch result {
                             case .success(let value):
                                 resolve?.call(withArguments: [value ?? NSNull()])
@@ -295,59 +379,190 @@ final class ScenarioRunner {
         context.setObject(logged, forKeyedSubscript: "__log" as NSString)
         context.setObject(command, forKeyedSubscript: "__command" as NSString)
         context.exceptionHandler = { _, exception in
-            let message = exception?.toString() ?? "error"
+            var message = exception?.toString() ?? "error"
+            // A script that does not parse: the line the reading stopped at.
+            if let line = exception?.forProperty("line"), line.isNumber, line.toInt32() > 0 { message += " (line \(line.toInt32()))" }
             ended(false, message)
         }
         let names = pageCommands.map { "'\($0)'" }.joined(separator: ", ")
         let prelude = """
             const params = Object.freeze(\(parametersJSON));
             const log = (...parts) => __log(parts.map((p) => typeof p === 'string' ? p : JSON.stringify(p)).join(' '));
+            \(Self.lineSupport)
             const page = {};
-            for (const name of [\(names)]) page[name] = (...args) => __command(name, args);
+            for (const name of [\(names)]) page[name] = (...args) => __at(__line(), () => __command(name, args));
             page.waitForSelector = page.waitFor;
-            page.evaluate = (body, arg, options) => __command('evaluate', [
+            page.waitForURL = (url, options) => __at(__line(), () => __command('waitForURL', [
+              url instanceof RegExp ? {regex: url.source, flags: url.flags} : url, options === undefined ? null : options]));
+            page.evaluate = (body, arg, options) => __at(__line(), () => __command('evaluate', [
               typeof body === 'function' ? 'return await (' + body.toString() + ')(__arg);' : String(body),
-              arg === undefined ? null : arg, (options && options.world) || 'isolated']);
-            const sleep = (ms) => __command('pause', [ms]);
+              arg === undefined ? null : arg, (options && options.world) || 'isolated']));
+            const sleep = (ms) => __at(__line(), () => __command('pause', [ms]));
             """
         context.evaluateScript(prelude)
         // The script's first line is line 1 of what runs: its line numbers stay its own.
-        let script = "(async () => {" + source + "\n})().then(() => __ended(true, ''), (e) => __ended(false, String(e && e.stack ? e + '\\n' + e.stack : e)));"
+        let script = "(async () => {" + source + "\n})().then((value) => __ended(true, __result(value)), (e) => __ended(false, __failure(e)));"
         context.evaluateScript(script, withSourceURL: URL(string: "scenario.js"))
+    }
+
+    /// The script's side of "which line": part of the prelude, in JavaScript, kept apart so that
+    /// scripts/test-shims.mjs runs this very text (in JavaScriptCore under Bun, in V8 under Node).
+    ///
+    /// A command that fails is rejected from this code, outside any call of the script, so its
+    /// error knows nothing of the scenario's lines: a script of a hundred lines with five
+    /// `page.click` failed with "no element matches #next" and no word of which. `__line()` reads
+    /// the line of the scenario a command is called from — the first frame of `scenario.js` (the
+    /// name the script is run under) in a stack made there; `__at` adds it to the error of a
+    /// command that fails, once ("… (line 12)", and `scenarioLine` on the error; "stopped" stays as
+    /// it is: a script may compare it). `__failure` is the
+    /// run's end by an error nobody caught: the script's own errors get their line the same way,
+    /// from their own stack. `__result` is what the script returned, as JSON text ('' for nothing).
+    static let lineSupport = #"""
+const __lineIn = (stack) => { const m = /scenario\.js:(\d+)/.exec(String(stack || '')); return m ? Number(m[1]) : 0; };
+const __line = () => __lineIn(new Error().stack);
+const __mark = (e, line) => {
+  try {
+    if (line > 0 && e && typeof e === 'object' && typeof e.message === 'string' && e.message !== 'stopped' && e.scenarioLine === undefined) {
+      e.scenarioLine = line;
+      e.message += ' (line ' + line + ')';
+    }
+  } catch (ignored) {}
+  return e;
+};
+const __at = (line, call) => {
+  let promise;
+  try { promise = call(); } catch (e) { throw __mark(e, line); }
+  return promise && typeof promise.then === 'function' ? promise.then(undefined, (e) => { throw __mark(e, line); }) : promise;
+};
+const __failure = (e) => {
+  __mark(e, __lineIn(e && e.stack));
+  return String(e && e.stack ? e + '\n' + e.stack : e);
+};
+const __result = (value) => {
+  if (value === undefined) { return ''; }
+  try { const text = JSON.stringify(value); return text === undefined ? '' : text; } catch (e) { return JSON.stringify(String(value)); }
+};
+"""#
+
+    /// Throws an error with `message` in the script, from inside a call of it into this code
+    /// (`__command`, `__log`): JavaScriptCore throws the context's exception set during the call
+    /// when the call returns.
+    @discardableResult
+    nonisolated private static func throwInScript(_ message: String) -> JSValue {
+        let context = JSContext.current()
+        context?.exception = JSValue(newErrorFromMessage: message, in: context)
+        return JSValue(undefinedIn: context)
     }
 }
 
 /// A thread with a run loop, for one scenario's JavaScript: work is handed to it in order.
+///
+/// Work comes through a run-loop source of its own (version 0), signalled for each block: a source
+/// handled makes `RunLoop.run(mode:before:)` return, and the loop then sees a cancellation. Blocks
+/// given with `CFRunLoopPerformBlock` did not: run, they are no source handled, so `run` went on
+/// waiting and the thread never looked at `isCancelled` again — every run's thread, and its
+/// JavaScript context, stayed until the profile's process ended, a finished run's too (the
+/// self-test's "after Stop … its thread ends" found it).
 private final class ScriptThread: Thread, @unchecked Sendable {
     private var runLoop: CFRunLoop?
+    private var source: CFRunLoopSource?
+    /// The blocks given and not run yet, in order.
+    private var work: [() -> Void] = []
     private let ready = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     /// The run's JavaScript; let go when the thread ends.
     var context: JSContext?
 
     override func main() {
+        var sourceContext = CFRunLoopSourceContext()
+        sourceContext.info = Unmanaged.passUnretained(self).toOpaque()
+        sourceContext.perform = { info in
+            guard let info else { return }
+            Unmanaged<ScriptThread>.fromOpaque(info).takeUnretainedValue().runWork()
+        }
+        let source = CFRunLoopSourceCreate(kCFAllocatorDefault, 0, &sourceContext)
+        CFRunLoopAddSource(CFRunLoopGetCurrent(), source, CFRunLoopMode.defaultMode)
         lock.lock()
         runLoop = CFRunLoopGetCurrent()
+        self.source = source
         lock.unlock()
-        // A source keeps the run loop waiting for work.
-        let port = Port()
-        RunLoop.current.add(port, forMode: .default)
         ready.signal()
         while !isCancelled {
             _ = RunLoop.current.run(mode: .default, before: .distantFuture)
         }
+        lock.lock()
+        self.source = nil
+        runLoop = nil
+        work.removeAll()
+        lock.unlock()
+        if let source { CFRunLoopSourceInvalidate(source) }
         context = nil
     }
 
     func waitUntilReady() { ready.wait() }
 
+    /// The blocks given so far, in order; one given while they run is the next signal's.
+    private func runWork() {
+        lock.lock()
+        let blocks = work
+        work.removeAll()
+        lock.unlock()
+        for block in blocks { block() }
+    }
+
     func perform(_ block: @escaping () -> Void) {
         lock.lock()
-        let loop = runLoop
+        guard let loop = runLoop, let source else {
+            lock.unlock()
+            return
+        }
+        work.append(block)
         lock.unlock()
-        guard let loop else { return }
-        CFRunLoopPerformBlock(loop, CFRunLoopMode.defaultMode.rawValue, block)
+        CFRunLoopSourceSignal(source)
         CFRunLoopWakeUp(loop)
+    }
+}
+
+/// A run's commands, between its script's thread and the main one: whether the run still takes any
+/// (Stop and the run's end close it, from the main thread; the script's thread reads it at each
+/// call), and how many the script has asked for that have not been answered on its thread yet — at
+/// most `commandLimit`: a script that awaits its commands has one, `Promise.all` over a page's
+/// elements a few hundred at most.
+private final class ScriptGate: @unchecked Sendable {
+    static let commandLimit = 1000
+    enum Answer { case taken, closed, full }
+    private let lock = NSLock()
+    private var closed = false
+    private var waiting = 0
+
+    /// Stop, or the run's end: no command or log line is taken any more.
+    func close() {
+        lock.lock()
+        closed = true
+        lock.unlock()
+    }
+
+    var isClosed: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed
+    }
+
+    /// One more command asked for: `.taken` counts it until `commandAnswered`.
+    func takeCommand() -> Answer {
+        lock.lock()
+        defer { lock.unlock() }
+        if closed { return .closed }
+        guard waiting < Self.commandLimit else { return .full }
+        waiting += 1
+        return .taken
+    }
+
+    /// A command taken has its answer on the script's thread (or was never sent).
+    func commandAnswered() {
+        lock.lock()
+        waiting = max(0, waiting - 1)
+        lock.unlock()
     }
 }
 
@@ -379,5 +594,24 @@ private final class LogGate: @unchecked Sendable {
         let count = leftOut
         leftOut = 0
         return count
+    }
+}
+
+extension ProfileManager.ScenarioRunState {
+    /// How long the run has taken: to its end's line, or to its last line so far.
+    var length: TimeInterval { max(0, (lines.last?.at ?? startedAt).timeIntervalSince(startedAt)) }
+
+    /// What the script returned, as JSON text; nil when it returned nothing, or has not ended.
+    var result: String? { lines.last(where: { $0.kind == .result })?.text }
+
+    /// The run's log as text, to copy or keep: the scenario's name and when it started, then each
+    /// line after the seconds since the start — where a run's time went is read off them.
+    var transcript: String {
+        var out = ["\(name) — \(ISO8601DateFormatter().string(from: startedAt))"]
+        for line in lines {
+            let seconds = String(format: "%9.3f", max(0, line.at.timeIntervalSince(startedAt)))
+            out.append("\(seconds)  \(line.kind == .result ? "result " : "")\(line.text)")
+        }
+        return out.joined(separator: "\n") + "\n"
     }
 }

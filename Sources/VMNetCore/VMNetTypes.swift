@@ -111,6 +111,16 @@ public struct VMNetConfiguration: Sendable {
     /// software-update hosts, so a guest never downloads gigabytes of updates through a paid proxy.
     public var blockedHostSuffixes: [String]
     public var mtu: Int
+    /// Names the guest was given fake addresses for at an earlier run of this network, with those
+    /// addresses: a machine woken from a saved state still holds them (in its resolver's cache,
+    /// in connections it is about to open) and must find the same names behind them.
+    public var knownNames: [VMNetKnownName] = []
+    /// The guest's UDP — QUIC (HTTP/3), WebRTC, anything but DNS and the time — is carried through
+    /// the proxy's own UDP relay (SOCKS5 UDP ASSOCIATE, RFC 1928 §7), and no other way. Off, or
+    /// with a proxy that is not SOCKS5, or one that refuses: answered "port unreachable", as
+    /// before. The app turns it on for a run only when its check before the start found that the
+    /// proxy carries UDP; DNS and the time are answered here either way, and never relayed.
+    public var relaysUDP = false
 
     public init(guestMAC: VMNetMAC, gatewayMAC: VMNetMAC,
                 gatewayAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0101), guestAddress: VMNetIPv4 = VMNetIPv4(0xC0A8_0117),
@@ -145,8 +155,81 @@ public struct VMNetCounters: Equatable, Sendable {
     public var dnsQueries: UInt64 = 0
     /// Queries answered "no such name" because the name is under a blocked suffix.
     public var dnsBlocked: UInt64 = 0
-    /// UDP that is not DHCP or DNS.
+    /// UDP that is not DHCP, DNS or a question for the time and was not carried: answered "port
+    /// unreachable" (or, for broadcasts, multicast and a full queue, nothing).
     public var datagramsDropped: UInt64 = 0
+    /// Questions for the time (NTP) answered with this Mac's clock.
+    public var timeQueries: UInt64 = 0
+    /// The guest's datagrams sent on through the proxy's UDP relay (`relaysUDP`), and their payload.
+    public var datagramsRelayed: UInt64 = 0
+    public var udpBytesFromGuest: UInt64 = 0
+    /// Datagrams from the relay delivered to the guest, and their payload.
+    public var datagramsToGuest: UInt64 = 0
+    public var udpBytesToGuest: UInt64 = 0
+    /// UDP associations with the proxy that came up, that did not (refused, not answered, not
+    /// understood), and that are open now. One per port the guest sends from.
+    public var udpAssociationsOpened: UInt64 = 0
+    public var udpAssociationsFailed: UInt64 = 0
+    public var udpAssociationsActive: Int = 0
+    /// The guest's connections the proxy failed one after another, by its own fault, since it last
+    /// carried one (`VMNetProxyTrouble`): a proxy that went down, or stopped taking its sign-in,
+    /// while the machine runs. A site the proxy answers it cannot reach neither counts nor resets.
+    public var proxyFailuresInARow: UInt64 = 0
+    /// Why the last of them failed; nil once a connection is carried again.
+    public var proxyTrouble: VMNetProxyTrouble?
 
     public init() {}
+}
+
+/// Why the proxy itself gave a connection no tunnel — a kind, never where the connection was going.
+public enum VMNetProxyTrouble: String, Equatable, Sendable, CaseIterable {
+    /// The proxy's address was not found, its port did not take the connection, or it closed the
+    /// connection or said nothing in time: the proxy is down, or not where its entry says.
+    case unreachable
+    /// The proxy refused the sign-in: SOCKS5's user name and password, or HTTP's 407.
+    case login
+    /// The proxy's answer is not the protocol the profile names (an HTTP proxy's port given as
+    /// SOCKS5, or the other way round).
+    case notUnderstood
+}
+
+/// A name the guest asked for and the fake address it was given for it (`FakeAddressPool`).
+public struct VMNetKnownName: Equatable, Sendable {
+    public var name: String
+    /// In host byte order, as `VMNetIPv4.value`.
+    public var address: UInt32
+
+    public init(name: String, address: UInt32) {
+        self.name = name
+        self.address = address
+    }
+}
+
+/// What the network has carried to and from one host the guest asked for, since it started. This
+/// IS the person's browsing — shown to them while the machine runs, kept in memory only, and
+/// never written to a log.
+public struct VMNetHost: Equatable, Sendable {
+    /// The name the guest asked for, or the address it connected to as written.
+    public var name: String
+    /// Connections the guest opened to it, made or not.
+    public var connections: UInt64
+    /// Of them, open now.
+    public var open: Int
+    public var bytesFromGuest: UInt64
+    public var bytesToGuest: UInt64
+    /// Questions for the name and connections to it refused because it is blocked.
+    public var blocked: UInt64
+    /// Seconds since the guest last asked for it or carried anything to or from it.
+    public var idle: Double
+
+    public init(name: String, connections: UInt64 = 0, open: Int = 0, bytesFromGuest: UInt64 = 0, bytesToGuest: UInt64 = 0,
+                blocked: UInt64 = 0, idle: Double = 0) {
+        self.name = name
+        self.connections = connections
+        self.open = open
+        self.bytesFromGuest = bytesFromGuest
+        self.bytesToGuest = bytesToGuest
+        self.blocked = blocked
+        self.idle = idle
+    }
 }

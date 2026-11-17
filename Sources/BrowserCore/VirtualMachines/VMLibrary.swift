@@ -13,7 +13,8 @@ import Foundation
 ///     share/                  the folder the guest sees during setup: the tools' installer, its status
 ///   machines/<profile id>/    one per profile: disk.img (a copy-on-write clone), aux.img,
 ///                             hardware-model.bin, machine-id.bin, share/ (settings in, status out),
-///                             tools/ (the boot script, shared read-only)
+///                             tools/ (the boot script, shared read-only), window.json (where its
+///                             window was last put)
 ///   downloads/
 ///     restore.ipsw.partial    Apple's restore image while it is fetched; restore.ipsw when whole
 ///     restore.json            VMDownloadState: what is being fetched, and how to go on with it
@@ -62,10 +63,25 @@ public struct VMLibrary: Equatable, Sendable {
         public var share: URL { directory.appendingPathComponent("share", isDirectory: true) }
         public var settings: URL { share.appendingPathComponent(VMGuestSettings.fileName) }
         public var status: URL { share.appendingPathComponent(VMGuestSettings.statusFileName) }
+        /// The helper's word to the guest that its display may sleep (`VMScreenSleep`), there only
+        /// while the machine's window is out of sight.
+        public var screenSleep: URL { share.appendingPathComponent(VMGuestSettings.screenSleepFileName) }
         /// The folder the machine is given read-only (`VMGuestSettings.toolsShareTag`): the boot
         /// script a machine takes a newer copy of itself from. The guest cannot write it, as it
         /// can the share — and what is taken from it runs as root in the guest.
         public var tools: URL { directory.appendingPathComponent("tools", isDirectory: true) }
+        /// The machine as it was when it was closed with instant wake on — its memory, as Apple's
+        /// framework saved it — and what it goes with (`VMSavedState`). Both are there only
+        /// between a close and the next start, which uses them once or removes them.
+        public var state: URL { directory.appendingPathComponent("state.vzvmsave") }
+        public var stateInfo: URL { directory.appendingPathComponent("state.json") }
+        /// Where the machine's window was last put (`VMWindowPlacement`): the machine's own note,
+        /// beside its disk and gone with it.
+        public var window: URL { directory.appendingPathComponent("window.json") }
+        /// A saved state waits for the machine's next start.
+        public var hasSavedState: Bool {
+            FileManager.default.fileExists(atPath: state.path) && FileManager.default.fileExists(atPath: stateInfo.path)
+        }
 
         /// Everything a machine needs to start is there.
         public var isComplete: Bool {
@@ -98,13 +114,20 @@ public struct VMLibrary: Equatable, Sendable {
         }
         if FileManager.default.fileExists(atPath: restoreImageURL.path) { return .downloaded }
         if let state = downloadState() {
-            let have = Self.fileSize(partialRestoreImageURL)
-            return .downloading(have: have, of: state.expectedLength)
+            return .downloading(have: downloadedBytes(state), of: state.expectedLength)
         }
         return .none
     }
 
     // MARK: The download's state
+
+    /// What of the restore image is here: the chunks that are whole, for a download of several
+    /// connections (its partial file has the whole length from the start); the partial file's
+    /// length, for one of one stream.
+    public func downloadedBytes(_ state: VMDownloadState? = nil) -> Int64 {
+        if let chunks = (state ?? downloadState())?.chunks { return chunks.doneBytes }
+        return Self.fileSize(partialRestoreImageURL)
+    }
 
     public func downloadState() -> VMDownloadState? {
         guard let data = try? Data(contentsOf: downloadStateURL) else { return nil }
@@ -228,8 +251,36 @@ public enum VMSetupState: Equatable, Sendable {
 /// read-only (`VMGuestSettings.toolsShareTag`), not from the shared folder, which anything in
 /// the machine can write; the pictures are kept in a folder of root's; what the script writes into
 /// the shared folder is moved into place, and a picture there is read as the person.
+///
+/// 8: macOS's panes for a new Mac — its "Welcome" screen among them — marked seen for the person
+/// who signs in by themselves, at the start, before the sign-in.
+///
+/// 9: the installer stops on a base signed in to an Apple ID, or with FileVault on, and says what
+/// to do (both would be in, or keep from signing in, every machine made from it).
+///
+/// 11: the menu bar and the Dock out of sight for a machine shown as a browser; and the time asked
+/// for when Lumen says the machine was woken from a saved state.
+///
+/// 10: the keyboard's layouts; what the base's region left behind (units, formats) removed when a
+/// machine comes to another; and the time zone, language and locale read back from the system
+/// into the status file, for Lumen to compare with what it asked for.
+///
+/// 12: the status says when browser mode's menu bar was changed at this start, which macOS takes
+/// at the next sign-in — a machine with instant wake is shut down once for it, as for a layout.
+///
+/// 13: the status says, as the script goes, which step of the start it is at (`LUMEN_STAGE`) and,
+/// once this start's settings are in — before Safari is opened —, which settings those were
+/// (`LUMEN_READY_REVISION`): the machine's window keeps its screen behind a cover until then
+/// (`VMStartCover`).
+///
+/// 14: the machine's display is put to sleep while the helper's word for it is in the shared
+/// folder (`VMGuestSettings.screenSleepFileName`, for a machine whose window has been out of
+/// sight a while, `VMScreenSleep`), and woken when the word is gone — only where the person's
+/// screen lock is off; what came of it is said in the status (`LUMEN_SCREEN_SLEEP`).
 public enum VMGuestTools {
-    public static let version = 7
+    public static let version = 14
+    /// The first tools whose script says which step it is at and when the settings are in.
+    public static let saysWhenReady = 13
     /// From this version on an installed boot script takes a newer copy of itself at a machine's
     /// start: a base with tools this new needs nothing done to it for a later version's settings.
     public static let updatesItselfFrom = 2

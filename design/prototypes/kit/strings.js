@@ -68,7 +68,6 @@
     'profiles.noMatches': ['No profiles match', 'Подходящих профилей нет'],
     'profiles.showAll': ['Show All Profiles', 'Показать все профили'],
     'profiles.device.mac': ['Mac', 'Mac'],
-    'profiles.device.iphone': ['iPhone', 'iPhone'],
     'profiles.appearsAs': ['%1$@ · Safari %2$@', '%1$@ · Safari %2$@'],
     'launch.error.proxyInvalid': ['The profile\'s proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.', 'Прокси профиля настроен неверно (адрес «%@»). Профиль не запущен, чтобы сайты не открылись напрямую. Исправьте адрес прокси в настройках профиля.'],
     // lock screen

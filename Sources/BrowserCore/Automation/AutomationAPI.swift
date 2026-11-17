@@ -10,9 +10,10 @@ import Foundation
 ///     programs of this user cannot drive the profiles without it;
 ///   * names this listener in `Host` (127.0.0.1, localhost or [::1] with its port): a web page
 ///     that points a name of its own at 127.0.0.1 (DNS rebinding) is refused;
-///   * comes from no web page: a browser sends `Origin` (and `Sec-Fetch-*`) with every
-///     cross-origin request, so one that has any is refused before the token is looked at, and
-///     no answer carries a CORS header for a page to read.
+///   * comes from no web page: a browser sends `Origin` with every cross-origin request and
+///     `Sec-Fetch-Site` with every request to 127.0.0.1, so one that has either is refused before
+///     the token is looked at (`AutomationGate.isFromWebPage`), and no answer carries a CORS
+///     header for a page to read.
 /// Nothing it answers holds a secret: a profile's proxy is its kind, host and port, never its
 /// credentials; cookies, which are a session's secret, only when asked for by name.
 public enum AutomationHTTP {
@@ -181,6 +182,21 @@ public enum AutomationHTTP {
         return .request(Request(method: String(requestLine[0]).uppercased(), path: path, query: query,
                                 headers: headers, body: Data(body), headerLines: headerLines))
     }
+
+    /// The answer to a connection the listener has no room for, from the first bytes it sent (the
+    /// request line is in them): nothing was done, send it again. Under `/wd/` the WebDriver
+    /// protocol's own error — "unknown error", whose status is 500 (the protocol has no "busy", and
+    /// Selenium's Python client takes a status above 500 for a success) — else the API's `503 busy`.
+    public static func busy(firstBytes: Data) -> Response {
+        let message = "Too many requests are arriving at once; this one was not acted on. Send it again in a moment."
+        let line = String(decoding: firstBytes.prefix(while: { $0 != 0x0D && $0 != 0x0A }), as: UTF8.self)
+        let parts = line.split(separator: " ")
+        if parts.count >= 2, WebDriverRoute.handles(String(parts[1])) {
+            let error = WebDriverError("unknown error", 500, message)
+            return Response(status: error.status, contentType: "application/json; charset=utf-8", body: error.body)
+        }
+        return .error(503, "busy", message)
+    }
 }
 
 /// Whether the API is on, where it listens and the token it asks for. This Mac's, kept in the
@@ -213,7 +229,7 @@ public enum AutomationGate {
     /// The refusal to send instead of acting on `request`, or nil when it may be acted on.
     public static func refusal(of request: AutomationHTTP.Request, token: String, port: Int) -> AutomationHTTP.Response? {
         // A web page's request, whatever else it carries.
-        if request.headers["origin"] != nil || request.headers.keys.contains(where: { $0.hasPrefix("sec-fetch-") }) {
+        if isFromWebPage(request) {
             return .error(403, "forbidden", "Requests from web pages are refused.")
         }
         let host = request.headers["host"]?.lowercased() ?? ""
@@ -231,7 +247,7 @@ public enum AutomationGate {
     /// header of ours): a web page's request and another Host are refused; the token is the
     /// caller's to compare (`tokenMatches`) once the path is read.
     public static func webDriverRefusal(of request: AutomationHTTP.Request, port: Int) -> WebDriverError? {
-        if request.headers["origin"] != nil || request.headers.keys.contains(where: { $0.hasPrefix("sec-fetch-") }) {
+        if isFromWebPage(request) {
             return WebDriverError("unknown error", 403, "Requests from web pages are refused.")
         }
         let host = request.headers["host"]?.lowercased() ?? ""
@@ -239,6 +255,17 @@ public enum AutomationGate {
             return WebDriverError("unknown error", 403, "The Host header must name this listener (127.0.0.1:\(port)).")
         }
         return nil
+    }
+
+    /// Whether `request` was made by a browser for a web page: it carries `Origin` (a page's fetch to
+    /// another origin, any POST of a page's), or the fetch metadata a browser adds — `Sec-Fetch-Site`
+    /// and the rest of the `Sec-Fetch-*` set, which Safari, Chrome and Firefox send on every request
+    /// to 127.0.0.1 (a trustworthy address). `Sec-Fetch-Mode` on its own is not a browser's mark:
+    /// Node's built-in fetch (undici), and so WebdriverIO, sends that one header of the set on every
+    /// request, and a browser never sends it without `Sec-Fetch-Site`.
+    public static func isFromWebPage(_ request: AutomationHTTP.Request) -> Bool {
+        if request.headers["origin"] != nil { return true }
+        return request.headers.keys.contains { $0.hasPrefix("sec-fetch-") && $0 != "sec-fetch-mode" }
     }
 
     /// Whether `given` is the API's token, compared in a time that does not depend on where they differ.

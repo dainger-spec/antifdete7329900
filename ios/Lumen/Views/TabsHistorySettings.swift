@@ -159,6 +159,9 @@ struct HistoryView: View {
                     Section {
                         Button(L("Очистить историю"), role: .destructive) { runtime.clearHistory() }
                             .accessibilityIdentifier("clearHistory")
+                    } footer: {
+                        // As the Mac keeps a profile's by default (HistoryRetention).
+                        Text(L("Хранятся посещения за последние %@ дней.", "\(HistoryRetention.days)"))
                     }
                 }
             }

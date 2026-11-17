@@ -33,6 +33,22 @@ extension ProfileConfiguration {
         }
         return saved
     }
+
+    /// This configuration as the profile editor saves it over `stored` (`savingEdit(over:)`), with
+    /// the proxy's location as `assigning` has it: when the proxy is another one than `stored`'s,
+    /// the location remembered for the old proxy goes, and in its place goes the one this edit
+    /// carries if it is the new proxy's — what the editor's check found through it ("From the
+    /// list", or Check under "New") — or none; its exit IP only while the profile asks to be warned
+    /// when it changes. The same proxy: what is stored stays (a launch's lookup may be newer than
+    /// the editor's copy). Without this, the old proxy's location was kept and the check's thrown
+    /// away, and the first launch through the new proxy had no location to fall back on.
+    public func savingEditorEdit(over stored: ProfileConfiguration?, at time: Date = Date()) -> ProfileConfiguration {
+        var saved = savingEdit(over: stored, at: time)
+        guard let stored, ProxyLocation.exitEndpoint(of: stored.proxy) != ProxyLocation.exitEndpoint(of: proxy) else { return saved }
+        saved.lastProxyLocation = rememberedProxyLocation
+        if proxy != nil, !saved.warnOnProxyIPChange { saved.lastProxyLocation?.exitIP = nil }
+        return saved
+    }
 }
 
 /// What giving proxies to profiles did.
@@ -90,23 +106,30 @@ extension ProfileRepository {
     /// copy went another way — a password changed in its editor, not in the list — keeps it: the
     /// list never overwrites what a profile was given since. Profiles with another proxy, or none,
     /// are not touched.
+    ///
+    /// `among`: the profiles to look at, of those listed — the ones the caller knows may use that
+    /// proxy; nil: every profile. A check that finds a proxy's type follows it, and with several
+    /// hundred proxies checked every profile's settings were read for each, on the main thread.
     @discardableResult
-    public func follow(_ entry: ProxyListEntry, previous: ProxySettings, at time: Date = Date()) -> ProxyAssignmentOutcome {
+    public func follow(_ entry: ProxyListEntry, previous: ProxySettings, among candidates: [UUID]? = nil,
+                       at time: Date = Date()) -> ProxyAssignmentOutcome {
         var outcome = ProxyAssignmentOutcome()
         guard let proxy = entry.usableProxy else { return outcome }
-        for summary in list() {
+        let listed = list().map(\.id)
+        let ids = candidates.map { wanted in listed.filter(Set(wanted).contains) } ?? listed
+        for id in ids {
             do {
-                let stored = try loadConfiguration(summary.id)
+                let stored = try loadConfiguration(id)
                 guard let current = stored.proxy, ProxyList.sameConnection(current, previous) else { continue }
                 let followed = stored.assigning(current.withConnection(of: proxy), check: entry.lastCheck, at: time)
                 guard followed != stored else {
-                    outcome.unchanged.append(summary.id)
+                    outcome.unchanged.append(id)
                     continue
                 }
-                try saveConfiguration(followed, for: summary.id)
-                outcome.changed.append(summary.id)
+                try saveConfiguration(followed, for: id)
+                outcome.changed.append(id)
             } catch {
-                outcome.failed[summary.id] = error.localizedDescription
+                outcome.failed[id] = error.localizedDescription
             }
         }
         return outcome

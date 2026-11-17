@@ -3,7 +3,8 @@ import Foundation
 import WebKit
 
 /// JavaScript shims for settings WebKit has no native per-web-view API for: time zone,
-/// geolocation and WebRTC. Best-effort and detectable; not engine-level.
+/// geolocation and WebRTC. Best-effort and detectable; not engine-level — and so installed only
+/// where the engine does not give the setting itself (below).
 ///
 /// What is deliberately NOT touched, because a fingerprinting test looks exactly for it:
 ///   * canvas, WebGL, audio and font rendering: noise makes two readings differ ("Canvas:
@@ -17,37 +18,48 @@ import WebKit
 ///   * navigator.deviceMemory: Safari does not implement it, so defining it marks a fake.
 /// No script overrides a navigator or screen value: a profile runs on the very engine and hardware
 /// it declares, and native values agree with everything else a page can measure (CSS media
-/// queries, window sizes, touch events), which a declared phone would not. The one value an iPhone
-/// view changes, the processor count, WebKit itself is given (`DeviceGeneration.processorCores`). An iPhone or iPad view is
-/// Safari on this Mac under that device's User-Agent, in a window of its screen's size — what
-/// Safari's own Develop › User Agent gives — and nothing more (the owner's decision, 31 October).
+/// queries, window sizes, touch events).
 ///
 /// What is replaced is replaced the way the engine defines it: accessors on the prototypes,
 /// strict methods with only `length` and `name`, the native receiver checks, and a
 /// `Function.prototype.toString` that prints them as native code — also when a page asks the
-/// toString of a fresh iframe (one registry per page, shared by every same-origin frame). The
-/// time zone shim covers the local constructor forms, `Date.parse`, the setters and
-/// sub-minute historical offsets, so Date is consistent with itself, not only with `Intl`.
+/// toString of a fresh iframe or of a window it opened (one registry for the same-origin windows
+/// of a page, which find each other by an event of this launch's own type, `ShimConfiguration.channel`:
+/// nothing a page can call or read hands the registry out). The time zone shim covers the local
+/// constructor forms, `Date.parse`, the setters and the offsets before standard time, so Date is
+/// consistent with itself, not only with `Intl`.
+///
+/// And a function is replaced only where the engine does not already answer as the profile. A
+/// profile in a process of its own has the engine in its time zone (`ProfileProcess`: TZ), a
+/// persistent store answers Safari's quota itself, and the engine answers geolocation and has
+/// WebRTC off: there the script asks the engine, finds nothing to substitute, and leaves every
+/// function the engine's own — `Date`, `toString`, `Worker`, the frames' accessors — which no
+/// replacement, however shaped, is.
+///
 /// A user script never runs in a worker; workers created from a blob of the page (how
-/// fingerprinting scripts create theirs) start with this script (`hookWorkers`), workers loaded
-/// from a URL and service workers keep the host's zone.
+/// fingerprinting scripts create theirs) start with this script (`hookWorkers`) when something it
+/// substitutes must reach them. Workers loaded from a URL and service workers have what the engine
+/// has: the profile's zone in a profile's own process, the host's elsewhere.
 enum PrivacyScripts {
     struct ShimConfiguration: Encodable {
         var timeZone: String?
         var geolocation: Geolocation
-        /// "disabled", "relayOnly", "unrestricted", or "tunnel" (with `webRTCRelay`).
+        /// "disabled", "relayOnly", "unrestricted", "tunnel" (with `webRTCRelay`), or "silent"
+        /// (present, connecting nowhere: `WebRTCRouting.silent`).
         var webRTC: String
         /// The app's TURN relay for this launch (`ProfileConfiguration.webRTCRouting`).
         var webRTCRelay: Relay?
         /// `window.safari` (`pushNotification`): only a macOS profile, and only when the Safari it
-        /// names gives pages one (`SafariVersions.givesWindowSafari`: up to 27.1, not from 27.2). An
-        /// iPhone or iPad has none (the owner's iPhone, 8 November), so an iPhone or iPad view never
-        /// gets one: there it was a mark of ours that no real browser shows.
+        /// names gives pages one (`SafariVersions.givesWindowSafari`: up to 27.1, not from 27.2).
         var safariObject: Bool
-        /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding.
+        /// The per-origin storage quota Safari reports (`safariStorageQuota`), before rounding; nil
+        /// where WebKit answers Safari's figure itself (`needsQuotaScript`).
         var storageQuota: Double?
-        /// An iPhone view with the full disguise: the phone the script presents (`patchPhone`).
-        var phone: Phone?
+        /// The type of the event by which the same-origin windows of a page find each other's
+        /// registry of replacements (the script's "family"): made at random for each launch
+        /// (`makeChannel`), so that no page can name it — a page that could would be handed the
+        /// list of what the script replaced. Never given to a worker (the script's `WORKER_KEYS`).
+        var channel: String
 
         /// What a page's `getUserMedia` is handed instead of the real camera (`patchCamera`); nil
         /// when the profile substitutes nothing, or when it delivers through the system camera
@@ -105,13 +117,6 @@ enum PrivacyScripts {
             struct Playback: Encodable { var loop: Bool; var paused: Bool; var rate: Double; var start: Double; var end: Double }
         }
 
-        struct Phone: Encodable {
-            var platform: String
-            var width: Int
-            var height: Int
-            var maxTouchPoints: Int
-        }
-
         struct Relay: Encodable {
             var urls: [String]
             var username: String
@@ -134,6 +139,7 @@ enum PrivacyScripts {
         var relay: ShimConfiguration.Relay?
         switch configuration.webRTCRouting {
         case .off: webRTC = WebRTCPolicy.disabled.rawValue
+        case .silent: webRTC = "silent"
         case let .native(policy): webRTC = policy.rawValue
         case let .relay(tunnel):
             webRTC = "tunnel"
@@ -149,17 +155,30 @@ enum PrivacyScripts {
         case let .fixed(latitude, longitude, accuracy):
             geolocation = .init(mode: "fixed", latitude: latitude, longitude: longitude, accuracy: accuracy)
         }
-        // window.safari: a macOS profile whose named Safari gives one; never an iPhone or iPad view.
-        let namedSafariVersion = HostSafari.version
-        let namedSafariGivesOne = configuration.deviceGeneration.platform == .macOS
-            && SafariVersions.givesWindowSafari(namedSafariVersion)
+        // window.safari: a profile whose named Safari gives one.
+        let namedSafariGivesOne = SafariVersions.givesWindowSafari(HostSafari.version)
         return ShimConfiguration(timeZone: configuration.timeZoneIdentifier, geolocation: geolocation,
                                  webRTC: webRTC, webRTCRelay: relay,
                                  safariObject: namedSafariGivesOne,
-                                 storageQuota: safariStorageQuota,
-                                 phone: phoneScript(for: configuration),
+                                 storageQuota: needsQuotaScript(for: configuration) ? safariStorageQuota : nil,
+                                 channel: makeChannel(),
                                  camera: cameraScript(for: configuration, systemCameraActive: systemCameraActive),
                                  systemCamera: systemCameraScript(for: configuration, active: systemCameraActive))
+    }
+
+    /// Whether a page's `navigator.storage.estimate()` needs the script to say Safari's quota: only
+    /// in an ephemeral profile, whose non-persistent store WebKit gives an app's fixed 1000 MiB. A
+    /// persistent profile's store answers for itself — Safari's figure where WebKit takes a
+    /// browser's ratios (`BrowserStorageQuota`), an app's 15 % of the standard volume where it does
+    /// not — and the script, which changes only the 1000 MiB, would wrap `estimate` (and with it
+    /// Worker, SharedWorker and URL.createObjectURL, for the workers' sake) to change nothing.
+    static func needsQuotaScript(for configuration: ProfileConfiguration) -> Bool {
+        configuration.ephemeral
+    }
+
+    /// A launch's own event type for the script's family of windows: 122 random bits, as text.
+    static func makeChannel() -> String {
+        UUID().uuidString.lowercased()
     }
 
     /// The system virtual camera as this profile should see it; nil unless the extension is
@@ -177,16 +196,24 @@ enum PrivacyScripts {
         return .init(sentinel: CameraSubstitution.systemDeviceName, usedHere: camera.usesSystemCamera, label: label)
     }
 
+    /// Whether the drawing camera shim has the pages' camera — drawing it, or refusing it ("No
+    /// camera", or a substitution through a system camera that is not on): when `cameraScript` gives
+    /// one. Its pages then never need the engine's camera (`BrowserTabContext.refusesCamera`).
+    static func scriptHasCamera(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> Bool {
+        let camera = configuration.cameraSubstitution
+        guard camera.isActive else { return false }
+        return camera.mode == .block || camera.delivery != .systemCamera || !systemCameraActive
+    }
+
     /// What the drawing camera shim is given; nil for a profile that substitutes nothing, or whose
     /// substitution the system camera delivers (`systemCameraScript`). "No camera" blocks whatever
     /// the delivery was last set to (the editor keeps it while hiding the picker). A substitution
     /// through the system camera while it is not on falls back to "No camera" too: the page then
     /// gets no camera, never the Mac's real one.
     static func cameraScript(for configuration: ProfileConfiguration, systemCameraActive: Bool = false) -> ShimConfiguration.Camera? {
+        guard scriptHasCamera(for: configuration, systemCameraActive: systemCameraActive) else { return nil }
         let camera = configuration.cameraSubstitution
-        guard camera.isActive else { return nil }
         let blocks = camera.mode == .block || (camera.delivery == .systemCamera && !systemCameraActive)
-        if !blocks && camera.delivery == .systemCamera { return nil }
         return .init(mode: blocks ? "block" : "substitute",
                      source: camera.source.rawValue,
                      width: camera.width, height: camera.height, frameRate: camera.frameRate,
@@ -213,35 +240,12 @@ enum PrivacyScripts {
                         : nil)
     }
 
-    /// What the full disguise's script presents of the phone; nil for a Mac or iPad profile and
-    /// for an iPhone view that leaves no script's trace (`PhoneDisguise.engineOnly`).
-    static func phoneScript(for configuration: ProfileConfiguration) -> ShimConfiguration.Phone? {
-        guard configuration.deviceGeneration.platform == .iOS, configuration.phoneDisguise == .full,
-              let phone = configuration.deviceGeneration.phone else { return nil }
-        return .init(platform: phone.platform, width: phone.screenWidth, height: phone.screenHeight,
-                     maxTouchPoints: phone.maxTouchPoints)
-    }
-
     /// navigator.storage.estimate().quota in Safari on a Mac, before WebKit rounds it up: a
     /// browser's origin quota ratio (0.6) times WebKit's *standard* volume capacity, 128 GB on a
     /// Mac, which WebKit reports instead of the real disk size, so it is the same on every Mac
     /// (`WebsiteDataStore::defaultStandardVolumeCapacity`). An app that is not a browser reports a
     /// fixed 1000 MiB instead.
     static let safariStorageQuota = 0.6 * 128 * 1024.0 * 1024.0 * 1024.0
-
-    /// The window of an iPhone or iPad view, in points: the device's screen. Only the window: what
-    /// a page reads of the screen, the touch points and the platform stays this Mac's (the owner's
-    /// decision, 31 October — a page told it is on a phone without touch broke on its touch events
-    /// and was told apart by them all the same). nil for a Mac profile.
-    static func deviceScreenSize(for configuration: ProfileConfiguration) -> CGSize? {
-        switch configuration.deviceGeneration.platform {
-        case .macOS: return nil
-        // The phone's screen (the owner's iPhone, 402×874): the window is as wide as it.
-        case .iOS: return configuration.deviceGeneration.phone.map { CGSize(width: $0.screenWidth, height: $0.screenHeight) }
-            ?? CGSize(width: 402, height: 874)
-        case .iPadOS: return CGSize(width: 820, height: 1180)
-        }
-    }
 
     @MainActor
     static func makeUserContentController(for configuration: ProfileConfiguration,
@@ -263,50 +267,194 @@ enum PrivacyScripts {
 
     static let shimBody = #"""
 'use strict';
-const patched = new WeakSet();
+// The engine's own built-ins, taken before any page script ran. What a replacement does when a
+// page calls it goes through these and through closures of this script, never through a function
+// a page can put in their place (Function.prototype.call, WeakMap.prototype.get, Promise.prototype.then…):
+// a page that replaces one and counts its calls sees none it would not see in Safari.
+const ReflectApply = Reflect.apply;
+const ReflectConstruct = Reflect.construct;
+const ReflectGet = Reflect.get;
+const ObjectCreate = Object.create;
+const ObjectDefineProperty = Object.defineProperty;
+const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
+const ObjectKeys = Object.keys;
+const ArrayIsArray = Array.isArray;
+const SymbolIterator = Symbol.iterator;
+const WeakMapGet = WeakMap.prototype.get;
+const WeakMapSet = WeakMap.prototype.set;
+const WeakSetHas = WeakSet.prototype.has;
+const WeakSetAdd = WeakSet.prototype.add;
+const PromiseThen = Promise.prototype.then;
+const RegExpExec = RegExp.prototype.exec;
+const StringSlice = String.prototype.slice;
+const StringToLowerCase = String.prototype.toLowerCase;
+const StringLastIndexOf = String.prototype.lastIndexOf;
+const StringIndexOf = String.prototype.indexOf;
+const StringReplace = String.prototype.replace;
+const MathCeil = Math.ceil;
+const SymbolToPrimitive = Symbol.toPrimitive;
+const NativeString = String;
+const NativeObject = Object;
+const NativeProxy = Proxy;
+const NativePromise = Promise;
+const NativeWeakMap = WeakMap;
+const NativeWeakSet = WeakSet;
+const NativeWeakRef = typeof WeakRef === 'function' ? WeakRef : null;
+const WeakRefDeref = NativeWeakRef ? NativeWeakRef.prototype.deref : null;
+const PromiseResolve = Promise.resolve;
+const call = (fn, self, ...args) => ReflectApply(fn, self, args);
+
 // The same script runs in a worker created from a blob (see hookWorkers), where there is no window.
 const IS_WORKER = typeof WorkerGlobalScope === 'function' && self instanceof WorkerGlobalScope;
 // This whole script, read before Function.prototype.toString is replaced: what hookWorkers runs
 // first in a worker. `install` is the name PrivacyScripts.source gives the wrapping function.
 const SOURCE = typeof install === 'function' ? Function.prototype.toString.call(install) : null;
-// Shared by every same-origin frame of the page: the frame above answers with its registry when
-// its (patched) Function.prototype.toString is called with this key as `this`.
-const REGISTRY_KEY = Symbol.for('wk.shim.registry');
-const registry = acquireRegistry();
 // How this engine prints a native function; the name is substituted per function.
 const NATIVE_TEMPLATE = Function.prototype.toString.call(Array.prototype.push).replace('push', '%NAME%');
 
-function acquireRegistry() {
-  if (IS_WORKER) return new WeakMap();
-  let w = window;
-  try {
-    while (w.parent && w.parent !== w) {
-      w = w.parent;
-      const shared = w.Function.prototype.toString.call(REGISTRY_KEY); // native: TypeError
-      if (shared) return shared;
-    }
-  } catch (e) {}
-  return new WeakMap();
+// ---- One family of windows ---------------------------------------------------------------------
+// The same-origin windows of a page — its frames, a window it opened, its opener — are one family:
+// one registry of what this script replaced and of the text each replacement prints as, so that
+// any of their Function.prototype.toString prints any of their replacements as the engine prints
+// its own. A window finds its family by asking the window above it, and its opener, with an event
+// whose type is this launch's own (CONFIG.channel: made at random for the launch, never given to a
+// worker, in no text a page can read). It is sent with this realm's own EventTarget functions and
+// heard by a listener the window above registered when its document started; the answer is put on
+// the event itself. So nothing a page can replace is called, nothing is left on any object a page
+// can reach, a listener cannot be listed, and Function.prototype.toString has no receiver it
+// answers otherwise than the engine. (Until 15 November the registry was handed out by
+// Function.prototype.toString itself to whoever called it with a well-known symbol: one line told
+// a profile from Safari, and listed what was replaced.) Without an answer — a cross-origin parent,
+// no channel — a window is a family of its own.
+const CHANNEL = typeof CONFIG.channel === 'string' && CONFIG.channel !== '' ? CONFIG.channel : null;
+const family = joinFamily();
+const registry = family.registry;
+
+function joinFamily() {
+  if (!IS_WORKER && CHANNEL !== null) {
+    try {
+      const NativeEvent = window.Event;
+      const dispatch = window.EventTarget.prototype.dispatchEvent;
+      const above = [];
+      if (window.parent && window.parent !== window) above[above.length] = window.parent;
+      if (window.opener) above[above.length] = window.opener;
+      for (let i = 0; i < above.length; i++) {
+        try {
+          const question = new NativeEvent(CHANNEL);
+          ReflectApply(dispatch, above[i], [question]); // a cross-origin window: SecurityError
+          const answer = ObjectGetOwnPropertyDescriptor(question, 'family');
+          if (answer && answer.value) return answer.value;
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+  // A window is known here by its realm — the Function.prototype of its global — not by the
+  // object a page holds for it, which stays the same when the window goes to another document
+  // and so to a realm no copy of this script has been through.
+  const own = ObjectCreate(null);
+  own.registry = new NativeWeakMap(); // replacement → the text it prints as
+  own.patched = new NativeWeakSet();  // realms a member of the family has been through (patchWindow)
+  own.printing = new NativeWeakSet(); // realms whose Function.prototype.toString knows the registry
+  own.prints = false;                 // a replacement exists somewhere in the family
+  own.plain = [];                     // WeakRefs of the realms whose toString is still the engine's
+  return own;
 }
 
+// A window of the family answers the windows below it, and those it opens.
+function answerFamily(w) {
+  if (CHANNEL === null || !w.EventTarget) return;
+  const listen = w.EventTarget.prototype.addEventListener;
+  if (typeof listen !== 'function') return;
+  ReflectApply(listen, w, [CHANNEL, (question) => {
+    try { ObjectDefineProperty(question, 'family', { value: family }); } catch (e) {}
+  }]);
+}
+
+// The first replacement made anywhere in the family: from then on every window of it prints the
+// registry's functions as native. Until then no window's toString is touched — a profile whose
+// settings replace nothing has the engine's own (`patchWindow`).
+function noteReplacement() {
+  if (family.prints) return;
+  family.prints = true;
+  const waiting = family.plain;
+  family.plain = [];
+  for (let i = 0; i < waiting.length; i++) {
+    let realm = null;
+    try { realm = ReflectApply(WeakRefDeref, waiting[i], []); } catch (e) {}
+    if (realm) { try { patchToString(realm); } catch (e) {} }
+  }
+}
+
+// The profile's time zone, when the engine is not in it already, under the name THIS engine has
+// for it. A profile in a process of its own gives WebKit's processes its zone (ProfileProcess:
+// TZ), so Date and Intl are the engine's there — in the page, every frame and every worker,
+// service workers included — and replacing them would only put copies where Safari has its own.
+// An engine names some zones by an older name of theirs (its ICU's: Asia/Calcutta for
+// Asia/Kolkata, Europe/Kiev for Europe/Kyiv), and says that name for the zone it is in whatever
+// name it was given — while it may hand a name given to a formatter back as given. So the zone is
+// known by the name the engine lists for it (Intl.supportedValuesOf), which is what a page reads
+// in Safari on a Mac in that zone: the comparison with the engine's own zone is made on it, and
+// where Date is replaced the formatters are given it.
+const ZONE_NAMES = ['Asia/Calcutta', 'Asia/Kolkata', 'Asia/Katmandu', 'Asia/Kathmandu', 'Asia/Saigon', 'Asia/Ho_Chi_Minh',
+  'Asia/Rangoon', 'Asia/Yangon', 'Europe/Kiev', 'Europe/Kyiv', 'America/Buenos_Aires', 'America/Argentina/Buenos_Aires',
+  'America/Catamarca', 'America/Argentina/Catamarca', 'America/Cordoba', 'America/Argentina/Cordoba',
+  'America/Jujuy', 'America/Argentina/Jujuy', 'America/Mendoza', 'America/Argentina/Mendoza',
+  'America/Indianapolis', 'America/Indiana/Indianapolis', 'America/Louisville', 'America/Kentucky/Louisville',
+  'America/Godthab', 'America/Nuuk', 'America/Coral_Harbour', 'America/Atikokan', 'Atlantic/Faeroe', 'Atlantic/Faroe',
+  'Africa/Asmera', 'Africa/Asmara', 'Pacific/Truk', 'Pacific/Chuuk', 'Pacific/Ponape', 'Pacific/Pohnpei',
+  'Pacific/Enderbury', 'Pacific/Kanton'];
+const ZONE = (function () {
+  const zone = CONFIG.timeZone;
+  if (typeof zone !== 'string' || zone === '') return null;
+  try {
+    const NativeDTF = Intl.DateTimeFormat;
+    const engine = new NativeDTF().resolvedOptions().timeZone;
+    if (engine === zone) return null;
+    // The zone's other name, if it has one (the pairs above: older, newer).
+    let other = null;
+    for (let i = 0; i < ZONE_NAMES.length; i++) if (ZONE_NAMES[i] === zone) other = ZONE_NAMES[i ^ 1];
+    // The name the engine itself has for the zone: the one it lists; else what it makes of the
+    // name in a formatter.
+    let listed = null;
+    try { listed = Intl.supportedValuesOf('timeZone'); } catch (e) {}
+    let name = null;
+    for (let i = 0; listed && i < listed.length && name !== zone; i++) {
+      if (listed[i] === zone || listed[i] === other) name = listed[i];
+    }
+    if (name === null) name = new NativeDTF('en-US', { timeZone: zone }).resolvedOptions().timeZone;
+    if (engine === name || engine === other) return null;
+    return name;
+  } catch (e) {}
+  return zone;
+})();
+
 function patchWindow(w) {
-  if (!w || patched.has(w)) return;
-  patched.add(w);
-  try { patchToString(w); } catch (e) {}
-  if (CONFIG.timeZone) { try { patchTimeZone(w, CONFIG.timeZone); } catch (e) {} }
-  if (CONFIG.phone) { try { patchPhone(w, CONFIG.phone); } catch (e) {} }
-  // Workers made from a blob run this same function with the same CONFIG (hookWorkers): every
-  // substitution above `if (IS_WORKER) return` reaches them — the time zone, an iPhone's
-  // platform, the storage quota, and the iOS app's fingerprint (ios/shim/fingerprint.js, put in
-  // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on,
-  // and only then (substitutesInWorkers): a worker left unhooked beside a substituted page answers
+  if (!w) return;
+  let realm;
+  try { realm = w.Function.prototype; } catch (e) { return; } // a window of another origin: its own copy's
+  if (typeof realm !== 'function') return; // Function.prototype is itself a function
+  // Once for a realm, whichever copy of the script comes to it: the window's own when its
+  // document starts, or — for a window a page reached before that — the copy of the window that
+  // reached it. A second pass would put replacements over replacements, and other functions in a
+  // page's hands than the ones it had.
+  if (call(WeakSetHas, family.patched, realm)) return;
+  call(WeakSetAdd, family.patched, realm);
+  if (!IS_WORKER) { try { answerFamily(w); } catch (e) {} }
+  if (ZONE) { try { patchTimeZone(w, ZONE); } catch (e) {} }
+  // Workers made from a blob run this same function with the part of CONFIG read here
+  // (`WORKER_KEYS`, hookWorkers): every substitution above the worker's `return` reaches them —
+  // and a key read here must be in WORKER_KEYS too — the time zone, the storage quota, and the
+  // iOS app's fingerprint (ios/shim/fingerprint.js, put in
+  // this function by ios/scripts/build-shim.py). So they are hooked whenever any of those is on —
+  // the time zone only when the script, not the engine, gives it — and only then
+  // (substitutesInWorkers): a worker left unhooked beside a substituted page answers
   // what the page does not (the lead, 8 November: the hook stood on the time zone alone, and a
   // profile with this Mac's time zone gave its workers the app's quota beside Safari's on the
   // page), and a hook with nothing to carry is a wrapper of ours with no reason. A worker loaded
   // from a URL runs none of it: a limit of its own (docs/ISOLATION_AND_LIMITATIONS.md).
   if (substitutesInWorkers(CONFIG)) { try { hookWorkers(w); } catch (e) {} }
   if (CONFIG.storageQuota) { try { patchStorageQuota(w, CONFIG.storageQuota); } catch (e) {} }
-  if (IS_WORKER) return; // no window, geolocation, WebRTC or frames in a worker
+  if (IS_WORKER) { printsAsNative(realm); return; } // no window, geolocation, WebRTC or frames in a worker
   if (CONFIG.safariObject) { try { patchSafariObject(w); } catch (e) {} }
   // 'native': the engine itself answers the profile's geolocation (NativeGeolocation.swift).
   if (!CONFIG.geolocation || CONFIG.geolocation.mode !== 'native') {
@@ -315,7 +463,27 @@ function patchWindow(w) {
   try { patchWebRTC(w, CONFIG.webRTC || 'disabled', CONFIG.webRTCRelay); } catch (e) {}
   if (CONFIG.camera) { try { patchCamera(w, CONFIG.camera); } catch (e) {} }
   if (CONFIG.systemCamera) { try { patchSystemCamera(w, CONFIG.systemCamera); } catch (e) {} }
-  try { hookChildWindows(w); } catch (e) {}
+  // A window reached before its own copy of this script ran is brought what this one has — when
+  // it has anything.
+  if (family.prints) { try { hookChildWindows(w); } catch (e) {} }
+  printsAsNative(realm);
+}
+
+// The realm's Function.prototype.toString prints the family's replacements as native — once
+// there is one; a realm of a family without any keeps the engine's own toString.
+function printsAsNative(realm) {
+  if (family.prints || !NativeWeakRef) { try { patchToString(realm); } catch (e) {} return; }
+  try {
+    // A page that makes frames all day: the realms that are gone are dropped from the list.
+    if (family.plain.length >= 256) {
+      const alive = [];
+      for (let i = 0; i < family.plain.length; i++) {
+        if (ReflectApply(WeakRefDeref, family.plain[i], [])) alive[alive.length] = family.plain[i];
+      }
+      family.plain = alive;
+    }
+    family.plain[family.plain.length] = new NativeWeakRef(realm);
+  } catch (e) {}
 }
 
 // ---- Functions that look native -------------------------------------------------------------
@@ -337,8 +505,14 @@ function orderOwnProperties(fn) {
 function asNative(fn) {
   orderOwnProperties(fn);
   // The engine prints an accessor without its "get " / "set " prefix.
-  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', fn.name.replace(/^[gs]et /, '')));
+  register(fn, call(StringReplace, fn.name, /^[gs]et /, ''));
   return fn;
+}
+
+// `fn` prints as the engine's function `name`.
+function register(fn, name) {
+  call(WeakMapSet, registry, fn, call(StringReplace, NATIVE_TEMPLATE, '%NAME%', () => name));
+  noteReplacement();
 }
 
 // A constructor shaped like a native one: `target` does the work (its new.target is the real
@@ -359,7 +533,7 @@ function constructor(name, length, target, statics, prototype, native) {
     defineStatics();
     Object.setPrototypeOf(fn, Object.getPrototypeOf(native));
   }
-  registry.set(fn, NATIVE_TEMPLATE.replace('%NAME%', name));
+  register(fn, name);
   return fn;
 }
 
@@ -373,16 +547,19 @@ function getter(name, impl) {
   return asNative(Object.getOwnPropertyDescriptor({ get [name]() { return ReflectApply(impl, this, []); } }, name).get);
 }
 
-function patchToString(w) {
-  const proto = w.Function.prototype;
+// `proto`: a realm's Function.prototype.
+function patchToString(proto) {
+  if (call(WeakSetHas, family.printing, proto)) return;
+  call(WeakSetAdd, family.printing, proto);
   const native = proto.toString;
+  // Whatever it is called on — a function, a proxy, a symbol, nothing — that is not in the
+  // registry gets the engine's own answer or its own TypeError.
   const toString = orderOwnProperties({ toString() {
-    if (this === REGISTRY_KEY) return registry;
-    const text = registry.get(this);
-    return text !== undefined ? text : native.call(this);
+    const text = ReflectApply(WeakMapGet, registry, [this]);
+    return text !== undefined ? text : ReflectApply(native, this, []);
   } }.toString);
-  registry.set(toString, native.call(native));
-  Object.defineProperty(proto, 'toString', { value: toString, writable: true, enumerable: false, configurable: true });
+  call(WeakMapSet, registry, toString, ReflectApply(native, native, []));
+  ObjectDefineProperty(proto, 'toString', { value: toString, writable: true, enumerable: false, configurable: true });
 }
 
 // Replaces a property keeping its enumerability (window.open is enumerable, prototype methods are not).
@@ -392,279 +569,15 @@ function define(target, name, value) {
                                         enumerable: existing ? !!existing.enumerable : false });
 }
 
-// ---- An iPhone (the full disguise, `PhoneDisguise.full`) -----------------------------------------
-// What the Mac's WebKit cannot be told and an iPhone's page reads: the phone's screen and the
-// window as large as it, five touch points, touch events, a coarse pointer without hover, the
-// portrait orientation, and the platform in a worker (the page's own is WebKit's, `PhoneEngine`).
-// Accessors where the engine defines them, made as the engine makes them (`getter`, `method`,
-// `constructor`). A touch made here from a click is a script's event: its isTrusted is false, and
-// the stylesheets' own @media rules keep this Mac's pointer — what a page that looks for them sees.
-function overrideGetter(obj, name, value) {
-  let holder = obj;
-  while (holder && !Object.prototype.hasOwnProperty.call(holder, name)) holder = Object.getPrototypeOf(holder);
-  if (!holder || holder === Object.prototype) return;
-  const native = Object.getOwnPropertyDescriptor(holder, name);
-  if (!native || !native.get) return;
-  const nativeGet = native.get;
-  const get = getter(name, function () {
-    ReflectApply(nativeGet, this, []); // the engine's own receiver check
-    return typeof value === 'function' ? value(ReflectApply(nativeGet, this, [])) : value;
-  });
-  Object.defineProperty(holder, name, { get: get, set: native.set, enumerable: native.enumerable, configurable: true });
-}
-
-function patchPhone(w, phone) {
-  const nav = w.navigator;
-  if (nav) overrideGetter(nav, 'platform', phone.platform);
-  if (IS_WORKER) return;
-  if (nav) overrideGetter(nav, 'maxTouchPoints', phone.maxTouchPoints);
-  const s = w.screen;
-  if (s) {
-    overrideGetter(s, 'width', phone.width);
-    overrideGetter(s, 'height', phone.height);
-    overrideGetter(s, 'availWidth', phone.width);  // an iPhone has no menu bar or Dock
-    overrideGetter(s, 'availHeight', phone.height);
-    if ('availLeft' in s) overrideGetter(s, 'availLeft', 0);
-    if ('availTop' in s) overrideGetter(s, 'availTop', 0);
-  }
-  // On an iPhone the window is the screen.
-  overrideGetter(w, 'outerWidth', phone.width);
-  overrideGetter(w, 'outerHeight', phone.height);
-  for (const name of ['screenX', 'screenY', 'screenLeft', 'screenTop']) overrideGetter(w, name, 0);
-  try { patchOrientation(w); } catch (e) {}
-  try { patchPointerQueries(w, phone); } catch (e) {}
-  try { patchTouch(w); } catch (e) {}
-}
-
-// Portrait, as a phone is held: screen.orientation, and window.orientation with its event, which
-// only iOS has.
-function patchOrientation(w) {
-  const SO = w.ScreenOrientation;
-  if (SO) {
-    overrideGetter(SO.prototype, 'type', 'portrait-primary');
-    overrideGetter(SO.prototype, 'angle', 0);
-  }
-  if (!('orientation' in w)) {
-    Object.defineProperty(w, 'orientation', { get: getter('orientation', function () { return 0; }),
-                                               set: undefined, enumerable: true, configurable: true });
-  }
-  if (!('onorientationchange' in w)) defineHandler(w, 'onorientationchange', 'orientationchange');
-}
-
-// matchMedia answers for a coarse pointer without hover, and for the phone's screen in
-// device-width/-height: the query is answered as one where those features are replaced by what
-// a phone says. Only what a script asks; the stylesheets' @media rules are the engine's.
-function patchPointerQueries(w, phone) {
-  const MQL = w.MediaQueryList;
-  if (!MQL || typeof w.matchMedia !== 'function') return;
-  const matchesDesc = Object.getOwnPropertyDescriptor(MQL.prototype, 'matches');
-  const mediaDesc = Object.getOwnPropertyDescriptor(MQL.prototype, 'media');
-  if (!matchesDesc || !matchesDesc.get || !mediaDesc || !mediaDesc.get) return;
-  const nativeMatches = matchesDesc.get, nativeMedia = mediaDesc.get, nativeMatchMedia = w.matchMedia;
-  // Always true, and always false whatever the window's size (a width bound was true for a view of no
-  // width, the self-test's): the resolution is at least 1 and never a million.
-  const YES = '(min-width: 0px)', NO = '(min-resolution: 1000000dppx)';
-  const rewrite = (query) => query
-    .replace(/\(\s*(any-)?pointer\s*:\s*(fine|coarse|none)\s*\)/gi, (m, any, v) => (v.toLowerCase() === 'coarse' ? YES : NO))
-    .replace(/\(\s*(any-)?pointer\s*\)/gi, YES)
-    .replace(/\(\s*(any-)?hover\s*:\s*(hover|none)\s*\)/gi, (m, any, v) => (v.toLowerCase() === 'none' ? YES : NO))
-    .replace(/\(\s*(any-)?hover\s*\)/gi, NO)
-    .replace(/\(\s*(min-|max-)?device-(width|height)\s*:\s*([\d.]+)px\s*\)/gi, (m, bound, side, n) => {
-      const size = side.toLowerCase() === 'width' ? phone.width : phone.height, x = parseFloat(n);
-      const b = (bound || '').toLowerCase();
-      return (b === 'min-' ? size >= x : b === 'max-' ? size <= x : size === x) ? YES : NO;
-    });
-  const matches = getter('matches', function () {
-    const native = ReflectApply(nativeMatches, this, []);
-    const query = ReflectApply(nativeMedia, this, []);
-    const rewritten = rewrite(query);
-    return rewritten === query ? native : ReflectApply(nativeMatches, ReflectApply(nativeMatchMedia, w, [rewritten]), []);
-  });
-  Object.defineProperty(MQL.prototype, 'matches', { get: matches, set: undefined, enumerable: matchesDesc.enumerable, configurable: true });
-}
-
-// An event handler attribute (ontouchstart, onorientationchange) as the engine has one.
-function defineHandler(target, name, type) {
-  const handlers = new WeakMap();
-  const get = getter(name, function () { const h = handlers.get(this); return h ? h.fn : null; });
-  const set = asNative({ ['set ' + name](fn) {
-    const old = handlers.get(this);
-    if (old) this.removeEventListener(type, old.listener);
-    if (typeof fn === 'function') {
-      const listener = function (event) { const r = ReflectApply(fn, this, [event]); if (r === false) event.preventDefault(); return r; };
-      handlers.set(this, { fn: fn, listener: listener });
-      this.addEventListener(type, listener);
-    } else {
-      handlers.delete(this);
-    }
-  } }['set ' + name]);
-  Object.defineProperty(target, name, { get: get, set: set, enumerable: true, configurable: true });
-}
-
-// Touch events: TouchEvent, Touch and TouchList as iOS has them, ontouch* handlers, and a touch
-// for each press of the primary button — touchstart, touchmove while it is held, touchend (a
-// touchend whose default is prevented takes the click away, as on a phone) — with the pointer
-// events saying "touch".
-function patchTouch(w) {
-  const doc = w.document, NativeUIEvent = w.UIEvent;
-  if (!doc || !NativeUIEvent || 'TouchEvent' in w) return;
-  const slots = new WeakMap();
-  const read = (o, Interface, key) => {
-    const slot = slots.get(o);
-    if (!slot || !(o instanceof Interface)) throw new w.TypeError('The ' + Interface.name + '.' + key + ' getter can only be used on instances of ' + Interface.name);
-    return slot[key];
-  };
-  const accessors = (proto, Interface, keys) => {
-    for (const key of keys) {
-      Object.defineProperty(proto, key, { get: getter(key, function () { return read(this, Interface, key); }),
-                                          set: undefined, enumerable: true, configurable: true });
-    }
-  };
-  const TouchListProto = {};
-  const listTarget = function () { throw new w.TypeError('Illegal constructor'); };
-  listTarget.prototype = TouchListProto;
-  const TouchList = constructor('TouchList', 0, listTarget, {}, TouchListProto, w.Object);
-  define(TouchListProto, 'item', method('item', 1, function (index) { const list = read(this, TouchList, 'list'); return list[index >>> 0] || null; }));
-  Object.defineProperty(TouchListProto, 'length', { get: getter('length', function () { return read(this, TouchList, 'list').length; }),
-                                                    set: undefined, enumerable: true, configurable: true });
-  Object.defineProperty(TouchListProto, Symbol.toStringTag, { value: 'TouchList', configurable: true });
-  const makeList = (touches) => {
-    const list = Object.create(TouchListProto);
-    slots.set(list, { list: touches });
-    touches.forEach((touch, i) => Object.defineProperty(list, i, { value: touch, enumerable: true, configurable: false, writable: false }));
-    return list;
-  };
-
-  const TouchProto = {};
-  const touchKeys = ['identifier', 'target', 'screenX', 'screenY', 'clientX', 'clientY', 'pageX', 'pageY',
-                     'radiusX', 'radiusY', 'rotationAngle', 'force', 'altitudeAngle', 'azimuthAngle', 'touchType'];
-  const touchTarget = function (init) {
-    if (!new.target) throw new w.TypeError("Failed to construct 'Touch': Please use the 'new' operator.");
-    if (!init || typeof init.identifier !== 'number' || !init.target) throw new w.TypeError('Type error');
-    const touch = Object.create(TouchProto);
-    const slot = {};
-    for (const key of touchKeys) slot[key] = init[key] !== undefined ? init[key] : (key === 'touchType' ? 'direct' : key === 'radiusX' || key === 'radiusY' ? 1 : 0);
-    slots.set(touch, slot);
-    return touch;
-  };
-  touchTarget.prototype = TouchProto;
-  const Touch = constructor('Touch', 1, touchTarget, {}, TouchProto, w.Object);
-  accessors(TouchProto, Touch, touchKeys);
-  Object.defineProperty(TouchProto, Symbol.toStringTag, { value: 'Touch', configurable: true });
-
-  const TouchEventProto = Object.create(NativeUIEvent.prototype);
-  const eventKeys = ['touches', 'targetTouches', 'changedTouches', 'altKey', 'metaKey', 'ctrlKey', 'shiftKey', 'scale', 'rotation'];
-  const eventTarget = function (type, init) {
-    if (!new.target) throw new w.TypeError("Failed to construct 'TouchEvent': Please use the 'new' operator.");
-    const options = init || {};
-    const event = ReflectConstruct(NativeUIEvent, [type, options], eventTarget);
-    const list = (value) => (value && slots.has(value) ? value : makeList(Array.isArray(value) ? value : []));
-    slots.set(event, { touches: list(options.touches), targetTouches: list(options.targetTouches), changedTouches: list(options.changedTouches),
-                       altKey: !!options.altKey, metaKey: !!options.metaKey, ctrlKey: !!options.ctrlKey, shiftKey: !!options.shiftKey,
-                       scale: 1, rotation: 0 });
-    return event;
-  };
-  eventTarget.prototype = TouchEventProto;
-  // Its [[Prototype]] is UIEvent, as MouseEvent's is (the helper takes the one of the interface given).
-  const TouchEvent = constructor('TouchEvent', 1, eventTarget, {}, TouchEventProto, w.MouseEvent || NativeUIEvent);
-  Object.defineProperty(TouchEventProto, 'constructor', { value: TouchEvent, writable: true, enumerable: false, configurable: true });
-  accessors(TouchEventProto, TouchEvent, eventKeys);
-  Object.defineProperty(TouchEventProto, Symbol.toStringTag, { value: 'TouchEvent', configurable: true });
-  Object.defineProperty(TouchListProto, 'constructor', { value: TouchList, writable: true, enumerable: false, configurable: true });
-  Object.defineProperty(TouchProto, 'constructor', { value: Touch, writable: true, enumerable: false, configurable: true });
-  for (const [name, value] of [['TouchEvent', TouchEvent], ['Touch', Touch], ['TouchList', TouchList]]) {
-    Object.defineProperty(w, name, { value: value, writable: true, enumerable: false, configurable: true });
-  }
-
-  // ontouch*: on elements, the document and the window, as GlobalEventHandlers has them on iOS.
-  for (const type of ['touchstart', 'touchmove', 'touchend', 'touchcancel']) {
-    for (const target of [w.HTMLElement && w.HTMLElement.prototype, w.SVGElement && w.SVGElement.prototype,
-                          w.Document && w.Document.prototype, w]) {
-      if (target && !Object.prototype.hasOwnProperty.call(target, 'on' + type)) defineHandler(target, 'on' + type, type);
-    }
-  }
-  // document.createEvent('TouchEvent'), which the Mac refuses.
-  const nativeCreateEvent = w.Document.prototype.createEvent;
-  define(w.Document.prototype, 'createEvent', method('createEvent', 1, function (kind) {
-    if (String(kind).toLowerCase() === 'touchevent' || String(kind).toLowerCase() === 'touchevents') {
-      ReflectApply(nativeCreateEvent, this, ['UIEvent']); // the receiver check
-      return new TouchEvent('', {});
-    }
-    return ReflectApply(nativeCreateEvent, this, [kind]);
-  }));
-
-  // The pointer events of the primary button say "touch".
-  const PE = w.PointerEvent;
-  const typeDesc = PE && Object.getOwnPropertyDescriptor(PE.prototype, 'pointerType');
-  const nativeType = typeDesc && typeDesc.get;
-  if (nativeType) overrideGetter(PE.prototype, 'pointerType', (value) => (value === 'mouse' ? 'touch' : value));
-  const pointerTypeOf = (event) => (nativeType ? ReflectApply(nativeType, event, []) : 'mouse');
-
-  // A press of the primary button is a touch: touchstart, touchmove, touchend at the target the
-  // press began on.
-  let active = null, swallowClick = false;
-  const nativeDispatch = w.EventTarget.prototype.dispatchEvent;
-  const touchOf = (event, target) => new Touch({ identifier: 0, target: target, screenX: event.screenX, screenY: event.screenY,
-                                                 clientX: event.clientX, clientY: event.clientY, pageX: event.pageX, pageY: event.pageY,
-                                                 radiusX: 1, radiusY: 1, force: event.type === 'pointerup' ? 0 : 1 });
-  const send = (target, type, touches, changed) => {
-    const event = new TouchEvent(type, { bubbles: true, cancelable: type !== 'touchcancel', composed: true, view: w,
-                                         touches: touches, targetTouches: touches, changedTouches: changed });
-    ReflectApply(nativeDispatch, target, [event]);
-    return event;
-  };
-  const primary = (event) => event.isPrimary && pointerTypeOf(event) === 'mouse';
-  // A touchstart whose default was prevented takes the press's mouse events and its click away
-  // (and so the focus a press gives), as on a phone; a prevented touchend takes the click.
-  let swallowMouse = false;
-  w.addEventListener('pointerdown', (event) => {
-    if (!primary(event) || event.button !== 0) return;
-    const touch = touchOf(event, event.target);
-    active = { target: event.target };
-    swallowClick = false;
-    swallowMouse = false;
-    const started = send(event.target, 'touchstart', [touch], [touch]);
-    if (started.defaultPrevented) { swallowMouse = true; swallowClick = true; }
-  }, true);
-  for (const type of ['mousedown', 'mouseup']) {
-    w.addEventListener(type, (event) => {
-      if (!swallowMouse || event.button !== 0) return;
-      if (type === 'mouseup') swallowMouse = false;
-      event.stopImmediatePropagation();
-      event.preventDefault();
-    }, true);
-  }
-  w.addEventListener('pointermove', (event) => {
-    if (!active || !primary(event) || !(event.buttons & 1)) return;
-    const touch = touchOf(event, active.target);
-    send(active.target, 'touchmove', [touch], [touch]);
-  }, true);
-  w.addEventListener('pointerup', (event) => {
-    if (!active || !primary(event)) return;
-    const target = active.target;
-    active = null;
-    const ended = send(target, 'touchend', [], [touchOf(event, target)]);
-    if (ended.defaultPrevented) swallowClick = true;
-  }, true);
-  w.addEventListener('pointercancel', (event) => {
-    if (!active || !primary(event)) return;
-    const target = active.target;
-    active = null;
-    send(target, 'touchcancel', [], [touchOf(event, target)]);
-  }, true);
-  w.addEventListener('click', (event) => {
-    if (!swallowClick) return;
-    swallowClick = false;
-    event.stopImmediatePropagation();
-    event.preventDefault();
-  }, true);
-}
-
 // ---- Time zone --------------------------------------------------------------------------------
 // Date and Intl behave as if the system zone were TZ: local getters and setters, the local
 // constructor forms, Date.parse of strings without an offset, toString's zone name, and the
 // default time zone of Intl.DateTimeFormat and toLocale*String. Offsets keep sub-minute
-// precision (pre-1900 "LMT" offsets have seconds), as the engine's own do.
+// precision (pre-1900 "LMT" offsets have seconds), as the engine's own do. Only where the engine
+// is not in the profile's zone itself (`ZONE`). What runs when a page calls a replacement uses
+// the engine's functions as they were when the document started and this script's own closures:
+// a page that replaces Function.prototype.call, isNaN, Map.prototype.get or
+// Intl.DateTimeFormat.prototype.formatToParts is asked nothing by `new Date().getHours()`.
 function patchTimeZone(w, TZ) {
   const NativeDate = w.Date;
   const proto = NativeDate.prototype;
@@ -672,8 +585,31 @@ function patchTimeZone(w, TZ) {
   const nativeGetTime = proto.getTime;
   const nativeSetTime = proto.setTime;
   const nativeParse = NativeDate.parse;
-  const nativeLocal = ['getFullYear', 'getMonth', 'getDate', 'getHours', 'getMinutes', 'getSeconds', 'getMilliseconds']
-    .map((name) => proto[name]);
+  const nativeUTC = NativeDate.UTC;
+  const formatToParts = NativeDTF.prototype.formatToParts;
+  const setUTCFullYear = proto.setUTCFullYear, setUTCHours = proto.setUTCHours;
+  const nativeLocal = [proto.getFullYear, proto.getMonth, proto.getDate, proto.getHours, proto.getMinutes,
+                       proto.getSeconds, proto.getMilliseconds];
+  const utcGetters = {
+    FullYear: proto.getUTCFullYear, Month: proto.getUTCMonth, Date: proto.getUTCDate,
+    Day: proto.getUTCDay, Hours: proto.getUTCHours, Minutes: proto.getUTCMinutes,
+    Seconds: proto.getUTCSeconds, Milliseconds: proto.getUTCMilliseconds
+  };
+  const utcSetters = {
+    FullYear: [proto.setUTCFullYear, 3], Month: [proto.setUTCMonth, 2], Date: [proto.setUTCDate, 1],
+    Hours: [proto.setUTCHours, 4], Minutes: [proto.setUTCMinutes, 3], Seconds: [proto.setUTCSeconds, 2],
+    Milliseconds: [proto.setUTCMilliseconds, 1]
+  };
+  const StringTrim = String.prototype.trim;
+  const MathFloor = Math.floor, MathTrunc = Math.trunc, MathAbs = Math.abs;
+  const isNaN = (x) => x !== x;
+  const isObject = (value) => value !== null && (typeof value === 'object' || typeof value === 'function');
+  const timeOf = (date) => ReflectApply(nativeGetTime, date, []); // the engine's receiver check
+  const read = (getter, date) => ReflectApply(getter, date, []);
+  // A Date holds ±8.64e15 ms; the wall clock of an instant within a day of either end lies
+  // outside that, and is read 400 years nearer zero (the Gregorian calendar repeats every 400
+  // years: the same month, day, weekday and time), the years put back where a year is said.
+  const LIMIT = 8.64e15, CYCLE = 12622780800000, CYCLE_YEARS = 400;
 
   const partsFormatter = new NativeDTF('en-US', {
     timeZone: TZ, hourCycle: 'h23', era: 'short',
@@ -682,72 +618,198 @@ function patchTimeZone(w, TZ) {
   });
   // The page's default locale, as the native Date#toString names the zone.
   const nameFormatter = new NativeDTF(undefined, { timeZone: TZ, timeZoneName: 'long' });
-  const offsetCache = new Map();
+  // The same instant's offset in words, to tell a name from an offset in any language; null on an
+  // engine that has no such style.
+  let offsetFormatter = null;
+  try { offsetFormatter = new NativeDTF(undefined, { timeZone: TZ, timeZoneName: 'longOffset' }); } catch (e) {}
+  let offsetCache = ObjectCreate(null), cached = 0;
 
-  // Minutes west of UTC at instant t (fractional before standard time), as getTimezoneOffset.
+  // Minutes west of UTC at instant t (fractional before standard time), as getTimezoneOffset;
+  // NaN for what is no instant (beyond the range of a Date), as the engine says.
   function offsetFor(t) {
-    const bucket = Math.floor(t / 900000);
-    if (offsetCache.has(bucket)) return offsetCache.get(bucket);
-    const p = {};
-    for (const part of partsFormatter.formatToParts(new NativeDate(t))) p[part.type] = part.value;
-    let year = +p.year;
+    if (!(t >= -LIMIT && t <= LIMIT)) return NaN;
+    const bucket = MathFloor(t / 900000);
+    const known = offsetCache[bucket];
+    if (known !== undefined) return known;
+    const p = ObjectCreate(null);
+    const parts = ReflectApply(formatToParts, partsFormatter, [new NativeDate(t)]);
+    for (let i = 0; i < parts.length; i++) p[parts[i].type] = parts[i].value;
+    let year = +p.year, shift = 0;
     if (p.era === 'BC' || p.era === 'B') year = 1 - year;
+    // At the range's ends the wall clock is itself beyond a Date: read a cycle nearer zero.
+    if (year > 275000) { year -= CYCLE_YEARS; shift = CYCLE; } else if (year < -271000) { year += CYCLE_YEARS; shift = -CYCLE; }
     const wallAsUTC = new NativeDate(0);
-    wallAsUTC.setUTCFullYear(year, +p.month - 1, +p.day);
-    wallAsUTC.setUTCHours(+p.hour % 24, +p.minute, +p.second, 0);
+    ReflectApply(setUTCFullYear, wallAsUTC, [year, +p.month - 1, +p.day]);
+    ReflectApply(setUTCHours, wallAsUTC, [+p.hour % 24, +p.minute, +p.second, 0]);
     const truncated = t - (((t % 1000) + 1000) % 1000);
-    const offset = (truncated - nativeGetTime.call(wallAsUTC)) / 60000;
-    if (offsetCache.size > 512) offsetCache.clear();
-    offsetCache.set(bucket, offset);
+    const offset = (truncated - (timeOf(wallAsUTC) + shift)) / 60000;
+    if (cached > 512) { offsetCache = ObjectCreate(null); cached = 0; }
+    offsetCache[bucket] = offset;
+    cached++;
     return offset;
   }
   // Wall-clock time in TZ, expressed as a UTC timestamp, and back.
   const toWall = (t) => t - offsetFor(t) * 60000;
   function fromWall(wallMs) {
-    let t = wallMs + offsetFor(wallMs) * 60000;
-    t = wallMs + offsetFor(t) * 60000; // second pass settles instants near a transition
-    return t;
+    // Within a day of the range's ends the wall clock itself is no instant: its offset is the
+    // one at the end it is near.
+    const near = wallMs > LIMIT ? LIMIT : wallMs < -LIMIT ? -LIMIT : wallMs;
+    const first = offsetFor(near);
+    let t = wallMs + first * 60000;
+    const second = offsetFor(t);
+    if (second !== first && !isNaN(second)) {
+      // A transition is near, and the wall clock may be said twice or never. Each offset gives an
+      // instant, which is one only if that offset holds at it. Twice (clocks set back): the
+      // earlier instant; never (clocks set forward): the later — both times the offset in force
+      // before the transition, as ECMAScript reads a local time.
+      const other = wallMs + second * 60000;
+      const holds = offsetFor(t) === first, otherHolds = offsetFor(other) === second;
+      if (holds && otherHolds) t = t < other ? t : other;
+      else if (otherHolds) t = other;
+      else if (!holds) t = t > other ? t : other;
+    }
+    return t >= -LIMIT && t <= LIMIT ? t : NaN;
+  }
+  // The wall clock of instant t, to be read with the UTC getters, and the years to add to its year.
+  function wallClock(t) {
+    let ms = toWall(t), years = 0;
+    if (ms > LIMIT) { ms -= CYCLE; years = CYCLE_YEARS; } else if (ms < -LIMIT) { ms += CYCLE; years = -CYCLE_YEARS; }
+    return { date: new NativeDate(ms), years: years };
   }
   // A string the engine parsed as host-local time: the wall clock it meant, read back with the
   // engine's own local getters (they and its parser agree to the millisecond, even for the
   // pre-standard-time offsets with seconds).
   function hostToWall(tHost) {
     const date = new NativeDate(tHost);
-    const [year, month, day, hours, minutes, seconds, ms] = nativeLocal.map((getter) => getter.call(date));
     const wall = new NativeDate(0);
-    wall.setUTCFullYear(year, month, day);
-    wall.setUTCHours(hours, minutes, seconds, ms);
-    return nativeGetTime.call(wall);
+    ReflectApply(setUTCFullYear, wall, [read(nativeLocal[0], date), read(nativeLocal[1], date), read(nativeLocal[2], date)]);
+    ReflectApply(setUTCHours, wall, [read(nativeLocal[3], date), read(nativeLocal[4], date), read(nativeLocal[5], date), read(nativeLocal[6], date)]);
+    return timeOf(wall);
   }
   // Strings with their own offset (Z, +01:00, GMT+0100, UTC, EST…) or date-only ISO forms (UTC per spec).
   const absolute = /^\d{4}(-\d{2}){0,2}$|(?:Z|[+-]\d{2}:?\d{2}|\b(?:UTC?|GMT|[ECMP][SD]T)\b)(?:\s*\(.*\))?\s*$/i;
 
-  function parse(text) {
-    const tHost = nativeParse.call(NativeDate, text);
-    if (isNaN(tHost) || absolute.test(String(text).trim())) return tHost;
-    return fromWall(hostToWall(tHost));
+  // `string` is a string already: the engine converts what it is given once, and so does this.
+  function parseString(string) {
+    const tHost = ReflectApply(nativeParse, NativeDate, [string]);
+    if (isNaN(tHost) || ReflectApply(RegExpExec, absolute, [ReflectApply(StringTrim, string, [])]) !== null) return tHost;
+    let wall = hostToWall(tHost);
+    // An hour this Mac's own zone skips (its clocks set forward) is read back as the hour after
+    // it: "2024-03-10T02:30" parsed on a Mac in New York says 03:30. So the same text is asked
+    // once more as a time without a zone of its own, and believed where it differs from the first
+    // reading by no more than such a skip.
+    let plain = ReflectApply(nativeParse, NativeDate, [string + 'Z']);
+    if (isNaN(plain)) plain = ReflectApply(nativeParse, NativeDate, [string + ' GMT']);
+    if (!isNaN(plain) && plain !== wall && MathAbs(plain - wall) <= 10800000) wall = plain;
+    return fromWall(wall);
+  }
+  const parse = (text) => parseString(`${text}`);
+
+  // ToPrimitive without a hint, as the engine converts the one argument of `new Date(value)`.
+  function toPrimitive(value) {
+    const exotic = value[SymbolToPrimitive];
+    if (exotic !== undefined && exotic !== null) return ReflectApply(exotic, value, ['default']);
+    const valueOf = value.valueOf;
+    if (typeof valueOf === 'function') { const v = ReflectApply(valueOf, value, []); if (!isObject(v)) return v; }
+    const toString = value.toString;
+    if (typeof toString === 'function') { const v = ReflectApply(toString, value, []); if (!isObject(v)) return v; }
+    return value; // nothing primitive: the engine's own TypeError, below
   }
 
   function construct(target, args) {
-    if (args.length === 0) return Reflect.construct(NativeDate, [], target);
+    if (args.length === 0) return ReflectConstruct(NativeDate, [], target);
     if (args.length === 1) {
       let value = args[0];
-      if (typeof value === 'object' && value !== null && !(value instanceof NativeDate)) {
-        value = value[Symbol.toPrimitive] ? value[Symbol.toPrimitive]('default') : value.valueOf();
-        if (typeof value === 'object') value = String(value);
+      if (isObject(value)) {
+        // A Date, of this window or another: its time value as it is (the milliseconds kept).
+        let time, isDate = false;
+        try { time = timeOf(value); isDate = true; } catch (e) {}
+        if (isDate) return ReflectConstruct(NativeDate, [time], target);
+        value = toPrimitive(value);
       }
-      if (typeof value === 'string') return Reflect.construct(NativeDate, [parse(value)], target);
-      return Reflect.construct(NativeDate, [value], target);
+      if (typeof value === 'string') return ReflectConstruct(NativeDate, [parseString(value)], target);
+      return ReflectConstruct(NativeDate, [value], target);
     }
-    const numbers = args.map(Number);
+    // Year, month, then what is given of day, hours, minutes, seconds, milliseconds: each made a
+    // number once and in order, as the engine does (a BigInt is its TypeError).
+    const numbers = [];
+    for (let i = 0; i < args.length && i < 7; i++) numbers[i] = +args[i];
     let year = numbers[0];
-    if (!isNaN(year)) { const whole = Math.trunc(year); if (whole >= 0 && whole <= 99) year = 1900 + whole; }
-    const wall = NativeDate.UTC(year, numbers[1], numbers.length > 2 ? numbers[2] : 1, numbers[3] || 0,
-                                numbers[4] || 0, numbers[5] || 0, numbers[6] || 0);
-    return Reflect.construct(NativeDate, [isNaN(wall) ? NaN : fromWall(wall)], target);
+    if (!isNaN(year)) { const whole = MathTrunc(year); if (whole >= 0 && whole <= 99) year = 1900 + whole; }
+    const given = (i, missing) => (i < numbers.length ? MathTrunc(numbers[i]) : missing);
+    // The wall clock, counted from the first of the month as the engine counts it (MakeDay,
+    // MakeTime): it may lie up to a day beyond what a Date holds, where Date.UTC would say NaN.
+    let monthStart = nativeUTC(year, numbers[1], 1);
+    if (isNaN(monthStart) && (year > 1000 || year < -1000)) {
+      // The month begins before the first instant a Date holds (or after the last): a cycle nearer zero.
+      monthStart = year < 0 ? nativeUTC(year + CYCLE_YEARS, numbers[1], 1) - CYCLE : nativeUTC(year - CYCLE_YEARS, numbers[1], 1) + CYCLE;
+    }
+    const wall = (monthStart + (given(2, 1) - 1) * 86400000)
+      + (((given(3, 0) * 3600000 + given(4, 0) * 60000) + given(5, 0) * 1000) + given(6, 0));
+    return ReflectConstruct(NativeDate, [isNaN(wall) ? NaN : fromWall(wall)], target);
   }
+
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const pad = (n, l) => { let s = '' + n; while (s.length < (l || 2)) s = '0' + s; return s; };
+  // The year as the engine writes it: at least four digits, a minus before a negative one.
+  const yearString = (y) => (y < 0 ? '-' + pad(-y, 4) : pad(y, 4));
+  // The zone's name at instant t as a formatter says it; '' when it says none.
+  const nameWith = (formatter, t) => {
+    const parts = ReflectApply(formatToParts, formatter, [new NativeDate(t)]);
+    for (let i = 0; i < parts.length; i++) if (parts[i].type === 'timeZoneName') return parts[i].value;
+    return '';
+  };
+  // Date#toString names the zone by one of its two names of today — standard or daylight —
+  // whatever the instant (measured in JavaScriptCore and V8: "Japan Standard Time" for the year
+  // 1 as for this year), where a formatter has a name only for instants its data covers and an
+  // offset ("GMT+09:18:59") for the rest: before 1970, far ahead. So an instant the formatter
+  // has no name for is given the zone's name of today: daylight when its offset is ahead of one
+  // the zone has within nine months of it (daylight time lasts up to eight), standard otherwise.
+  let namesOfToday = null;
+  function zoneName(t) {
+    const name = nameWith(nameFormatter, t);
+    if (offsetFormatter === null || name !== nameWith(offsetFormatter, t)) return name === '' ? TZ : name;
+    if (namesOfToday === null) {
+      const now = timeOf(new NativeDate());
+      let standardAt = now, daylightAt = now;
+      for (let month = 1; month < 12; month++) {
+        const then = now - month * 2629800000, offset = offsetFor(then);
+        if (offset > offsetFor(standardAt)) standardAt = then;
+        if (offset < offsetFor(daylightAt)) daylightAt = then;
+      }
+      namesOfToday = { standard: nameWith(nameFormatter, standardAt), daylight: nameWith(nameFormatter, daylightAt) };
+    }
+    const offset = offsetFor(t);
+    for (let month = -9; month <= 9; month++) {
+      if (offset < offsetFor(t + month * 2629800000)) return namesOfToday.daylight; // none beyond the range (NaN)
+    }
+    return namesOfToday.standard;
+  }
+  function zoneSuffix(t) {
+    const minutesEast = -offsetFor(t);
+    const a = MathAbs(MathTrunc(minutesEast));
+    return 'GMT' + (minutesEast >= 0 ? '+' : '-') + pad(MathFloor(a / 60)) + pad(a % 60) + ' (' + zoneName(t) + ')';
+  }
+  function datePart(clock) {
+    const s = clock.date;
+    return days[read(utcGetters.Day, s)] + ' ' + months[read(utcGetters.Month, s)] + ' ' + pad(read(utcGetters.Date, s)) + ' ' +
+      yearString(read(utcGetters.FullYear, s) + clock.years);
+  }
+  function timePart(clock, t) {
+    const s = clock.date;
+    return pad(read(utcGetters.Hours, s)) + ':' + pad(read(utcGetters.Minutes, s)) + ':' + pad(read(utcGetters.Seconds, s)) + ' ' + zoneSuffix(t);
+  }
+  // Date#toString of instant t.
+  function stringOf(t) {
+    if (isNaN(t)) return 'Invalid Date';
+    const clock = wallClock(t);
+    return datePart(clock) + ' ' + timePart(clock, t);
+  }
+
   const target = function (...args) {
-    if (new.target === undefined) return String(new DateShim());
+    // Called as a function: the time now as a string, whatever it is given.
+    if (new.target === undefined) return stringOf(timeOf(new NativeDate()));
     return construct(new.target, args);
   };
   target.prototype = proto; // what `new DateShim()` constructs with (new.target is then `target`)
@@ -755,94 +817,110 @@ function patchTimeZone(w, TZ) {
   define(proto, 'constructor', DateShim);
   define(w, 'Date', DateShim);
 
-  const utcGetters = {
-    FullYear: proto.getUTCFullYear, Month: proto.getUTCMonth, Date: proto.getUTCDate,
-    Day: proto.getUTCDay, Hours: proto.getUTCHours, Minutes: proto.getUTCMinutes,
-    Seconds: proto.getUTCSeconds, Milliseconds: proto.getUTCMilliseconds
-  };
-  for (const name of Object.keys(utcGetters)) {
+  for (const name of ObjectKeys(utcGetters)) {
     const utcGetter = utcGetters[name];
     define(proto, 'get' + name, method('get' + name, 0, function () {
-      const t = nativeGetTime.call(this);
-      return isNaN(t) ? NaN : utcGetter.call(new NativeDate(toWall(t)));
+      const t = timeOf(this);
+      if (isNaN(t)) return NaN;
+      const clock = wallClock(t);
+      return read(utcGetter, clock.date) + (name === 'FullYear' ? clock.years : 0);
     }));
   }
   define(proto, 'getYear', method('getYear', 0, function () {
-    const t = nativeGetTime.call(this);
-    return isNaN(t) ? NaN : new NativeDate(toWall(t)).getUTCFullYear() - 1900;
+    const t = timeOf(this);
+    if (isNaN(t)) return NaN;
+    const clock = wallClock(t);
+    return read(utcGetters.FullYear, clock.date) + clock.years - 1900;
   }));
+  // Whole minutes, as the engine answers (it drops the seconds of an offset before standard time;
+  // the local time itself keeps them).
   define(proto, 'getTimezoneOffset', method('getTimezoneOffset', 0, function () {
-    const t = nativeGetTime.call(this);
-    return isNaN(t) ? NaN : offsetFor(t);
+    const t = timeOf(this);
+    return isNaN(t) ? NaN : MathTrunc(offsetFor(t)) + 0;
   }));
 
-  const utcSetters = {
-    FullYear: [proto.setUTCFullYear, 3], Month: [proto.setUTCMonth, 2], Date: [proto.setUTCDate, 1],
-    Hours: [proto.setUTCHours, 4], Minutes: [proto.setUTCMinutes, 3], Seconds: [proto.setUTCSeconds, 2],
-    Milliseconds: [proto.setUTCMilliseconds, 1]
-  };
-  for (const name of Object.keys(utcSetters)) {
-    const [utcSetter, length] = utcSetters[name];
+  // The engine's own UTC setter on the wall clock. The wall clock of a valid instant can lie up
+  // to a day beyond what a Date holds, where the engine's setter answers NaN: it is then set a
+  // 400-year cycle earlier, or later, and the cycle put back (a year given moves with it).
+  function setOnWall(wallMs, utcSetter, numbers, isYear) {
+    const near = wallMs > LIMIT ? -1 : wallMs < -LIMIT ? 1 : 0;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const cycles = attempt === 0 ? 0 : attempt === 1 ? -1 : 1;
+      // A year given replaces the wall clock's own, which is then only read (a cycle nearer zero
+      // when it lies beyond a Date); anything else is set on the clock as moved.
+      const date = new NativeDate(wallMs + (isYear ? near : cycles) * CYCLE);
+      if (isNaN(timeOf(date))) continue;
+      let given = numbers;
+      if (isYear && cycles !== 0 && numbers.length > 0) {
+        given = [numbers[0] + cycles * CYCLE_YEARS];
+        for (let i = 1; i < numbers.length; i++) given[i] = numbers[i];
+      }
+      const set = ReflectApply(utcSetter, date, given);
+      if (!isNaN(set)) return set - cycles * CYCLE;
+    }
+    return NaN;
+  }
+  for (const name of ObjectKeys(utcSetters)) {
+    const utcSetter = utcSetters[name][0], length = utcSetters[name][1];
     define(proto, 'set' + name, method('set' + name, length, function (...args) {
-      const t = nativeGetTime.call(this);
-      // Only setFullYear works on an invalid date (from +0); the others leave it invalid.
-      if (isNaN(t) && name !== 'FullYear') return nativeSetTime.call(this, NaN);
-      const wallDate = new NativeDate(toWall(isNaN(t) ? 0 : t));
-      const wall = utcSetter.apply(wallDate, args);
-      return nativeSetTime.call(this, isNaN(wall) ? NaN : fromWall(wall));
+      const t = timeOf(this);
+      // An invalid date stays invalid, but for setFullYear (which starts from the wall clock's
+      // zero); which of its arguments the engine still reads is the engine's own setter's to say.
+      if (isNaN(t) && name !== 'FullYear') {
+        ReflectApply(utcSetter, new NativeDate(NaN), args);
+        return ReflectApply(nativeSetTime, this, [NaN]);
+      }
+      // The arguments the engine reads, each made a number once and in order.
+      const numbers = [];
+      for (let i = 0; i < args.length && i < length; i++) numbers[i] = +args[i];
+      const wall = setOnWall(isNaN(t) ? 0 : toWall(t), utcSetter, numbers, name === 'FullYear');
+      return ReflectApply(nativeSetTime, this, [isNaN(wall) ? NaN : fromWall(wall)]);
     }));
   }
+  const setFullYear = proto.setFullYear;
   define(proto, 'setYear', method('setYear', 1, function (year) {
-    let y = Number(year);
-    if (isNaN(y)) return nativeSetTime.call(this, NaN);
-    const whole = Math.trunc(y);
+    timeOf(this);
+    let y = +year;
+    if (isNaN(y)) return ReflectApply(nativeSetTime, this, [NaN]);
+    const whole = MathTrunc(y);
     if (whole >= 0 && whole <= 99) y = 1900 + whole;
-    return proto.setFullYear.call(this, y);
+    return ReflectApply(setFullYear, this, [y]);
   }));
 
-  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const pad = (n, l) => String(n).padStart(l || 2, '0');
-  const yearString = (y) => (y < 0 ? '-' + pad(-y, 6) : pad(y, 4));
-  function zoneSuffix(t) {
-    const minutesEast = -offsetFor(t);
-    const a = Math.abs(Math.trunc(minutesEast));
-    const namePart = nameFormatter.formatToParts(new NativeDate(t)).find((p) => p.type === 'timeZoneName');
-    return 'GMT' + (minutesEast >= 0 ? '+' : '-') + pad(Math.floor(a / 60)) + pad(a % 60) +
-      ' (' + (namePart ? namePart.value : TZ) + ')';
-  }
-  const wall = (date) => { const t = nativeGetTime.call(date); return isNaN(t) ? null : new NativeDate(toWall(t)); };
-  function datePart(s) {
-    return days[s.getUTCDay()] + ' ' + months[s.getUTCMonth()] + ' ' + pad(s.getUTCDate()) + ' ' + yearString(s.getUTCFullYear());
-  }
-  function timePart(s, t) {
-    return pad(s.getUTCHours()) + ':' + pad(s.getUTCMinutes()) + ':' + pad(s.getUTCSeconds()) + ' ' + zoneSuffix(t);
-  }
-  define(proto, 'toString', method('toString', 0, function () {
-    const s = wall(this);
-    return s === null ? 'Invalid Date' : datePart(s) + ' ' + timePart(s, nativeGetTime.call(this));
-  }));
+  define(proto, 'toString', method('toString', 0, function () { return stringOf(timeOf(this)); }));
   define(proto, 'toDateString', method('toDateString', 0, function () {
-    const s = wall(this);
-    return s === null ? 'Invalid Date' : datePart(s);
+    const t = timeOf(this);
+    return isNaN(t) ? 'Invalid Date' : datePart(wallClock(t));
   }));
   define(proto, 'toTimeString', method('toTimeString', 0, function () {
-    const s = wall(this);
-    return s === null ? 'Invalid Date' : timePart(s, nativeGetTime.call(this));
+    const t = timeOf(this);
+    return isNaN(t) ? 'Invalid Date' : timePart(wallClock(t), t);
   }));
 
+  // The options a page gives a formatter, read by the engine itself — member by member, in its
+  // own order, each once, with the page's object as the receiver — through a proxy that answers
+  // one thing of its own: the profile's zone where the page's object names none. No options: an
+  // object naming the zone; null: the engine's own TypeError.
   const withZone = (options) => {
-    const o = Object.assign({}, options);
-    if (o.timeZone === undefined) o.timeZone = TZ;
-    return o;
+    if (options === null) return options;
+    if (options === undefined) { const own = ObjectCreate(null); own.timeZone = TZ; return own; }
+    const given = NativeObject(options);
+    const handler = ObjectCreate(null);
+    handler.get = (target, key) => {
+      const value = ReflectGet(given, key, given);
+      return key === 'timeZone' && value === undefined ? TZ : value;
+    };
+    // The proxy's target is an empty object of this script's: what the engine checks a proxy's
+    // answers against is asked of it, not of the page's object.
+    return new NativeProxy(ObjectCreate(null), handler);
   };
   for (const name of ['toLocaleString', 'toLocaleDateString', 'toLocaleTimeString']) {
     const original = proto[name];
-    define(proto, name, method(name, 0, function (locales, options) { return original.call(this, locales, withZone(options)); }));
+    define(proto, name, method(name, 0, function (locales, options) { return ReflectApply(original, this, [locales, withZone(options)]); }));
   }
 
   const dtfTarget = function (locales, options) {
-    return Reflect.construct(NativeDTF, [locales, withZone(options)], new.target === undefined ? dtfTarget : new.target);
+    return ReflectConstruct(NativeDTF, [locales, withZone(options)], new.target === undefined ? dtfTarget : new.target);
   };
   dtfTarget.prototype = NativeDTF.prototype; // instanceof goes through the bound target
   const DateTimeFormat = constructor('DateTimeFormat', 0, dtfTarget, { supportedLocalesOf: NativeDTF.supportedLocalesOf }, NativeDTF.prototype);
@@ -861,20 +939,40 @@ function patchStorageQuota(w, quota) {
   const estimate = Manager && Manager.prototype.estimate;
   if (typeof estimate !== 'function') return;
   const APP_QUOTA = 1048576000;
-  define(Manager.prototype, 'estimate', method('estimate', 0, function () {
-    return estimate.apply(this, arguments).then((result) => {
-      if (result && typeof result.quota === 'number' && result.quota <= APP_QUOTA) {
-        result.quota = Math.ceil(result.quota * (quota / APP_QUOTA));
+  // The page is handed the engine's own promise (its rejection for a wrong receiver included);
+  // the figure is put right in the engine's answer before any reaction of the page's sees it,
+  // this script's being the first registered.
+  const adjust = (result) => {
+    try {
+      const own = result !== null && typeof result === 'object' ? ObjectGetOwnPropertyDescriptor(result, 'quota') : undefined;
+      if (own && typeof own.value === 'number' && own.value <= APP_QUOTA) {
+        ObjectDefineProperty(result, 'quota', { value: MathCeil(own.value * (quota / APP_QUOTA)),
+                                                writable: own.writable, enumerable: own.enumerable, configurable: own.configurable });
       }
-      return result;
-    });
+    } catch (e) {}
+  };
+  define(Manager.prototype, 'estimate', method('estimate', 0, function () {
+    const promise = ReflectApply(estimate, this, arguments);
+    quietly(promise, adjust);
+    return promise;
   }));
+}
+
+// `onValue` as the first reaction of an engine's promise, registered with the engine's own `then`
+// and without asking a page's code anything: `then` asks a promise for its constructor (a getter a
+// page may have put on Promise.prototype), so for the length of the call the promise has one of
+// its own. A rejection is the page's to see, not this reaction's.
+function quietly(promise, onValue) {
+  try {
+    ObjectDefineProperty(promise, 'constructor', { value: NativePromise, writable: true, enumerable: false, configurable: true });
+    try { ReflectApply(PromiseThen, promise, [onValue, () => {}]); } finally { delete promise.constructor; }
+  } catch (e) {}
 }
 
 // ---- Safari the app -----------------------------------------------------------------------------
 // Safari up to 27.1 on a Mac exposes window.safari, a plain object holding a SafariRemoteNotification
 // (website push permission API); a macOS profile naming such a Safari gives a page what that Safari
-// would. Never in an iPhone or iPad view, and not from Safari 27.2, which has none.
+// would. Not from Safari 27.2, which has none.
 function patchSafariObject(w) {
   if ('safari' in w) return;
   const proto = {};
@@ -1029,25 +1127,8 @@ function patchGeolocation(w, geo) {
 // here, before any page script ran, and gives the engine null-prototype objects with own data
 // properties: replacing Reflect, Function.prototype.call/apply, Object.assign, Array.prototype
 // methods or iterators, or putting accessors on Object.prototype, changes nothing the engine
-// reads. The native constructor and methods never reach a function the page can replace.
-const ReflectApply = Reflect.apply;
-const ReflectConstruct = Reflect.construct;
-const ObjectCreate = Object.create;
-const ObjectDefineProperty = Object.defineProperty;
-const ObjectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
-const SymbolIterator = Symbol.iterator;
-const WeakMapGet = WeakMap.prototype.get;
-const WeakMapSet = WeakMap.prototype.set;
-const PromiseThen = Promise.prototype.then;
-const RegExpExec = RegExp.prototype.exec;
-const StringSlice = String.prototype.slice;
-const StringToLowerCase = String.prototype.toLowerCase;
-const StringLastIndexOf = String.prototype.lastIndexOf;
-const StringIndexOf = String.prototype.indexOf;
-const NativeString = String;
-const NativePromise = Promise;
-const PromiseResolve = Promise.resolve;
-const call = (fn, self, ...args) => ReflectApply(fn, self, args);
+// reads. The native constructor and methods never reach a function the page can replace. (The
+// built-ins are captured at the top of the script.)
 
 // An iterable the engine converts as a WebIDL sequence, iterated by closures of this script.
 function sequenceOf(items) {
@@ -1092,7 +1173,13 @@ function patchWebRTC(w, policy, relay) {
   const nativeClose = nativeProto.close;
   // 'tunnel': the app's TURN relay (127.0.0.1) is the only ICE server, so every candidate is a
   // relay through the profile's proxy. The page keeps seeing its own configuration.
-  const viaTunnel = policy === 'tunnel' && relay ? relay : null;
+  // 'silent': WebRTC stays in the page as Safari has it — the engine's own interfaces, codecs,
+  // capabilities and offers — but connects nowhere, as on a network that lets no UDP through:
+  // relay-only with no ICE server at all, so the engine gathers no candidate (no host address, no
+  // server-reflexive one) and sends nothing. Everything else is the tunnel's: the page sees its own
+  // configuration, and a remote candidate named by a host name never reaches the resolver.
+  const viaTunnel = policy === 'tunnel' && relay ? relay
+    : policy === 'silent' ? { urls: [], username: '', credential: '' } : null;
   const relayServers = [];
   if (viaTunnel) {
     for (let i = 0; i < viaTunnel.urls.length; i++) {
@@ -1201,12 +1288,32 @@ function patchWebRTC(w, policy, relay) {
       }
       return copies;
     };
+    // The relay as the engine reports it back: by its credentials, which are this launch's alone.
+    const isRelayServer = (server) => {
+      if (!isObject(server)) return false;
+      for (let i = 0; i < relayServers.length; i++) {
+        if (server.username === relayServers[i].username || server.credential === relayServers[i].credential) return true;
+      }
+      return false;
+    };
     define(nativeProto, 'getConfiguration', method('getConfiguration', 0, function () {
       const result = call(nativeGetConfiguration, this); // the engine's receiver check
       const view = call(WeakMapGet, pageView, this);
       if (view) {
         ObjectDefineProperty(result, 'iceServers', { value: copyServers(view.iceServers), writable: true, enumerable: true, configurable: true });
         ObjectDefineProperty(result, 'iceTransportPolicy', { value: view.iceTransportPolicy, writable: true, enumerable: true, configurable: true });
+      } else {
+        // A connection this realm did not make — another frame's, asked through this frame's
+        // function, or the other way round — keeps the relay in the engine all the same, and its
+        // view is that frame's: the relay is taken out, never shown with its credentials.
+        const servers = result.iceServers;
+        const kept = [];
+        let removed = false;
+        for (let i = 0; servers && i < servers.length; i++) {
+          if (isRelayServer(servers[i])) removed = true;
+          else kept[kept.length] = servers[i];
+        }
+        if (removed) ObjectDefineProperty(result, 'iceServers', { value: kept, writable: true, enumerable: true, configurable: true });
       }
       return result;
     }));
@@ -1407,10 +1514,11 @@ function hookChildWindows(w) {
     if (!Ctor) return;
     const descriptor = Object.getOwnPropertyDescriptor(Ctor.prototype, prop);
     if (!descriptor || !descriptor.get) return;
+    const nativeGet = descriptor.get;
     Object.defineProperty(Ctor.prototype, prop, {
       configurable: true, enumerable: descriptor.enumerable, set: descriptor.set,
       get: getter(prop, function () {
-        const value = descriptor.get.call(this);
+        const value = ReflectApply(nativeGet, this, []);
         try { patchWindow(toWindow(value)); } catch (e) {}
         return value;
       })
@@ -1423,7 +1531,7 @@ function hookChildWindows(w) {
   const nativeOpen = w.open;
   if (nativeOpen) {
     define(w, 'open', method('open', 0, function (...args) {
-      const opened = nativeOpen.apply(this, args);
+      const opened = ReflectApply(nativeOpen, this, args);
       try { patchWindow(opened); } catch (e) {}
       return opened;
     }));
@@ -1461,16 +1569,53 @@ function patchSystemCamera(w, sc) {
   // The engine's own error for a camera that is not there (as `patchCamera`'s).
   function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
 
+  // The engine's own accessors and methods, taken before `serveDeviceGetters` replaces any and before
+  // the page could. Where a request goes is decided by what they say, and what the engine opened is
+  // looked at and stopped through them only: never by what a page put in their place (a `label`
+  // getter that gives the Mac's camera the sentinel's name, a `getTracks` handed the stream the
+  // engine opened at the first grant). Missing ones read as nothing: no sentinel, no camera.
+  function engineFunction(proto, key, accessor) {
+    const d = proto && ObjectGetOwnPropertyDescriptor(proto, key);
+    const f = d && (accessor ? d.get : d.value);
+    return typeof f === 'function' ? f : null;
+  }
+  const InfoProto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+  const infoKind = engineFunction(InfoProto, 'kind', true), infoLabel = engineFunction(InfoProto, 'label', true);
+  const infoId = engineFunction(InfoProto, 'deviceId', true), infoGroup = engineFunction(InfoProto, 'groupId', true);
+  const StreamProto = w.MediaStream && w.MediaStream.prototype;
+  const streamTracks = engineFunction(StreamProto, 'getTracks', false);
+  const streamVideoTracks = engineFunction(StreamProto, 'getVideoTracks', false);
+  const TrackProto = w.MediaStreamTrack && w.MediaStreamTrack.prototype;
+  const trackSettings = engineFunction(TrackProto, 'getSettings', false);
+  const trackStop = engineFunction(TrackProto, 'stop', false);
+  // What the engine says of `self` through `f`; null when it cannot be read.
+  function ask(f, self) {
+    if (!f) return null;
+    try { return ReflectApply(f, self, []); } catch (e) { return null; }
+  }
+  function text(f, self) { const v = ask(f, self); return typeof v === 'string' ? v : ''; }
+  // An own data property of an object the engine made (a track's settings); nothing a page put on
+  // Object.prototype.
+  function ownValue(o, key) {
+    try { const d = ObjectGetOwnPropertyDescriptor(o, key); return d && 'value' in d ? d.value : undefined; } catch (e) { return undefined; }
+  }
+  // The engine's promise followed with its own `then`, its `constructor` made an own property first:
+  // `then` (and `await`) ask a promise for its constructor, and a getter a page put on
+  // Promise.prototype would be handed the promise — with it, the stream or the list it holds.
+  function follow(promise, onValue, onError) {
+    try {
+      ObjectDefineProperty(promise, 'constructor', { value: NativePromise, writable: true, configurable: true });
+      ReflectApply(PromiseThen, promise, [onValue, onError]);
+    } catch (e) { onError(e); }
+  }
+
   // A MediaDeviceInfo of ours that copies the real device's ids but reads the believable label, so
   // getUserMedia with that deviceId still reaches the real (virtual) device.
   function renamed(real) {
     if (!Info) return real;
     const device = Object.create(Info.prototype);
     fakeDevices.add(device);
-    let id = '', group = '';
-    try { id = String(real.deviceId); } catch (e) {}
-    try { group = String(real.groupId); } catch (e) {}
-    deviceData.set(device, { deviceId: id, kind: 'videoinput', groupId: group, label: sc.label });
+    deviceData.set(device, { deviceId: text(infoId, real), kind: 'videoinput', groupId: text(infoGroup, real), label: sc.label });
     return device;
   }
   function serveDeviceGetters() {
@@ -1503,12 +1648,11 @@ function patchSystemCamera(w, sc) {
   try { serveDeviceGetters(); } catch (e) {}
 
   const nativeEnum = MDP.enumerateDevices;
+  // The engine's list, as the engine names it: kinds and labels read with its own getters.
   function findSentinel(list) {
     for (let i = 0; i < list.length; i++) {
       const dev = list[i];
-      let label = '';
-      try { label = String(dev.label); } catch (e) {}
-      if (dev && dev.kind === 'videoinput' && label === sc.sentinel) return dev;
+      if (text(infoKind, dev) === 'videoinput' && text(infoLabel, dev) === sc.sentinel) return dev;
     }
     return null;
   }
@@ -1517,94 +1661,192 @@ function patchSystemCamera(w, sc) {
       const self = this;
       let real;
       try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
-      return real.then(function (list) {
-        const out = [];
-        let sentinelDev = null;
-        for (let i = 0; i < list.length; i++) {
-          const dev = list[i];
-          let label = '';
-          try { label = String(dev.label); } catch (e) {}
-          if (dev && dev.kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
-          // One camera only when using it — but only once devices are named. Before the page holds
-          // the camera permission the engine lists a single unnamed placeholder per kind; it stays,
-          // as in Safari, or the page would read "no camera" and may never ask for one.
-          if (sc.usedHere && dev && dev.kind === 'videoinput' && label) continue;
-          out.push(dev);
-        }
-        if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
-        return out;
+      return new w.Promise(function (resolve, reject) {
+        follow(real, function (list) {
+          try {
+            const out = [];
+            let sentinelDev = null;
+            for (let i = 0; i < list.length; i++) {
+              const dev = list[i];
+              const kind = text(infoKind, dev), label = text(infoLabel, dev);
+              if (kind === 'videoinput' && label === sc.sentinel) { sentinelDev = dev; continue; }
+              // One camera only when using it — but only once cameras are named. Before the page
+              // holds the camera permission the engine lists a single unnamed placeholder per kind,
+              // with an empty id; it stays, as in Safari, or the page would read "no camera" and may
+              // never ask for one. A named camera, or one with an id, is a real one: left out.
+              if (sc.usedHere && kind !== 'audioinput' && kind !== 'audiooutput' && (label || text(infoId, dev))) continue;
+              out.push(dev);
+            }
+            if (sc.usedHere && sentinelDev) out.unshift(renamed(sentinelDev));
+            resolve(out);
+          } catch (e) { reject(e); }
+        }, reject);
       });
     }));
   }
 
-  // The profile that uses the system camera: route a plain getUserMedia({video}) to the sentinel
-  // device, so the page gets the virtual one and never the Mac's real camera. The sentinel is found
+  // The profile that uses the system camera: route a getUserMedia({video}) that pins no device to the
+  // sentinel, so the page gets the virtual camera and never the Mac's real one. The sentinel is found
   // by its label, which the engine gives only once the page holds the camera permission:
-  //  - with it, the call goes straight to the sentinel; if the devices are named and none is the
+  //  - with it, the call goes straight to the sentinel; if the cameras are named and none is the
   //    sentinel, the virtual camera is gone: NotFoundError, and the real one is not even opened;
-  //  - before it, the page's own call is let through so the engine can ask; if what it opened is
-  //    not the sentinel, that stream is stopped before the page ever sees it and the sentinel is
-  //    opened instead (the real camera's light may blink once, at a site's first grant). No sentinel
-  //    after the grant, or one that will not open: the error, never the real camera.
+  //  - before it, the request is let through so the engine can ask; if what it opened is not the
+  //    sentinel, that stream is stopped before the page ever sees it and the sentinel is opened
+  //    instead (the real camera's light may blink once, at a site's first grant). No sentinel after
+  //    the grant, or one that will not open: the error, never the real camera.
+  // Only an exact pin — `deviceId: {exact: id}` with an id, or a list of ids — is the engine's own:
+  // the page named the one device it wants, or none fits and the engine says so. A bare deviceId (a
+  // string or a list) or `{ideal}` is an ideal, which the engine meets with its default camera when no
+  // device has that id: routed to the sentinel like a request that names none.
   if (sc.usedHere && typeof MDP.getUserMedia === 'function' && typeof nativeEnum === 'function') {
     const nativeGUM = MDP.getUserMedia;
+    // A plain copy of what a page passed: each own enumerable member read once, objects and lists
+    // copied the same way, into objects without a prototype and arrays of this script's own (written
+    // with defineProperty, so no setter a page put on Array.prototype is asked). Everything is
+    // decided on the copy: a getter, an iterator or a Proxy that answered this script one thing could
+    // answer the engine another.
+    const copied = function (value, depth) {
+      if (value === null || (typeof value !== 'object' && typeof value !== 'function')) return value;
+      if (depth > 8) return undefined;
+      if (ArrayIsArray(value)) {
+        const items = [];
+        const n = value.length;
+        for (let i = 0; i < n && i < 64; i++) {
+          ObjectDefineProperty(items, i, { value: copied(value[i], depth + 1), writable: true, enumerable: true, configurable: true });
+        }
+        return items;
+      }
+      const out = ObjectCreate(null);
+      const keys = ObjectKeys(value);
+      for (let i = 0; i < keys.length; i++) {
+        const v = copied(value[keys[i]], depth + 1);
+        if (v !== undefined) out[keys[i]] = v;
+      }
+      return out;
+    };
+    // What the engine is handed: the copy, its lists as sequences this script iterates — a page's
+    // Array.prototype[Symbol.iterator] is never asked for what the engine reads.
+    const forEngine = function (value) {
+      if (value === null || typeof value !== 'object') return value;
+      if (ArrayIsArray(value)) {
+        const items = [];
+        for (let i = 0; i < value.length; i++) {
+          ObjectDefineProperty(items, i, { value: forEngine(value[i]), writable: true, enumerable: true, configurable: true });
+        }
+        return sequenceOf(items);
+      }
+      const out = ObjectCreate(null);
+      const keys = ObjectKeys(value);
+      for (let i = 0; i < keys.length; i++) out[keys[i]] = forEngine(value[keys[i]]);
+      return out;
+    };
+    // Whether a copied deviceId pins a device: `{exact}` with an id, or a list of ids, each a
+    // non-empty string. A bare string or list, `{ideal}`, or an exact that names nothing, does not.
+    const pinsDevice = function (pin) {
+      if (pin === null || typeof pin !== 'object' || ArrayIsArray(pin)) return false;
+      const exact = pin.exact;
+      if (typeof exact === 'string') return exact !== '';
+      if (!ArrayIsArray(exact) || exact.length === 0) return false;
+      for (let i = 0; i < exact.length; i++) if (typeof exact[i] !== 'string' || exact[i] === '') return false;
+      return true;
+    };
     define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
       const self = this;
-      // The page's own arguments, kept here: inside the async function below `arguments` is that
-      // function's own (empty), and getUserMedia() with nothing in it is a TypeError.
-      const args = arguments;
-      const wantVideo = constraints && constraints.video;
-      if (!wantVideo) return ReflectApply(nativeGUM, self, args);
-      const videoObj = (typeof wantVideo === 'object') ? wantVideo : null;
-      const already = videoObj && videoObj.deviceId && (videoObj.deviceId.exact || typeof videoObj.deviceId === 'string');
-      if (already) return ReflectApply(nativeGUM, self, args);
-      // The page's constraints with the video pinned to the sentinel; everything else as it asked.
-      const onSentinel = function (id) {
-        const merged = {};
-        for (const key in constraints) merged[key] = constraints[key];
-        const vc = {};
-        if (videoObj) { for (const k in videoObj) vc[k] = videoObj[k]; }
-        vc.deviceId = { exact: id };
+      // Nothing, null or not a dictionary: the engine's own answer to it, which asks for no device.
+      if (constraints === null || (typeof constraints !== 'object' && typeof constraints !== 'function')) {
+        return ReflectApply(nativeGUM, self, arguments);
+      }
+      // The request's members read once, in the engine's (lexicographic) order, and copied: the engine
+      // is handed the copy, never the page's object. WebIDL: null or any object asks for the device,
+      // anything else by its truth. Kept here too because inside the functions below `arguments` is
+      // their own.
+      let audio, video;
+      try {
+        audio = copied(constraints.audio, 0);
+        video = copied(constraints.video, 0);
+      } catch (e) { return w.Promise.reject(e); }
+      const request = ObjectCreate(null);
+      if (audio !== undefined) request.audio = audio;
+      if (video !== undefined) request.video = video;
+      const askedVideo = video === null
+        || (video !== undefined && (typeof video === 'object' || typeof video === 'function' || !!video));
+      if (!askedVideo || (video !== null && typeof video === 'object' && !ArrayIsArray(video) && pinsDevice(video.deviceId))) {
+        return ReflectApply(nativeGUM, self, [forEngine(request)]);
+      }
+      const videoObj = (video !== null && typeof video === 'object' && !ArrayIsArray(video)) ? video : null;
+      // The request with its video constraints but the deviceId, which pins no device here; its audio
+      // as asked. With `id`, the video pinned to that device (the sentinel).
+      const rerouted = function (id) {
+        const merged = ObjectCreate(null);
+        if (audio !== undefined) merged.audio = audio;
+        if (!videoObj && id === undefined) { merged.video = video; return merged; }
+        const vc = ObjectCreate(null);
+        if (videoObj) {
+          const keys = ObjectKeys(videoObj);
+          for (let i = 0; i < keys.length; i++) if (keys[i] !== 'deviceId') vc[keys[i]] = videoObj[keys[i]];
+        }
+        if (id !== undefined) {
+          const exact = ObjectCreate(null);
+          exact.exact = id;
+          vc.deviceId = exact;
+        }
         merged.video = vc;
         return merged;
       };
-      const devices = async function () {
-        try { return await ReflectApply(nativeEnum, self, []); } catch (e) { return []; }
-      };
-      const idOf = function (list) { const s = findSentinel(list); return s ? String(s.deviceId) : null; };
+      const idOf = function (list) { const s = findSentinel(list); return s ? text(infoId, s) || null : null; };
       // Named cameras are what the page sees once it holds the camera permission; before it, none
       // is. Cameras only: a page that holds just the microphone may see its microphones named.
       const named = function (list) {
         for (let i = 0; i < list.length; i++) {
-          try { if (list[i].kind === 'videoinput' && String(list[i].label)) return true; } catch (e) {}
+          if (text(infoKind, list[i]) === 'videoinput' && text(infoLabel, list[i])) return true;
         }
         return false;
       };
       const videoDeviceOf = function (stream) {
-        try { const t = stream.getVideoTracks()[0]; const s = t && t.getSettings(); return s ? String(s.deviceId) : null; } catch (e) { return null; }
+        const tracks = ask(streamVideoTracks, stream);
+        const track = tracks && tracks[0];
+        const settings = track ? ask(trackSettings, track) : null;
+        const id = settings ? ownValue(settings, 'deviceId') : undefined;
+        return typeof id === 'string' ? id : null;
       };
       const stopAll = function (stream) {
-        try { const ts = stream.getTracks(); for (let i = 0; i < ts.length; i++) { try { ts[i].stop(); } catch (e) {} } } catch (e) {}
+        const tracks = ask(streamTracks, stream);
+        if (!tracks) return;
+        for (let i = 0; i < tracks.length; i++) ask(trackStop, tracks[i]);
       };
       return new w.Promise(function (resolve, reject) {
-        (async function () {
+        // The engine's answers, followed with its own `then`; nothing it opened passes through
+        // anything of the page's on the way.
+        const open = function (req, onStream, onError) {
+          let p;
+          try { p = ReflectApply(nativeGUM, self, [forEngine(req)]); } catch (e) { onError(e); return; }
+          follow(p, onStream, onError);
+        };
+        const devices = function (next) {
+          let p;
+          try { p = ReflectApply(nativeEnum, self, []); } catch (e) { next([]); return; }
+          follow(p, next, function () { next([]); });
+        };
+        devices(function (before) {
           try {
-            const before = await devices();
             const known = idOf(before);
-            if (known) { resolve(await ReflectApply(nativeGUM, self, [onSentinel(known)])); return; }
+            if (known) { open(rerouted(known), resolve, reject); return; }
             if (named(before)) { reject(notFound()); return; }
-            // No permission yet: the engine asks now, with the page's constraints as it passed them.
-            const first = await ReflectApply(nativeGUM, self, args);
-            const id = idOf(await devices());
-            if (id && videoDeviceOf(first) === id) { resolve(first); return; }
-            if (!id) { stopAll(first); reject(notFound()); return; }
-            let second;
-            try { second = await ReflectApply(nativeGUM, self, [onSentinel(id)]); }
-            catch (e) { stopAll(first); reject(e); return; }
-            stopAll(first);
-            resolve(second);
+            // No permission yet: the engine asks now, with the page's constraints as they were read
+            // (but the deviceId, which the virtual camera answers).
+            open(rerouted(), function (first) {
+              devices(function (after) {
+                try {
+                  const id = idOf(after);
+                  if (id && videoDeviceOf(first) === id) { resolve(first); return; }
+                  if (!id) { stopAll(first); reject(notFound()); return; }
+                  open(rerouted(id), function (second) { stopAll(first); resolve(second); },
+                       function (e) { stopAll(first); reject(e); });
+                } catch (e) { stopAll(first); reject(e); }
+              });
+            }, reject);
           } catch (e) { reject(e); }
-        })();
+        });
       });
     }));
   }
@@ -1665,7 +1907,7 @@ function patchCamera(w, cam) {
   const ours = new WeakSet();          // our video tracks
   const trackData = new WeakMap();     // track -> { settings, capabilities, constraints, cancel }
   const fakeDevices = new WeakSet();   // our MediaDeviceInfo
-  const deviceData = new WeakMap();    // device -> { deviceId, kind, groupId, labelWhenGranted }
+  const deviceData = new WeakMap();    // device -> { deviceId, kind, groupId, label }: shown once the camera is granted
 
   function notFound() { try { return new w.DOMException('The requested device was not found.', 'NotFoundError'); } catch (e) { return new w.Error('NotFoundError'); } }
 
@@ -1862,7 +2104,11 @@ function patchCamera(w, cam) {
   async function audioTrack(request, nativeGUM) {
     if (cam.audio === 'off') return null;
     if (cam.audio === 'real' && typeof nativeGUM === 'function') {
-      try { const s = await ReflectApply(nativeGUM, md, [{ audio: request }]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
+      // A request without a prototype: the engine reads its `video` as missing, whatever a page
+      // put on Object.prototype.
+      const only = ObjectCreate(null);
+      only.audio = request;
+      try { const s = await ReflectApply(nativeGUM, md, [only]); return s.getAudioTracks()[0] || null; } catch (e) { return null; }
     }
     return silentAudioTrack();
   }
@@ -1872,27 +2118,49 @@ function patchCamera(w, cam) {
     const nativeGUM = MDP.getUserMedia;
     const nativeEnum = MDP.enumerateDevices;
     const nativeDisplay = MDP.getDisplayMedia;
+    // Whether the engine takes `self` for a MediaDevices: its receiver check is not tied to a realm,
+    // so another frame's MediaDevices (or this one's handed to another frame's function) is one as
+    // much as this realm's own. Asked of an accessor of the engine's that does nothing else,
+    // captured before the page runs; nothing the page can replace (`w.MediaDevices`, instanceof) is
+    // asked. Without that accessor, anything is taken for one: the substitution, never the camera.
+    const devicechange = ObjectGetOwnPropertyDescriptor(MDP, 'ondevicechange');
+    const brandCheck = devicechange && typeof devicechange.get === 'function' ? devicechange.get : null;
+    const isMediaDevices = function (self) {
+      if (!brandCheck) return true;
+      try { ReflectApply(brandCheck, self, []); return true; } catch (e) { return false; }
+    };
+    // A member of a request as the engine reads it (WebIDL `boolean or MediaTrackConstraints`, false
+    // when missing): null or any object asks for the device, anything else by its truth.
+    const asked = function (value) {
+      return value === null || (value !== undefined && (typeof value === 'object' || typeof value === 'function' || !!value));
+    };
 
     if (typeof nativeGUM === 'function') {
       define(MDP, 'getUserMedia', method('getUserMedia', 1, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeGUM, self, arguments);
-        const wantVideo = constraints && constraints.video;
-        const wantAudio = constraints && constraints.audio;
-        if (!wantVideo && !wantAudio) return ReflectApply(nativeGUM, self, arguments); // the engine's own TypeError
+        // The engine is never handed the page's own request (a getter could answer it otherwise
+        // than it answered here) nor a receiver it would take: what reaches it asks for no device,
+        // so all that can come back is its own TypeError.
+        if (!isMediaDevices(self)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
+        const isRequest = constraints !== null && (typeof constraints === 'object' || typeof constraints === 'function');
+        if (!isRequest) return ReflectApply(nativeGUM, self, arguments); // undefined, null or not a dictionary
+        // Each member read once, in the engine's (lexicographic) order.
+        const wantAudio = constraints.audio;
+        const wantVideo = constraints.video;
+        if (!asked(wantVideo) && !asked(wantAudio)) return ReflectApply(nativeGUM, self, [ObjectCreate(null)]);
         return new w.Promise(function (resolve, reject) {
           (async function () {
             try {
               const tracks = [];
-              if (wantVideo) {
+              if (asked(wantVideo)) {
                 if (mode === 'block') { reject(notFound()); return; }
                 tracks.push(makeVideoTrack(resolveVideo(wantVideo)));
                 videoGranted = true;
               }
-              if (wantAudio) {
+              if (asked(wantAudio)) {
                 const a = await audioTrack(wantAudio, nativeGUM);
                 if (a) tracks.push(a);
-                else if (!wantVideo) { reject(notFound()); return; }
+                else if (!asked(wantVideo)) { reject(notFound()); return; }
               }
               resolve(new w.MediaStream(tracks));
             } catch (e) { reject(e); }
@@ -1906,15 +2174,24 @@ function patchCamera(w, cam) {
         const self = this;
         let real;
         try { real = ReflectApply(nativeEnum, self, []); } catch (e) { return w.Promise.reject(e); }
-        return real.then(function (list) { return buildDeviceList(list); },
-                         function () { return buildDeviceList([]); });
+        // Whatever realm `self` is of, the list is filtered here; its promise is followed with the
+        // engine's own `then`, so a page's Promise.prototype.then never sees the list as it came.
+        return call(PromiseThen, real, function (list) { return buildDeviceList(list); },
+                    function () { return buildDeviceList([]); });
       }));
     }
 
     if (cam.screenShare && mode === 'substitute' && typeof nativeDisplay === 'function') {
       define(MDP, 'getDisplayMedia', method('getDisplayMedia', 0, function (constraints) {
         const self = this;
-        if (w.MediaDevices && !(self instanceof w.MediaDevices)) return ReflectApply(nativeDisplay, self, arguments);
+        // Any MediaDevices gets the substitution, as for getUserMedia; what is no MediaDevices gets
+        // the engine's TypeError from a request for nothing.
+        if (!isMediaDevices(self)) {
+          const none = ObjectCreate(null);
+          none.audio = false;
+          none.video = false;
+          return ReflectApply(nativeDisplay, self, [none]);
+        }
         return new w.Promise(function (resolve, reject) {
           try {
             const res = resolveVideo(constraints && constraints.video);
@@ -1926,9 +2203,22 @@ function patchCamera(w, cam) {
     }
   }
 
+  // The engine's own `kind` getter, taken before `serveDeviceGetters` replaces it and before the
+  // page could: a real camera's entry is never handed to anything the page put in its place.
+  const nativeKind = (function () {
+    const proto = w.MediaDeviceInfo && w.MediaDeviceInfo.prototype;
+    const d = proto && ObjectGetOwnPropertyDescriptor(proto, 'kind');
+    return d && typeof d.get === 'function' ? d.get : null;
+  })();
   function buildDeviceList(list) {
     const out = [];
-    for (let i = 0; i < list.length; i++) { const d = list[i]; if (d && d.kind === 'videoinput') continue; out.push(d); }
+    for (let i = 0; i < list.length; i++) {
+      const d = list[i];
+      let kind;
+      try { kind = nativeKind ? call(nativeKind, d) : d.kind; } catch (e) { continue; } // unreadable: left out
+      if (kind === 'videoinput') continue;
+      out.push(d);
+    }
     if (mode === 'substitute') { const fake = makeFakeCamera(); if (fake) out.unshift(fake); }
     return out;
   }
@@ -1957,7 +2247,10 @@ function patchCamera(w, cam) {
           // would throw on them: serve our value first, and reach the engine only for a real one.
           if (fakeDevices.has(this)) {
             const data = deviceData.get(this) || {};
-            if (key === 'label') return videoGranted ? (data.label || '') : '';
+            // Before the camera is granted the entry is Safari's placeholder: no name, and no ids —
+            // a page is shown nothing of this profile's camera (its ids come from the profile's
+            // secret) until it is allowed the camera.
+            if (key === 'label' || key === 'deviceId' || key === 'groupId') return videoGranted ? (data[key] || '') : '';
             return data[key];
           }
           return nativeGet.call(this); // receiver check + the real value
@@ -1969,7 +2262,8 @@ function patchCamera(w, cam) {
     if (toJSON && typeof toJSON.value === 'function') {
       define(proto, 'toJSON', method('toJSON', 0, function () {
         if (!fakeDevices.has(this)) return toJSON.value.call(this);
-        return { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: videoGranted ? defaultLabel : '' };
+        if (!videoGranted) return { deviceId: '', kind: 'videoinput', groupId: '', label: '' };
+        return { deviceId: deviceId, kind: 'videoinput', groupId: groupId, label: defaultLabel };
       }));
     }
     const InputProto = w.InputDeviceInfo && w.InputDeviceInfo.prototype;
@@ -1977,7 +2271,8 @@ function patchCamera(w, cam) {
       const nativeCaps = InputProto.getCapabilities;
       define(InputProto, 'getCapabilities', method('getCapabilities', 0, function () {
         if (!fakeDevices.has(this)) return ReflectApply(nativeCaps, this, arguments);
-        return capabilities();
+        // The placeholder before the grant has no device behind it: no capabilities (and no ids).
+        return videoGranted ? capabilities() : {};
       }));
     }
   }
@@ -2039,22 +2334,62 @@ function patchCamera(w, cam) {
 function substitutesInWorkers(config) {
   const fp = config.fingerprint;
   const fingerprint = !!fp && (!!fp.language || ['canvas', 'webgl', 'audio'].some((k) => !!fp[k] && fp[k] !== 'real'));
-  return !!(config.timeZone || config.phone || config.storageQuota) || fingerprint;
+  // The time zone only where the script gives it (`ZONE`): an engine already in the profile's zone
+  // gives it to every worker itself.
+  return !!(ZONE || config.storageQuota) || fingerprint;
 }
+
+// What a worker is given of CONFIG: what the script reads there before the worker's `return` —
+// the time zone, the storage quota, the iOS app's fingerprint — and nothing
+// else. Never the camera (its media is tens of MB, which every frame would copy into its bootstrap)
+// nor the WebRTC relay's credentials (a worker's script can read its own source back, and they are
+// the page's to use, never to read), nor the family's channel (with it a page would be handed the
+// registry). Written out once, here, before any page script runs.
+const WORKER_KEYS = ['timeZone', 'storageQuota', 'fingerprint'];
+const JSONStringify = JSON.stringify;
+const WORKER_CONFIG = (function () {
+  const out = {};
+  for (let i = 0; i < WORKER_KEYS.length; i++) {
+    const value = CONFIG[WORKER_KEYS[i]];
+    if (value !== undefined && value !== null) out[WORKER_KEYS[i]] = value;
+  }
+  return ReflectApply(JSONStringify, null, [out]);
+})();
 
 function hookWorkers(w) {
   const URLClass = w.URL;
   const nativeCreate = URLClass && URLClass.createObjectURL;
-  if (!SOURCE || typeof nativeCreate !== 'function' || typeof w.Blob !== 'function' || typeof w.WeakRef !== 'function') return;
-  const blobs = new Map();        // blob: URL this realm created → WeakRef to its Blob
-  const replacements = new Map(); // that URL → the URL of the same Blob behind this script
-  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it.
-  const bootstrap = 'try { (0, eval)(' + JSON.stringify('(' + SOURCE + ')(' + JSON.stringify(CONFIG) + ');') + '); } catch (e) {}';
+  // The engine's Blob, taken now: the page's own, put in its place later, is never handed the script.
+  const NativeBlob = w.Blob;
+  if (!SOURCE || typeof nativeCreate !== 'function' || typeof NativeBlob !== 'function' || !NativeWeakRef) return;
+  // Kept in objects of this script's own, without a prototype: what a page puts on Map.prototype
+  // or Object.prototype is not asked when it makes a URL or a worker.
+  let blobs = ObjectCreate(null), blobCount = 0; // blob: URL this realm created → WeakRef to its Blob
+  const replacements = ObjectCreate(null);       // that URL → the URL of the same Blob behind this script
+  const blobOf = (key) => {
+    const ref = blobs[key];
+    return ref === undefined ? undefined : ReflectApply(WeakRefDeref, ref, []);
+  };
+  // A CSP without 'unsafe-eval' stops the eval, never the page's own code after it. Made at the
+  // first worker, not for every frame that never starts one.
+  let bootstrapText = null;
+  const bootstrap = () => {
+    if (bootstrapText === null) {
+      bootstrapText = 'try { (0, eval)(' + ReflectApply(JSONStringify, null, ['(' + SOURCE + ')(' + WORKER_CONFIG + ');']) + '); } catch (e) {}';
+    }
+    return bootstrapText;
+  };
   define(URLClass, 'createObjectURL', method('createObjectURL', 1, function (object) {
-    const url = nativeCreate.apply(this, arguments);
-    if (object instanceof w.Blob) {
-      if (blobs.size > 500) blobs.forEach((ref, key) => { if (!ref.deref()) blobs.delete(key); });
-      blobs.set(url, new w.WeakRef(object));
+    const url = ReflectApply(nativeCreate, this, arguments);
+    if (typeof url === 'string' && object instanceof NativeBlob) {
+      if (blobCount > 500) {
+        const kept = ObjectCreate(null);
+        blobCount = 0;
+        for (const key in blobs) { if (blobOf(key)) { kept[key] = blobs[key]; blobCount++; } }
+        blobs = kept;
+      }
+      if (blobs[url] === undefined) blobCount++;
+      blobs[url] = new NativeWeakRef(object);
     }
     return url;
   }));
@@ -2067,45 +2402,49 @@ function hookWorkers(w) {
   function read(url) {
     try {
       const xhr = new XHR();
-      xhrOpen.call(xhr, 'GET', url, false);
-      xhrSend.call(xhr);
-      return responseText.get.call(xhr);
+      ReflectApply(xhrOpen, xhr, ['GET', url, false]);
+      ReflectApply(xhrSend, xhr, []);
+      return ReflectApply(responseText.get, xhr, []);
     } catch (e) { return null; }
   }
   // Leading comments and directives ('use strict'), which must stay first.
   const PROLOGUE = /^(?:(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\n]*(?:\n|$))*(?:'[^'\\\n]*'|"[^"\\\n]*")[ \t]*(?:;|\r?\n|$))*/;
   // The same replacement for the same URL: a SharedWorker is found again by its URL.
   function replacementFor(url) {
-    const key = String(url);
-    if (replacements.has(key)) return replacements.get(key);
-    const blob = blobs.has(key) ? blobs.get(key).deref() : undefined;
+    // The address as the engine reads it (ToString: a symbol is its TypeError, caught by the caller).
+    const key = `${url}`;
+    if (replacements[key] !== undefined) return replacements[key];
+    const blob = blobOf(key);
     if (!blob) return null;
     const text = read(key);
-    let parts = [bootstrap, blob];
-    if (text !== null) {
-      const prologue = PROLOGUE.exec(text)[0];
+    let parts = [bootstrap(), blob];
+    if (typeof text === 'string') {
+      const prologue = ReflectApply(RegExpExec, PROLOGUE, [text])[0];
       // On the directive's own line, so the page's next line keeps its columns too.
-      const newline = /\r?\n$/.exec(prologue);
-      parts = newline ? [prologue.slice(0, newline.index) + ';', bootstrap, text.slice(newline.index)]
-                      : [prologue, bootstrap, text.slice(prologue.length)];
+      const newline = ReflectApply(RegExpExec, /\r?\n$/, [prologue]);
+      parts = newline ? [call(StringSlice, prologue, 0, newline.index) + ';', bootstrap(), call(StringSlice, text, newline.index)]
+                      : [prologue, bootstrap(), call(StringSlice, text, prologue.length)];
     }
-    const replacement = nativeCreate.call(URLClass, new w.Blob(parts, { type: blob.type || 'text/javascript' }));
-    replacements.set(key, replacement);
+    // Handed to the engine through closures of this script (`sequenceOf`, ReflectApply), not an
+    // array iterator or a Function.prototype.call a page can replace.
+    const options = ObjectCreate(null);
+    options.type = blob.type || 'text/javascript';
+    const replacement = ReflectApply(nativeCreate, URLClass, [new NativeBlob(sequenceOf(parts), options)]);
+    replacements[key] = replacement;
     return replacement;
   }
   for (const name of ['Worker', 'SharedWorker']) {
     const Native = w[name];
     if (typeof Native !== 'function') continue;
-    const workerTarget = function (scriptURL) {
-      const args = Array.prototype.slice.call(arguments);
+    const workerTarget = function (...args) {
       // Without `new`: the engine's own TypeError.
-      if (new.target === undefined) return Reflect.apply(Native, this, args);
+      if (new.target === undefined) return ReflectApply(Native, this, args);
       if (args.length > 0) {
         let replacement = null;
-        try { replacement = replacementFor(scriptURL); } catch (e) {}
+        try { replacement = replacementFor(args[0]); } catch (e) {}
         if (replacement) args[0] = replacement;
       }
-      return Reflect.construct(Native, args, new.target);
+      return ReflectConstruct(Native, args, new.target);
     };
     workerTarget.prototype = Native.prototype; // what `new` constructs with (new.target is the target)
     const Wrapped = constructor(name, Native.length, workerTarget, {}, Native.prototype, Native);
@@ -2114,6 +2453,12 @@ function hookWorkers(w) {
   }
 }
 
+// This window answers for its family whatever comes next — also when its realm was patched
+// before this copy ran and is not gone through again (a listener does not outlive every way a
+// window comes to a new document; a second one says the same).
+if (!IS_WORKER && typeof Function.prototype === 'function' && call(WeakSetHas, family.patched, Function.prototype)) {
+  try { answerFamily(window); } catch (e) {}
+}
 patchWindow(IS_WORKER ? self : window);
 """#
 }

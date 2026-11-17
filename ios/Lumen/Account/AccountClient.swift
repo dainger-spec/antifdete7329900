@@ -59,6 +59,13 @@ enum AccountClient {
 
     /// One request. Nil: no answer at all (no network, a timeout) — "unreachable" (§9.3). What came
     /// back is judged by the caller: a body that is not the server's JSON is "unreachable" too.
+    ///
+    /// A request that failed before the server could have answered it — no route for a moment, the
+    /// name not resolved, the connection refused or dropped under it — is sent again, twice at most,
+    /// after half a second and a second and a half: a phone between networks, or back from the
+    /// background, loses its first request (CI runs 131 and 141, AccountTests: a sign-in that never
+    /// reached the stand-in said "the server is not answering" at once, and the next one went
+    /// through). A timeout is not sent again: the person has waited for it already.
     static func send(_ method: String, _ path: String, body: Data?, token: String?) async -> (status: Int, data: Data)? {
         var request = URLRequest(url: server.appendingPathComponent(path.hasPrefix("/") ? String(path.dropFirst()) : path))
         request.httpMethod = method
@@ -67,8 +74,35 @@ enum AccountClient {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
-        guard let (data, response) = try? await session.data(for: request), let http = response as? HTTPURLResponse else { return nil }
-        return (http.statusCode, data)
+        let pauses: [UInt64] = [500_000_000, 1_500_000_000]
+        for attempt in 0...pauses.count {
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard let http = response as? HTTPURLResponse else { return nil }
+                return (http.statusCode, data)
+            } catch {
+                let code = (error as? URLError)?.code
+                let said = code.map { "URLError \($0.rawValue)" } ?? String(describing: error)
+                note("\(method) \(path): no answer, attempt \(attempt + 1) — \(said)")
+                guard attempt < pauses.count, let code, retried.contains(code), !Task.isCancelled else { return nil }
+                try? await Task.sleep(nanoseconds: pauses[attempt])
+            }
+        }
+        return nil
+    }
+
+    /// The failures that come before the server could answer, which a second try may get past.
+    private static let retried: Set<URLError.Code> = [
+        .networkConnectionLost, .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .dnsLookupFailed,
+    ]
+
+    /// A request with no answer, in the log — and, for the tests, in Documents/relay.log, which ci.sh
+    /// keeps with each run: what the system said, where the screen only says "not answering".
+    private static func note(_ line: String) {
+        NSLog("Lumen account: %@", line)
+        #if DEBUG
+        if TestHooks.enabled { RelayLogFile.shared.append("account: " + line) }
+        #endif
     }
 
     /// The sync's requests (`LumenSyncTransport`): any method and headers, the device token, the

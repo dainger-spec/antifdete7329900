@@ -84,6 +84,8 @@ enum UpdateSelfTest {
                     .add(title: "Before the update", url: URL(string: "https://example.org/before")!) // l10n: not text
             }
             AppUpdater.firstCheckDelay = 2
+            // The scenarios count the feed's requests: none on coming back to the app.
+            AppUpdater.checkWhenBackAfter = 0
             let updater = AppUpdater(configuration: configuration)
 
             // Automatic checks off: not one request, though one would be due after 2 s.
@@ -156,6 +158,22 @@ enum UpdateSelfTest {
             await updater.checkNow()
             check("changed archive: refused once downloaded", failed(updater) { $0 == .archiveHash }, "\(updater.state)")
             check("changed archive: not kept", !archiveStaged(configuration))
+
+            // A release's archive left by a build that did not remove it when a newer release
+            // replaced it before a quit: the next launch removes it, as nothing names it any more.
+            try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+            let superseded = configuration.staging.appendingPathComponent("PrivacyBrowser-0.zip")
+            try Data("an earlier release".utf8).write(to: superseded) // l10n: not text
+            let launchSuite = "PBUpdateLaunch-\(UUID().uuidString)"
+            if let launchDefaults = UserDefaults(suiteName: launchSuite) {
+                _ = AppUpdater(configuration: configuration, defaults: launchDefaults)
+                launchDefaults.removePersistentDomain(forName: launchSuite)
+                check("an archive of a release replaced before a quit is removed at the next launch",
+                      !FileManager.default.fileExists(atPath: superseded.path))
+            } else {
+                check("an archive of a release replaced before a quit is removed at the next launch", false, "no defaults of its own")
+            }
 
             try await serve("valid")
             await updater.checkNow()

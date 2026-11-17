@@ -101,6 +101,65 @@ final class ScenarioScheduleTests: XCTestCase {
         XCTAssertTrue(schedules.schedules.isEmpty)
     }
 
+    /// How the run a schedule started ended is kept for its row: nobody may have been looking.
+    func testHowTheLastRunEndedIsKept() {
+        var schedules = ScenarioSchedules()
+        let run = ScenarioSchedule(action: .scenario(UUID()), profileID: profile, when: .daily(hour: 10, minute: 0), jitterMinutes: 0)
+        schedules.put(run, at: morning, calendar: utc)
+        let atTen = morning.addingTimeInterval(2 * 3600)
+        // Nothing is kept for a schedule that has started no run, nor for one that is gone.
+        schedules.recordEnd(run.id, .finished, at: atTen)
+        schedules.recordEnd(UUID(), .finished, at: atTen)
+        XCTAssertNil(schedules.schedules[0].lastEnd)
+
+        schedules.record(run.id, .started, at: atTen, calendar: utc)
+        XCTAssertNil(schedules.schedules[0].lastEnd, "still going")
+        let next = schedules.schedules[0].nextRunAt
+        schedules.recordEnd(run.id, .failed, reason: "Error: no element matches #login (line 7)\n@scenario.js:7:21", at: atTen.addingTimeInterval(42))
+        XCTAssertEqual(schedules.schedules[0].lastEnd,
+                       ScenarioSchedule.End(kind: .failed, reason: "Error: no element matches #login (line 7)", endedAt: atTen.addingTimeInterval(42), duration: 42))
+        XCTAssertEqual(schedules.schedules[0].lastResult, .started, "the run was made; how it ended is said beside that")
+        XCTAssertEqual(schedules.schedules[0].nextRunAt, next, "an end plans nothing")
+
+        // The next run's start takes the old end away; its own end is then the last.
+        let tomorrow = atTen.addingTimeInterval(86_400)
+        schedules.record(run.id, .started, at: tomorrow, calendar: utc)
+        XCTAssertNil(schedules.schedules[0].lastEnd)
+        schedules.recordEnd(run.id, .finished, at: tomorrow.addingTimeInterval(95.5))
+        XCTAssertEqual(schedules.schedules[0].lastEnd?.kind, .finished)
+        XCTAssertEqual(schedules.schedules[0].lastEnd?.duration, 95.5)
+        XCTAssertNil(schedules.schedules[0].lastEnd?.reason)
+        // A run that did not start, or was missed, leaves the last run's end as it is.
+        schedules.record(run.id, .missed, at: tomorrow.addingTimeInterval(86_400), calendar: utc)
+        XCTAssertEqual(schedules.schedules[0].lastEnd?.kind, .finished)
+
+        // A reason is one line of a length a row holds; a clock set back gives no negative length.
+        let long = ScenarioSchedule.End(kind: .failed, reason: String(repeating: "x", count: 1000), endedAt: atTen, duration: -5)
+        XCTAssertEqual(long.reason?.count, ScenarioSchedule.End.maximumReasonLength + 1)
+        XCTAssertEqual(long.reason?.hasSuffix("…"), true)
+        XCTAssertEqual(long.duration, 0)
+        XCTAssertEqual(ScenarioSchedule.End(kind: .stopped, reason: "byUser", endedAt: atTen, duration: 1).reason, "byUser")
+    }
+
+    /// A file written before runs' ends were kept has none, and reads as it did.
+    func testAScheduleFromBeforeEndsWereKeptStillReads() throws {
+        let id = UUID()
+        let old = """
+            {"format":1,"schedules":[{"id":"\(id.uuidString)","action":{"warmUp":{}},"profileID":"\(profile.uuidString)",
+            "when":{"every":{"hours":6}},"jitterMinutes":10,"isEnabled":true,"lastResult":"started","lastRunAt":"2026-11-12T10:00:00Z"}]}
+            """
+        let read = try JSONCoding.decoder.decode(ScenarioSchedules.self, from: Data(old.utf8))
+        XCTAssertEqual(read.schedules.first?.id, id)
+        XCTAssertEqual(read.schedules.first?.lastResult, .started)
+        XCTAssertNil(read.schedules.first?.lastEnd)
+        // And one with an end goes through the file's coding whole.
+        var schedules = read
+        schedules.recordEnd(id, .stopped, reason: "profileStopped", at: Date(timeIntervalSince1970: 1_794_480_000))
+        let again = try JSONCoding.decoder.decode(ScenarioSchedules.self, from: JSONCoding.encoder.encode(schedules))
+        XCTAssertEqual(again, schedules)
+        XCTAssertEqual(again.schedules.first?.lastEnd?.kind, .stopped)
+    }
+
     func testTheFileIsItsOwnAndRoundTrips() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-schedules-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

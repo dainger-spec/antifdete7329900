@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import Foundation
 import os
 import WebKit
@@ -27,6 +28,9 @@ final class PageDriver {
         case untypeable(String)
         case script(String)
         case navigation(String)
+        /// What was asked cannot be done to this element (a choice a list does not have), in its
+        /// own words.
+        case refused(String)
 
         var description: String {
             switch self {
@@ -38,6 +42,7 @@ final class PageDriver {
             case .untypeable(let character): return "the keyboard layout has no key for \"\(character)\""
             case .script(let message): return "script error: \(message)"
             case .navigation(let message): return "navigation failed: \(message)"
+            case .refused(let message): return message
             }
         }
     }
@@ -111,6 +116,8 @@ final class PageDriver {
     private func navigation(_ what: String, state: LoadState, timeout: TimeInterval?, _ start: () -> Void) async throws {
         let mark = Double.random(in: 1...1_000_000, using: &generator)
         _ = try? await isolated("globalThis.__pbDocument = mark; return true;", ["mark": mark])
+        // This navigation is waited for by itself, not as what an earlier click may have opened.
+        lastAction = nil
         let before = webView.url
         start()
         try await waitUntil(what, timeout: timeout ?? self.timeout) {
@@ -121,7 +128,46 @@ final class PageDriver {
         try await waitForLoadState(state, timeout: timeout)
     }
 
+    /// A page that loads this soon after a click, a key or a choice in a list loads because of
+    /// it (`waitForLoadState`).
+    static let followsWithin: TimeInterval = 1.5
+
+    /// The last thing done that may open a page — a click, a key, a choice in a list: when, and
+    /// the document it was done in (`documentMark`).
+    private var lastAction: (at: Date, document: Double?)?
+
+    /// The document's mark in the driver's world, made at the first asking: another document has
+    /// none, which is how a navigation is told.
+    private func documentMark() async -> Double? {
+        let mark = Double.random(in: 1...1_000_000, using: &generator)
+        return try? await isolated("if (globalThis.__pbDocument === undefined) { globalThis.__pbDocument = mark; } return globalThis.__pbDocument;",
+                                   ["mark": mark]) as? Double
+    }
+
+    /// Before a click, a key or a choice: the document it is done in is marked, for a
+    /// `waitForLoadState` that follows it.
+    private func willAct() async {
+        let document = await documentMark()
+        lastAction = (Date(), document)
+    }
+
+    /// Waits for the page to reach `state`. Right after a click, a key or a choice in a list
+    /// (within `followsWithin`), first for the page that action opens to begin loading: the old
+    /// page is still "complete" for a moment after the click, and a wait that looked at once
+    /// went on to read the page that was being left (`click; waitForLoadState()` is what the
+    /// recorder writes for a click that opens a page). With no page coming, it waits out that
+    /// moment and no longer.
     func waitForLoadState(_ state: LoadState = .load, timeout: TimeInterval? = nil) async throws {
+        if let action = lastAction {
+            lastAction = nil
+            let until = action.at.addingTimeInterval(Self.followsWithin)
+            while Date() < until, !webView.isLoading {
+                let now = try? await isolated("return globalThis.__pbDocument === undefined ? -1 : globalThis.__pbDocument;") as? Double
+                // Another document already (a quick page, or one from the back-forward cache).
+                if let now, now != action.document { break }
+                try await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
         try await waitUntil("load state \(state.rawValue)", timeout: timeout ?? self.timeout) {
             let ready = try? await self.isolated("return document.readyState;") as? String
             switch state {
@@ -129,6 +175,18 @@ final class PageDriver {
             case .load: return ready == "complete" && !self.webView.isLoading
             }
         }
+    }
+
+    /// Waits until the page's address is one `pattern` matches (`ScenarioURLPattern`), then for
+    /// `state`: after a click whose page comes late — a form checked by a script first, a chain
+    /// of redirects — where `waitForLoadState` alone cannot know a page is still to come.
+    func waitForURL(_ pattern: ScenarioURLPattern, waitUntil state: LoadState = .load, timeout: TimeInterval? = nil) async throws {
+        onLog?("waitForURL \(pattern.shown)")
+        lastAction = nil
+        try await waitUntil("the address to match \(pattern.shown)", timeout: timeout ?? self.timeout) {
+            self.webView.url.map { pattern.matches($0.absoluteString) } ?? false
+        }
+        try await waitForLoadState(state, timeout: timeout)
     }
 
     var url: URL? { webView.url }
@@ -215,18 +273,118 @@ final class PageDriver {
     }
 
     /// Finds elements by CSS, or by their text with `text=` (as Playwright: the smallest visible
-    /// elements whose text holds it, case and spacing aside).
+    /// elements whose text holds it, case and spacing aside). `host >>> inner`: `inner` (CSS or
+    /// `text=`) inside the open shadow root of each element `host` finds — a web component's own
+    /// elements, which no selector of the document reaches; the recorder names them so. `at`: the
+    /// element at a viewport point, inside open shadow roots too; `holds`: whether `t` is `e` or
+    /// in it, across shadow roots; `focused`: the element with the focus, likewise.
     private static let findAll = """
-        const find = (selector) => {
-          if (!selector.startsWith('text=')) return Array.from(document.querySelectorAll(selector));
+        const findIn = (scope, selector) => {
+          if (!selector.startsWith('text=')) return Array.from(scope.querySelectorAll(selector));
           const wanted = selector.slice(5).trim().replace(/^"(.*)"$/, '$1').replace(/\\s+/g, ' ').toLowerCase();
-          const all = Array.from(document.querySelectorAll('body *')).filter((e) => {
+          const all = Array.from(scope.querySelectorAll(scope === document ? 'body *' : '*')).filter((e) => {
             const text = (e.innerText || '').replace(/\\s+/g, ' ').trim().toLowerCase();
             return text.includes(wanted);
           });
           return all.filter((e) => !all.some((other) => other !== e && e.contains(other)));
         };
+        const find = (selector) => {
+          if (selector.startsWith('text=')) return findIn(document, selector);
+          const [first, ...inner] = selector.split(/\\s+>>>\\s+/);
+          let found = findIn(document, first);
+          for (const step of inner) found = found.flatMap((host) => host.shadowRoot ? findIn(host.shadowRoot, step) : []);
+          return found;
+        };
+        const at = (x, y) => {
+          let t = document.elementFromPoint(x, y);
+          while (t && t.shadowRoot && typeof t.shadowRoot.elementFromPoint === 'function') {
+            const inner = t.shadowRoot.elementFromPoint(x, y);
+            if (!inner || inner === t) break;
+            t = inner;
+          }
+          return t;
+        };
+        const holds = (e, t) => {
+          for (let n = t; n; n = n.parentNode || (n.nodeType === 11 ? n.host : null)) { if (n === e) return true; }
+          return false;
+        };
+        const focused = () => {
+          let a = document.activeElement;
+          while (a && a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+          return a;
+        };
 
+        """
+
+    // MARK: Lists
+
+    /// Chooses in the list `selector` (a `<select>`, or a label of one) the options `choices`
+    /// name — each a text (an option's value, else its label), or `{value:}`, `{label:}`,
+    /// `{index:}` — and gives back the values chosen. One choice for a list of one; any number
+    /// for a list that takes several, where they replace what was chosen.
+    ///
+    /// The pointer goes to the list, as a hand's would; the choice itself is made from the
+    /// driver's world, as AutoFill fills a field: a list's menu is the system's, not the page's —
+    /// a press on the list opens it for nobody to choose in. The page gets `input` and `change`
+    /// as it does for a person's choice, but not marked as a person's (`isTrusted` is false):
+    /// the one command here of which that is so (docs/AUTOMATION.md).
+    @discardableResult
+    func selectOption(_ selector: String, _ choices: [Any], timeout: TimeInterval? = nil) async throws -> [String] {
+        onLog?("selectOption \(selector)")
+        try await reach(selector, timeout: timeout)
+        await willAct()
+        let value = try await isolated(Self.findAll + Self.chooseOptions, ["selector": selector, "wanted": choices])
+        guard let answer = value as? [String: Any] else { throw Failure.script("no answer about \(selector)") }
+        if let problem = answer["problem"] as? String {
+            let about = answer["about"] as? String ?? ""
+            switch problem {
+            case "missing": throw Failure.notFound(selector)
+            case "notList": throw Failure.refused("\(selector) is not a list (a <select>): it is <\(about)>")
+            case "disabled": throw Failure.refused("\(selector) is disabled")
+            case "noOption": throw Failure.refused("\(selector) has no option \(about)")
+            case "optionDisabled": throw Failure.refused("the option \(about) of \(selector) is disabled")
+            default: throw Failure.refused("\(selector) takes one choice: it is not a list of several")
+            }
+        }
+        try await pause(0.08...0.2)
+        return answer["values"] as? [String] ?? []
+    }
+
+    /// `selector`, `wanted`: the list's options chosen, in the driver's world. Its answer is
+    /// `{values}` or `{problem, about}`; scripts/test-shims.mjs runs this text.
+    static let chooseOptions = """
+        let list = find(selector)[0];
+        if (!list) return {problem: 'missing'};
+        if (list instanceof HTMLLabelElement && list.control) list = list.control;
+        if (!(list instanceof HTMLSelectElement)) return {problem: 'notList', about: String(list.nodeName).toLowerCase()};
+        if (list.disabled) return {problem: 'disabled'};
+        const options = Array.from(list.options);
+        const plain = (text) => String(text).replace(/\\s+/g, ' ').trim();
+        const pick = (want) => {
+          if (want !== null && typeof want === 'object') {
+            if (typeof want.index === 'number') return options[want.index];
+            if (want.value !== undefined) return options.find((o) => o.value === String(want.value));
+            if (want.label !== undefined) return options.find((o) => plain(o.label) === plain(want.label));
+            return undefined;
+          }
+          return options.find((o) => o.value === String(want)) || options.find((o) => plain(o.label) === plain(want));
+        };
+        const chosen = [];
+        for (const want of wanted) {
+          const option = pick(want);
+          const about = typeof want === 'object' ? JSON.stringify(want) : JSON.stringify(String(want));
+          if (!option) return {problem: 'noOption', about};
+          if (option.disabled) return {problem: 'optionDisabled', about};
+          if (!chosen.includes(option)) chosen.push(option);
+        }
+        if (chosen.length !== 1 && !list.multiple) return {problem: 'several'};
+        const before = options.map((o) => o.selected);
+        if (list.multiple) { for (const o of options) o.selected = chosen.includes(o); } else { chosen[0].selected = true; }
+        if (options.some((o, i) => o.selected !== before[i])) {
+          list.dispatchEvent(new Event('input', {bubbles: true, composed: true}));
+          list.dispatchEvent(new Event('change', {bubbles: true}));
+        }
+        return {values: chosen.map((o) => o.value)};
         """
 
     // MARK: The pointer
@@ -236,6 +394,7 @@ final class PageDriver {
     func click(_ selector: String, clickCount: Int = 1, timeout: TimeInterval? = nil) async throws {
         onLog?("click \(selector)")
         try await reach(selector, timeout: timeout)
+        await willAct()
         // A double click's presses come within the system's interval, each counted as its place.
         let count = max(1, clickCount)
         for index in 0..<count {
@@ -257,18 +416,26 @@ final class PageDriver {
             let point = try await pointerTarget(selector, timeout: timeout)
             try await moveTo(point)
             let still = try await isolated(Self.findAll + """
-                const e = find(selector)[0], t = document.elementFromPoint(x, y);
-                return !!e && !!t && (t === e || e.contains(t));
+                const e = find(selector)[0], t = at(x, y);
+                return !!e && !!t && holds(e, t);
                 """, ["selector": selector, "x": point.x, "y": point.y]) as? Bool
             if still == true { return }
             if attempt == 2 { throw Failure.covered(selector, by: "the page moving under the pointer") }
         }
     }
 
+    /// Moves the pointer to the viewport point `point`, as a hand moves it, and leaves it there
+    /// (WebDriver's actions: a hover, the way to a press).
+    func movePointer(to point: CGPoint) async throws {
+        onLog?("move to \(Int(point.x)),\(Int(point.y))")
+        try await moveTo(point)
+    }
+
     /// Clicks the viewport point `point` (CSS pixels from the viewport's top left).
     func click(at point: CGPoint) async throws {
         onLog?("click at \(Int(point.x)),\(Int(point.y))")
         try await moveTo(point)
+        await willAct()
         await input.click(hold: Double.random(in: 0.06...0.13, using: &generator))
     }
 
@@ -290,9 +457,9 @@ final class PageDriver {
             let point = CGPoint(x: info.inView.minX + info.inView.width * Double.random(in: 0.3...0.7, using: &generator),
                                 y: info.inView.minY + info.inView.height * Double.random(in: 0.35...0.65, using: &generator))
             let top = try await isolated(Self.findAll + """
-                const e = find(selector)[0], t = document.elementFromPoint(x, y);
+                const e = find(selector)[0], t = at(x, y);
                 if (!e || !t) return 'nothing';
-                if (t === e || e.contains(t)) return '';
+                if (holds(e, t)) return '';
                 return t.id ? '#' + t.id : t.nodeName.toLowerCase();
                 """, ["selector": selector, "x": point.x, "y": point.y]) as? String
             if top == "" { return point }
@@ -447,7 +614,7 @@ final class PageDriver {
             return key
         }
         if let selector {
-            let focused = try await isolated(Self.findAll + "const e = find(selector)[0]; return !!e && document.activeElement === e;",
+            let focused = try await isolated(Self.findAll + "const e = find(selector)[0]; return !!e && focused() === e;",
                                              ["selector": selector]) as? Bool
             if focused != true { try await click(selector) }
         }
@@ -484,6 +651,7 @@ final class PageDriver {
         }
         key.modifiers.formUnion(modifiers)
         input.holdFocus()
+        await willAct()
         await input.press(key, hold: Double.random(in: 0.05...0.12, using: &generator))
         try await pause(0.05...0.12)
     }

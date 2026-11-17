@@ -4,8 +4,9 @@ import SwiftUI
 // MARK: - Settings → Appearance
 
 /// How the app's own windows look and move (Settings → Appearance): the light at entry, the
-/// profile list's density, the interface's animations. Kept in this Mac's defaults, outside the
-/// vault: the lock screen needs them before the vault opens, and none of it is secret.
+/// greeting at launch, the profile list's density, the interface's animations. Kept in this Mac's
+/// defaults, outside the vault: the lock screen needs them before the vault opens, and none of it
+/// is secret.
 @MainActor
 final class AppearancePreferences: ObservableObject {
     static let shared = AppearancePreferences()
@@ -26,6 +27,9 @@ final class AppearancePreferences: ObservableObject {
     @Published var animations: Bool { didSet { defaults.set(animations, forKey: Keys.animations) } }
     /// Each profile's exit country as a flag fading behind its row in the list (`CountryBackdrop`).
     @Published var countryBackdrop: Bool { didSet { defaults.set(countryBackdrop, forKey: Keys.countryBackdrop) } }
+    /// The welcome window (`WelcomeSplash`) at every start a person makes, not only the first one
+    /// (`WelcomeLaunch`). Off by default.
+    @Published var greetEveryStart: Bool { didSet { defaults.set(greetEveryStart, forKey: Keys.greetEveryStart) } }
 
     private let defaults: UserDefaults
 
@@ -34,6 +38,7 @@ final class AppearancePreferences: ObservableObject {
         static let density = "appearance.density"
         static let animations = "appearance.animations"
         static let countryBackdrop = "appearance.countryBackdrop"
+        static let greetEveryStart = "appearance.greetEveryStart"
     }
 
     init(defaults: UserDefaults = .standard) {
@@ -42,6 +47,12 @@ final class AppearancePreferences: ObservableObject {
         density = defaults.string(forKey: Keys.density).flatMap(Density.init(rawValue:)) ?? .comfortable
         animations = defaults.object(forKey: Keys.animations) as? Bool ?? true
         countryBackdrop = defaults.object(forKey: Keys.countryBackdrop) as? Bool ?? false
+        greetEveryStart = defaults.object(forKey: Keys.greetEveryStart) as? Bool ?? false
+    }
+
+    /// The welcome-at-every-start setting as stored, read before the app's model exists.
+    nonisolated static func greetsEveryStart(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: Keys.greetEveryStart) as? Bool ?? false
     }
 
     /// The animations setting as stored, from any thread.

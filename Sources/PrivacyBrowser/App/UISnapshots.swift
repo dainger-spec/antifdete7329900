@@ -1,5 +1,6 @@
 import AppKit
 import BrowserCore
+import MachineCover
 import SwiftUI
 
 /// `Lumen --render-ui-snapshots <folder>`: renders the app's screens with sample data
@@ -22,9 +23,10 @@ enum UISnapshots {
         Localization.applyProcessLanguage()
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
-        // A run took 115 s in CI run 556, before the edge checks and the list's steps.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 240) {
-            print("SNAPSHOTS TIMEOUT after 240 s")
+        // A run took 115 s in CI run 556, before the edge checks and the list's steps; with the
+        // scenarios', warm-up's and restore's screens 240 s ended it at some 200 of 285 pictures.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 600) {
+            print("SNAPSHOTS TIMEOUT after 600 s")
             exit(3)
         }
         Task { @MainActor in
@@ -56,7 +58,8 @@ enum UISnapshots {
         let devices = AccountDevices(devices: [
             AccountDevice(deviceID: "d1", code: "B119", label: "Studio", lastSeenAt: now, profileCount: 21, mine: true), // l10n: not text
             AccountDevice(deviceID: "d2", code: "3KQ9", label: "", lastSeenAt: now.addingTimeInterval(-3 * 86_400), profileCount: 9, mine: true),
-        ], limit: 3, used: 2, unlinkAvailableAt: nil, unlinkCooldownSeconds: 604_800, offlineWorkSeconds: 604_800)
+            AccountDevice(deviceID: "p1", code: "K7Q2", lastSeenAt: now.addingTimeInterval(-7_200), profileCount: 2, mine: true, platform: "ios"),
+        ], limit: 3, used: 2, unlinkAvailableAt: nil, unlinkCooldownSeconds: 604_800, offlineWorkSeconds: 604_800, phoneLimit: 3, phonesUsed: 1)
         let signedIn = LicenseModel(preview: record, state: LicenseState(mode: .full, entitlement: p, check: .valid(p), banners: [],
                                                                          allowedProfilesHere: 38, worksWithoutServerUntil: p.graceEndsAt, now: now),
                                     devices: devices)
@@ -80,6 +83,53 @@ enum UISnapshots {
         return (signedOut, signedIn, signedInWithKey, keyWithEmail)
     }
 
+    /// The setup screen's other way, a picture a step: where the vault is (with a restore that was
+    /// not finished), the account's vaults — two to choose from and one a newer version wrote — the
+    /// server's answers that are no list (sync not in the plan, a new device held, no vault), a
+    /// server of one's own, the master password and a wrong one, the vault coming and a run cut
+    /// short, and the vault here with a profile whose settings never reached the place.
+    private static func restoreFlow(into folder: URL, model: AppModel) async -> Int {
+        var problems = 0
+        let made = Date(timeIntervalSince1970: 1_773_316_800)
+        let now = Date()
+        let first = RestoreModel.Candidate(vaultID: UUID(uuidString: "6F1E2D3C-4B5A-4978-8695-A4B3C2D1E0F1")!, createdAt: made,
+                                           changedAt: now.addingTimeInterval(-26 * 3_600), passwordChanged: true)
+        let second = RestoreModel.Candidate(vaultID: UUID(uuidString: "0A1B2C3D-4E5F-4A6B-8C7D-9E0F1A2B3C4D")!,
+                                            createdAt: made.addingTimeInterval(190 * 86_400), changedAt: now.addingTimeInterval(-41 * 86_400))
+        let newer = RestoreModel.Candidate(vaultID: UUID(uuidString: "11111111-2222-4333-8444-555555555555")!, createdAt: nil,
+                                           changedAt: now.addingTimeInterval(-2 * 86_400), problem: L("restore.vault.newer"))
+        let names = ["Work", "Shop 1", "Shop 2", "Shop 3", "Mail", "Ads", "Bank", "Travel", "News", "Forum", "Market", "Support"]
+        let cut = errorText(CoreError.io("sync request failed: The network connection was lost."))
+        let samples: [(name: String, sample: RestoreModel, height: CGFloat)] = [
+            ("launch-restore-source",
+             RestoreModel(sample: .source, unfinished: [VaultRestore.Unfinished(vaultID: first.vaultID, createdAt: made, bytes: 41_300_000)]), 860),
+            ("launch-restore-account",
+             RestoreModel(sample: .account, place: .account, account: .vaults([first, second, newer]), selected: first.vaultID), 900),
+            ("launch-restore-not-in-plan", RestoreModel(sample: .account, place: .account, account: .state(.notInPlan)), 820),
+            ("launch-restore-on-hold",
+             RestoreModel(sample: .account, place: .account, account: .state(.onHold(until: now.addingTimeInterval(3 * 86_400)))), 780),
+            ("launch-restore-no-vaults", RestoreModel(sample: .account, place: .account, account: .state(.noVaults)), 780),
+            ("launch-restore-signed-out", RestoreModel(sample: .account, place: .account, account: .state(.signedOut)), 780),
+            ("launch-restore-server", RestoreModel(sample: .server), 900),
+            ("launch-restore-password", RestoreModel(sample: .password, place: .account, candidate: first), 900),
+            ("launch-restore-wrong-password",
+             RestoreModel(sample: .password, place: .folder(path: "/Volumes/NAS/lumen"), candidate: second, problem: L("restore.password.wrong")), 940),
+            ("launch-restore-bringing",
+             RestoreModel(sample: .bringing, place: .account, candidate: first, profileNames: names,
+                          progress: VaultRestore.Progress(listed: 61, fetched: 21, bytes: 12_400_000, alreadyHere: 13), continued: true), 820),
+            ("launch-restore-interrupted",
+             RestoreModel(sample: .bringing, place: .account, candidate: first, profileNames: names, interrupted: cut), 820),
+            ("launch-restore-done",
+             RestoreModel(sample: .done, place: .account, summary: .init(profiles: 12, withoutSettings: ["Shop 3"], place: .account)), 900),
+        ]
+        for entry in samples {
+            problems += await Shot(name: entry.name, size: CGSize(width: 1180, height: entry.height), edges: true) {
+                LockBackdrop { SetupView(restoring: entry.sample).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        return problems
+    }
+
     private static func settings(into folder: URL, model: AppModel) async -> Int {
         var problems = 0
         for section in SettingsSection.allCases where section != .updates {
@@ -87,6 +137,16 @@ enum UISnapshots {
                 SettingsView(section: section).environmentObject(model)
             }.capture(into: folder)
         }
+        // The search, with a setting's name typed: the pages that answer, each with the setting it
+        // found, and that setting's row marked on its page (SettingsSearch).
+        problems += await Shot(name: "settings-search", size: SettingsView.size, edges: true) {
+            SettingsView(section: .behavior, search: L("settings.behavior.zoom")).environmentObject(model)
+        }.capture(into: folder)
+        // The command palette with the same typed: the single setting, and the page it is on.
+        problems += await Shot(name: "palette-setting", size: CommandPaletteView.size, titled: false) {
+            CommandPaletteView(commands: paletteSample(sampleRows()), query: L("settings.behavior.zoom"))
+                .environment(\.appModelForCommands, model)
+        }.capture(into: folder)
         // A Mac whose Safari runs a newer engine than profiles, on whatever runner this is.
         EngineWarning.standIn = EngineWarning.Facts(safari: "27.2", engine: "26.6.2", macOS: 26) // l10n: not text
         problems += await Shot(name: "settings-about-engines", size: SettingsView.size, edges: true) {
@@ -256,6 +316,21 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-proxied", size: CGSize(width: 1180, height: 560), edges: true) {
             ProfilesPreview(rows: rows, filter: .proxied, sync: .failed)
         }.capture(into: folder)
+        // The list by name (the Name column's title says so, with its arrow), and the sidebar's
+        // "Proxy not working": the profiles whose proxy did not answer.
+        problems += await Shot(name: "profiles-by-name", size: CGSize(width: 1180, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, order: .name)
+        }.capture(into: folder)
+        problems += await Shot(name: "profiles-proxy-failing", size: CGSize(width: 1180, height: 560), edges: true) {
+            ProfilesPreview(rows: rows, filter: .proxyFailing)
+        }.capture(into: folder)
+        // Tags for a selection (the bar's "Tags…"): one to add, one of theirs marked to be removed.
+        let tagged = [rows[1], rows[3], rows[6], rows[8]].map { ProfileTagsPanel.Profile(name: $0.name, tags: $0.tags) }
+        problems += await Shot(name: "sheet-profile-tags", size: CGSize(width: 520, height: 400), titled: false) {
+            ProfileTagsPanel(profiles: tagged, knownTags: ["ads", "clients", "DE", "mobile", "NL", "Q4 campaign", "warm-up"],
+                             added: ["Q4 campaign"], removing: ["warm-up"])
+                .environment(\.tagColors, sampleTagColors)
+        }.capture(into: folder)
         // The inspector: one profile (Northwind), one whose settings cannot be read (R1: said there
         // too, and it does not start), several, and over the list in a window too narrow for both.
         let northwind = rows[1].id
@@ -301,6 +376,11 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-inspector-over", size: CGSize(width: 1180, height: 740), edges: true) {
             ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
         }.capture(into: folder)
+        // The narrowest window: no room for the compact list beside the inspector, which lies over
+        // the list, opaque.
+        problems += await Shot(name: "profiles-inspector-narrowest", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
+            ProfilesPreview(rows: rows, showsInspector: true, selected: [northwind], inspectorInfo: info)
+        }.capture(into: folder)
         // The list after a profile's window closed (the owner, 1 November: blank until scrolled up).
         problems += await listAfterReturn(into: folder)
         // The command palette (⌘K), as it opens and with something typed.
@@ -325,6 +405,11 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "simplified-mode-sandboxed", size: CGSize(width: 360, height: 260), titled: false) {
             SimplifiedModeExplanation(reason: .sandboxed)
+        }.capture(into: folder)
+        // Whose window it is, in Safari's own window: the profile's chip as the end of Safari's
+        // toolbar carries it, on a light toolbar and on a dark one (SafariProfileMarker).
+        problems += await Shot(name: "safari-profile-marker", size: CGSize(width: 760, height: 104), titled: false) {
+            SafariProfileMarkerPreview()
         }.capture(into: folder)
         // What sites see: before a snapshot, its differences, every signal, and Safari silent.
         func seen(comparedWithSafari: Bool = true) -> WhatSitesSee {
@@ -646,10 +731,66 @@ enum UISnapshots {
         problems += await Shot(name: "avatar-glyphs-faces", size: CGSize(width: 620, height: 440)) {
             AvatarGlyphPicker(draft: .constant(glyphDraft), avatarID: glyphOwner, sectionKey: "faces")
         }.capture(into: folder)
+        // The Scenarios section (docs/AUTOMATION.md): the person's scenarios, the templates, a
+        // template's form, a scenario's steps beside its code, a recording, the profiles of a run,
+        // a run's table as it goes and once it has ended, the runs kept, and the first opening.
+
+        problems += await warmUp(into: folder)
         // The scenario editor: a scenario chosen, its code with the commands beside it.
         let scenario = Scenario(name: L("scenarios.untitled"), source: L("scenarios.template"))
-        problems += await Shot(name: "scenarios", size: CGSize(width: 1100, height: 760)) {
-            ScenariosView(sample: scenario).environmentObject(model)
+        let signIn = Scenario(name: L("scenarios.template.signin.title"),
+                              source: ScenarioTemplate.template("signin")!.source(settings: ["LOGIN_URL": .text("https://shop.example/login"), "SIGNED_IN": .text("text=My orders")]) { L(ScenarioTemplate.wordKey($0)) },
+                              folder: "Shop", templateID: "signin")
+        let feed = Scenario(name: L("scenarios.template.feed.title"), source: ScenarioTemplate.template("feed")!.source(settings: ["PAGE_URL": .text("https://news.example/")]) { L(ScenarioTemplate.wordKey($0)) },
+                            templateID: "feed")
+        let scenarioProfiles = rows.prefix(8).enumerated().map { index, row in
+            ScenarioProfile(id: row.id, name: row.name, tags: row.tags, avatar: row.avatar, isRunning: row.isRunning, values: index == 3 ? ["login"] : ["login", "password"])
+        }
+        let runStart = Date(timeIntervalSince1970: 1_792_921_000)
+        var going = ScenarioBatch(scenarioID: signIn.id, scenarioName: signIn.name, entries: scenarioProfiles.map { ScenarioBatch.Entry(profileID: $0.id, name: $0.name) }, startedAt: runStart)
+        going.entries[3].state = .skipped(reason: String(format: L("scenarios.run.skipped.values"), "password"))
+        for index in 0..<3 { going.began(scenarioProfiles[index].id, at: runStart.addingTimeInterval(Double(index) * 9)) }
+        going.ended(scenarioProfiles[0].id, .finished, at: runStart.addingTimeInterval(38), result: "\"signed in\"")
+        going.began(scenarioProfiles[4].id, at: runStart.addingTimeInterval(40))
+        var ended = going
+        ended.ended(scenarioProfiles[1].id, .finished, at: runStart.addingTimeInterval(50), result: "\"signed in\"")
+        ended.ended(scenarioProfiles[2].id, .failed(reason: "timed out: text=My orders visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
+                    log: ["    0.0  window: Safari's", "    0.1  goto https://shop.example/login", "    2.3  type 17 characters into input[type=\"email\"]",
+                          "    4.4  type 14 characters into input[type=\"password\"]", "    7.0  press Enter", "    7.1  waitFor text=My orders visible",
+                          "   37.1  timed out: text=My orders visible (line 17)", "   37.1  Failed: timed out: text=My orders visible (line 17)"])
+        for index in 4..<scenarioProfiles.count {
+            ended.began(scenarioProfiles[index].id, at: runStart.addingTimeInterval(Double(index) * 20))
+            ended.ended(scenarioProfiles[index].id, .finished, at: runStart.addingTimeInterval(Double(index) * 20 + 41), result: "\"signed in\"")
+        }
+        var earlier = ScenarioBatch(scenarioID: feed.id, scenarioName: feed.name, entries: scenarioProfiles.prefix(4).map { ScenarioBatch.Entry(profileID: $0.id, name: $0.name) },
+                                    startedAt: runStart.addingTimeInterval(-90_000))
+        for profile in scenarioProfiles.prefix(4) {
+            earlier.began(profile.id, at: earlier.startedAt)
+            earlier.ended(profile.id, .finished, at: earlier.startedAt.addingTimeInterval(64), result: "5")
+        }
+        let scenarioSample = ScenariosSection.Sample(scenarios: [signIn, feed, scenario], profiles: scenarioProfiles, runs: [ended, earlier])
+        func scenarioShot(_ name: String, _ change: (inout ScenariosSection.Sample) -> Void) async -> Int {
+            var changed = scenarioSample
+            change(&changed)
+            let sample = changed
+            return await Shot(name: name, size: CGSize(width: 1168, height: 800), titled: false) {
+                ScenariosSection(sample: sample).background(Theme.surface).environmentObject(model)
+            }.capture(into: folder)
+        }
+        problems += await scenarioShot("scenarios") { _ in }
+        problems += await scenarioShot("scenarios-templates") { $0.tab = .templates }
+        problems += await scenarioShot("scenarios-first-open") { $0.scenarios = []; $0.runs = [] }
+        problems += await scenarioShot("scenarios-editor") { $0.place = .editor(signIn.id) }
+        problems += await scenarioShot("scenarios-editor-steps") { $0.place = .editor(feed.id); $0.editorMode = .steps }
+        problems += await scenarioShot("scenarios-run-going") { $0.runs = [going]; $0.place = .run(going.id) }
+        problems += await scenarioShot("scenarios-run-ended") { $0.place = .run(ended.id) }
+        problems += await scenarioShot("scenarios-run-log") { $0.place = .run(ended.id); $0.showsLog = true }
+        problems += await scenarioShot("scenarios-runs") { $0.tab = .runs }
+        problems += await Shot(name: "scenarios-template-form", size: CGSize(width: 900, height: 640), titled: false) {
+            ScenarioTemplateForm(template: ScenarioTemplate.template("signin")!, taken: []) { _ in }.environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "scenarios-run-choose", size: CGSize(width: 880, height: 660), titled: false) {
+            ScenarioRunChooser(scenario: signIn, profiles: scenarioProfiles) { _ in }.environmentObject(model)
         }.capture(into: folder)
         // A recording going on: its steps as they come, in place of the run's log.
         let recordedSteps = [
@@ -660,9 +801,7 @@ enum UISnapshots {
             RecordedStep(.load),
             RecordedStep(.click, selector: "[data-testid=\"orders\"]"),
         ]
-        problems += await Shot(name: "scenarios-recording", size: CGSize(width: 1100, height: 760)) {
-            ScenariosView(sample: scenario, sampleRecording: recordedSteps).environmentObject(model)
-        }.capture(into: folder)
+        problems += await scenarioShot("scenarios-recording") { $0.place = .editor(scenario.id); $0.recording = recordedSteps }
         // Runs by the clock: two schedules, none yet, and the form one is added in.
         let clockProfiles = [(id: rows[0].id, name: "Personal"), (id: rows[1].id, name: "Northwind")]
         var daily = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .daily(hour: 10, minute: 0), jitterMinutes: 15)
@@ -672,6 +811,31 @@ enum UISnapshots {
         var hourly = ScenarioSchedule(action: .warmUp, profileID: rows[0].id, when: .every(hours: 6), jitterMinutes: 30)
         hourly.nextRunAt = Date(timeIntervalSince1970: 1_793_015_000)
         hourly.lastResult = .missed
+        // How the last run ended, once it has: one that failed says why (with the scenario's
+        // line), one that finished in how long.
+        var failing = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[0].id, when: .daily(hour: 2, minute: 30), jitterMinutes: 0)
+        failing.nextRunAt = Date(timeIntervalSince1970: 1_793_020_000)
+        failing.lastRunAt = Date(timeIntervalSince1970: 1_792_933_600)
+        failing.lastResult = .started
+        failing.lastEnd = ScenarioSchedule.End(kind: .failed, reason: "Error: no element matches #login (line 7)",
+                                               endedAt: Date(timeIntervalSince1970: 1_792_933_631), duration: 31)
+        var finished = ScenarioSchedule(action: .scenario(scenario.id), profileID: rows[1].id, when: .every(hours: 12), jitterMinutes: 20)
+        finished.nextRunAt = Date(timeIntervalSince1970: 1_793_030_000)
+        finished.lastRunAt = Date(timeIntervalSince1970: 1_792_986_800)
+        finished.lastResult = .started
+        finished.lastEnd = ScenarioSchedule.End(kind: .finished, endedAt: Date(timeIntervalSince1970: 1_792_986_995), duration: 195)
+        problems += await Shot(name: "scenarios-schedule-ends", size: CGSize(width: 860, height: 760)) {
+            ScenarioSchedulesPane(sample: .init(schedules: [failing, finished, daily], scenarios: [scenario], profiles: clockProfiles, editing: nil))
+                .background(Theme.surface)
+                .environmentObject(model)
+        }.capture(into: folder)
+        // A profile's own values for scenarios: the plain form, with a name the scenario reads offered empty.
+        problems += await Shot(name: "scenarios-values", size: CGSize(width: 560, height: 380), titled: false) {
+            ScenarioValuesSheet(profileID: rows[1].id, profileName: "Northwind", namesRead: ["login", "password", "city"],
+                                sample: [ScenarioValues.Value(name: "login", value: "alice@northwind.example"),
+                                         ScenarioValues.Value(name: "password", value: "correct horse battery")])
+                .environmentObject(model)
+        }.capture(into: folder)
         problems += await Shot(name: "scenarios-schedule", size: CGSize(width: 860, height: 760)) {
             ScenarioSchedulesPane(sample: .init(schedules: [daily, hourly], scenarios: [scenario], profiles: clockProfiles, editing: nil))
                 .background(Theme.surface)
@@ -690,6 +854,8 @@ enum UISnapshots {
                 .environmentObject(model)
         }.capture(into: folder)
         problems += await proxyList(into: folder)
+        problems += await machineCover(into: folder)
+        problems += await machinesList(into: folder)
         // A real browser window of a running profile (WebKit, toolbar, tab strip, start page).
         problems += await browserWindows(into: folder)
         // The launch screen (the Profiles window before unlocking), also while the vault opens.
@@ -701,12 +867,37 @@ enum UISnapshots {
         problems += await Shot(name: "launch-setup", size: CGSize(width: 1180, height: 820), edges: true) {
             LockBackdrop { SetupView().environmentObject(lockModel) }
         }.capture(into: folder)
+        // Unlocking with Touch ID turned on (Settings › Security), as a Mac with Touch ID shows it —
+        // a stand-in state: nothing is kept and Touch ID is not asked. The lock screen with its
+        // second action; the same after a restart, when the password is asked; the setting; and
+        // the sheet that turns it on.
+        let touchModel = AppModel()
+        touchModel.touchIDAskedAtStart = true
+        touchModel.touchID = TouchIDStatus(offered: true, sensor: .ready, decision: .touchID)
+        problems += await Shot(name: "launch-unlock-touchid", size: CGSize(width: 1180, height: 780), edges: true) {
+            LockBackdrop { UnlockView().environmentObject(touchModel) }
+        }.capture(into: folder)
+        let restartedModel = AppModel()
+        restartedModel.touchIDAskedAtStart = true
+        restartedModel.touchID = TouchIDStatus(offered: true, sensor: .ready, decision: .password(.restarted))
+        problems += await Shot(name: "launch-unlock-touchid-restarted", size: CGSize(width: 1180, height: 780), edges: true) {
+            LockBackdrop { UnlockView().environmentObject(restartedModel) }
+        }.capture(into: folder)
+        problems += await Shot(name: "settings-security-touchid", size: SettingsView.size, edges: true) {
+            SettingsView(section: .security).environmentObject(touchModel)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-touchid-on", size: CGSize(width: 480, height: 400), titled: false) {
+            TouchIDTurnOnView().environmentObject(touchModel)
+        }.capture(into: folder)
         // §10.1: a master password that is the license's key, refused under its field.
         let refusedModel = AppModel()
         refusedModel.masterPasswordRefusal = L("contract.master_password.same_as_key")
         problems += await Shot(name: "launch-setup-same-as-key", size: CGSize(width: 1180, height: 900), edges: true) {
             LockBackdrop { SetupView().environmentObject(refusedModel) }
         }.capture(into: folder)
+        // "I already have a vault" (RestoreFlow): the steps of bringing a vault back from where a Mac
+        // synced it, and what the Lumen server may answer — sample data, nothing asked of any server.
+        problems += await restoreFlow(into: folder, model: lockModel)
         // The first launch's first screen with an account server: the sign-in, the interface's
         // language on it (FirstLaunchLanguagePicker).
         problems += await Shot(name: "launch-sign-in", size: CGSize(width: 1180, height: 820), edges: true) {
@@ -724,6 +915,7 @@ enum UISnapshots {
         problems += await Shot(name: "launch-open", size: CGSize(width: 1180, height: 740), edges: true) {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
+        problems += await welcome(into: folder)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()
         }.capture(into: folder)
@@ -738,6 +930,47 @@ enum UISnapshots {
         problems += await Shot(name: "flags", size: CGSize(width: 900, height: 620), titled: false) {
             FlagSheet()
         }.capture(into: folder)
+        return problems
+    }
+
+    // MARK: The launch screen
+
+    /// The launch screen (WelcomeSplash), still at chosen moments: a later launch's greeting written
+    /// and settled, in Russian and in English; the Russian one 60 % written; the first launch's, with
+    /// its button; and the Russian one in the glass drawn where Metal is missing. The Metal glass is
+    /// drawn here as a picture (a cached picture of a window holds no Metal layer), by the same shader.
+    private static func welcome(into folder: URL) async -> Int {
+        guard let russian = WelcomeLettering.all.first(where: { $0.code == "ru" }),
+              let english = WelcomeLettering.all.first(where: { $0.code == "en" }) else {
+            print("FAIL the launch screen has no greeting in Russian or English")
+            return 1
+        }
+        func settled(_ greeting: WelcomeLettering) -> Double {
+            WelcomeTiming(duration: greeting.duration, reduced: false).settledAt + 0.5
+        }
+        if WelcomeGlassRenderer.prepareNow() == nil {
+            print("NOTE the launch screen's Metal glass cannot be made here: its pictures show the drawn glass")
+        }
+        let size = CGSize(width: 1180, height: 740)
+        var problems = 0
+        problems += await Shot(name: "welcome-ru", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {}, still: settled(russian))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-ru-writing", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {},
+                          still: WelcomeTiming.penStart + russian.duration * 0.6)
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-en", size: size, edges: true) {
+            WelcomeSplash(greeting: english, firstLaunch: false, opening: {}, finished: {}, still: settled(english))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-en-first", size: size, edges: true) {
+            WelcomeSplash(greeting: english, firstLaunch: true, opening: {}, finished: {}, still: settled(english))
+        }.capture(into: folder)
+        problems += await Shot(name: "welcome-ru-drawn-glass", size: size, edges: true) {
+            WelcomeSplash(greeting: russian, firstLaunch: true, opening: {}, finished: {}, still: settled(russian),
+                          fallbackGlass: true)
+        }.capture(into: folder)
+        WelcomeGlassRenderer.release()
         return problems
     }
 
@@ -861,6 +1094,74 @@ enum UISnapshots {
     /// the one behind a VPN's substitute DNS, on the service's and on a working one; the Edit and
     /// Export sheets; and what a profile whose proxy did not work at its launch says. Nothing is
     /// checked here and nothing goes to the network.
+    // MARK: A virtual machine's start
+
+    /// The cover over a profile's machine while its start puts the profile's settings in place
+    /// (MachineCover; the helper shows it): in a MacBook Air 13″ window, at two steps — signing in,
+    /// and the look — and with "Show the screen" offered after a minute. Still frames, the glint
+    /// where design/prototypes/vm-cover.html's frames have it.
+    private static func machineCover(into folder: URL) async -> Int {
+        var problems = 0
+        let texts = MachineCoverTexts(VMCenter.coverTexts)
+        let shots: [(name: String, stage: VMSetupStage, offers: Bool, still: Double)] = [
+            ("vm-cover-signin", .signin, false, 1.9), ("vm-cover-look", .look, false, 3.0), ("vm-cover-longer", .locale, true, 4.1),
+        ]
+        for shot in shots {
+            let model = MachineCoverModel(name: "Vienna", texts: texts, stage: shot.stage, offersReveal: shot.offers) // l10n: not text
+            problems += await Shot(name: shot.name, size: CGSize(width: 1280, height: 832), titled: false) {
+                MachineCoverView(model: model, still: shot.still)
+            }.capture(into: folder)
+        }
+        return problems
+    }
+
+    // MARK: The machines' list
+
+    /// The virtual machines' rows as they say what happened (no vault, no machine): one running;
+    /// one asleep; one whose proxy rejected its login at the start, said as the check found it;
+    /// one not started onto a disk that is nearly full; one macOS refused for Apple's limit, in
+    /// the interface's words with the system's under them; one shut down instead of kept as it
+    /// was, for want of room for its state.
+    private static func machinesList(into folder: URL) async -> Int {
+        let guest = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_MACOS_VERSION=26.1\nLUMEN_SAFARI_VERSION=26.1\n")
+        func proxy(_ host: String) -> ProxySettings {
+            ProxySettings(kind: .socks5, host: host, port: 1080, username: "lumen", password: "preview")
+        }
+        func machine(_ name: String, _ host: String, _ country: String, display: String = "macbook-air-13", memory: Int = 6,
+                     instantWake: Bool = false) -> VMProfile {
+            VMProfile(name: name, proxy: proxy(host), timeZoneIdentifier: "Europe/Berlin", countryCode: country, displayID: display,
+                      memoryGB: memory, instantWake: instantWake)
+        }
+        let rejectedProxy = proxy("fr.proxy.example")
+        let rejected = sampleFailed(ProxyDiagnosis(verdict: .credentialsRejected, kinds: [.socks5], authentication: .rejected,
+                                                   connectedAddress: "203.0.113.41"))
+        let gigabyte = VMRequirements.gibibyte
+        let samples: [VMListPreview.Sample] = [
+            .init(profile: machine("Shop DE", "de.proxy.example", "DE"), // l10n: not text
+                  state: VMCenter.Running(phase: .running, bytesUp: 48_300_000, bytesDown: 912_000_000, connections: 14,
+                                          udp: .throughProxy),
+                  exit: sampleWorks(.socks5, "203.0.113.30", "DE", "Europe/Berlin", "Frankfurt", [61]), guest: guest,
+                  disk: 6 * gigabyte + gigabyte / 5),
+            .init(profile: machine("Ads US", "us.proxy.example", "US", display: "macbook-pro-14", memory: 8, instantWake: true), // l10n: not text
+                  exit: sampleWorks(.socks5, "198.51.100.7", "US", "America/New_York", "New York", [140]), guest: guest,
+                  disk: 4 * gigabyte, asleep: true),
+            .init(profile: machine("Mail FR", "fr.proxy.example", "FR"), // l10n: not text
+                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte),
+            .init(profile: machine("Bank UK", "uk.proxy.example", "GB", display: "imac-24"), // l10n: not text
+                  problem: VMCenter.roomText(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
+                  guest: guest, disk: 7 * gigabyte),
+            .init(profile: machine("Forum PL", "pl.proxy.example", "PL"), // l10n: not text
+                  problem: VMCenter.failureText(kind: .limit,
+                                                message: "The maximum supported number of active virtual machines has been reached."), // l10n: not text
+                  guest: guest, disk: 3 * gigabyte),
+            .init(profile: machine("Travel ES", "es.proxy.example", "ES", memory: 8, instantWake: true), // l10n: not text
+                  problem: VMCenter.notKeptText(kind: .noRoom, message: nil), guest: guest, disk: 9 * gigabyte),
+        ]
+        return await Shot(name: "vm-list-states", size: CGSize(width: 1040, height: 760), titled: false) {
+            VMListPreview(samples: samples)
+        }.capture(into: folder)
+    }
+
     private static func proxyList(into folder: URL) async -> Int {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -905,6 +1206,13 @@ enum UISnapshots {
             }.capture(into: folder)
             problems += await Shot(name: "proxies-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: section(selecting: [berlin.id]))
+            }.capture(into: folder)
+            // Only the proxies that did not answer: the silent one selected, with "Replace in
+            // Profiles…" for the two profiles on it.
+            let failing = AnyView(ProxyListPanel(proxies: proxies, profileCounts: counts, profilesUsing: names,
+                                                 selection: .constant([silent.id]), filter: .failing))
+            problems += await Shot(name: "proxies-failing", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: entries.count, proxies: failing)
             }.capture(into: folder)
             problems += await Shot(name: "sheet-proxy-edit", size: CGSize(width: 560, height: 400), titled: false) {
                 ProxyEditView(proxies: proxies, entry: berlin, profileCount: 3)
@@ -1438,7 +1746,6 @@ enum UISnapshots {
     static func sampleRows() -> [ProfileRowItem] {
         func id(_ n: UInt8) -> UUID { UUID(uuid: (n, 0x1C, 0x5E, 0x17, 0, n, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, n)) }
         let mac = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "macos-26"), hostSafariVersion: HostSafari.version)
-        let iPhone = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "ios-26"), hostSafariVersion: HostSafari.version)
         let now = Date()
         return [
             ProfileRowItem(id: id(1), name: "Personal", activity: .running, exit: .direct, ephemeral: false,
@@ -1452,8 +1759,8 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3_600)),
             ProfileRowItem(id: id(4), name: "Research", activity: .stopped,
                            exit: .proxy(endpoint: "nl.gateway.example:1080", countryCode: "NL"), ephemeral: false,
-                           appearsAs: iPhone, lastUsed: now.addingTimeInterval(-86_400),
-                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"], deviceSymbol: "iphone"),
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-86_400),
+                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"]),
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
@@ -1470,7 +1777,7 @@ enum UISnapshots {
             ProfileRowItem(id: id(9), name: "Marketplace US", activity: .stopped,
                            exit: .proxy(endpoint: "us-dal.proxy.example:1080", countryCode: "US"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-2 * 3_600), tags: ["clients"],
-                           problem: "us-dal.proxy.example:1080"), // l10n: not text
+                           problem: "us-dal.proxy.example:1080", proxyFailed: true), // l10n: not text
         ]
     }
 }
@@ -1484,6 +1791,159 @@ enum UISnapshots {
 /// adds. A Settings window with a grey band at its top passed here (the owner, 2 November); the real
 /// one is checked by `SettingsWindowCheck`.
 @MainActor
+/// The profile's chip of Safari's window on the two grounds Safari's toolbar has — light and dark,
+/// with the Mac — for four profiles: a colour chosen and one from the id, a glyph chosen, a proxy
+/// whose exit is known, one whose exit is not, and a direct connection; a name too long is cut.
+private struct SafariProfileMarkerPreview: View {
+    @MainActor private var samples: [BrowserChromeModel] { [
+        BrowserChromeModel(profileName: "Northwind US", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000001")!,
+                           exit: .proxy(endpoint: "us-nyc.proxy.example:1080", countryCode: "US"), avatar: ProfileAvatarStyle(color: 0)),
+        BrowserChromeModel(profileName: "Магазин 3", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000002")!,
+                           exit: .proxy(endpoint: "de-ber.proxy.example:1080", countryCode: "DE"), avatar: ProfileAvatarStyle(color: 6, letters: "М3")),
+        BrowserChromeModel(profileName: "Ads — Brand", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+                           exit: .proxy(endpoint: "proxy.example:8080", countryCode: nil), avatar: ProfileAvatarStyle(color: 1)),
+        BrowserChromeModel(profileName: "A profile whose name is far too long for a toolbar", profileID: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+                           exit: .direct, avatar: ProfileAvatarStyle(color: 3)),
+    ] }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            row(ground: Color(hex: 0xECECEE))
+            row(ground: Color(hex: 0x29292B))
+        }
+    }
+
+    /// A strip the height of Safari's toolbar, the chips where its trailing end has them.
+    @MainActor private func row(ground: Color) -> some View {
+        HStack(spacing: 14) {
+            Spacer(minLength: 0)
+            ForEach(samples, id: \.profileID) { model in
+                SafariProfileMarkerView(model: model)
+            }
+        }
+        .padding(.trailing, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 52)
+        .background(ground)
+    }
+}
+
+extension UISnapshots {
+    /// The Warm-up section in each of its states, "New warm-up", a run's report and a list of one's
+    /// own: drawn from sample values, as the screen is a screen of values (`WarmUpScreen`).
+    fileprivate static func warmUp(into folder: URL) async -> Int {
+        var problems = 0
+        func id(_ byte: UInt8) -> UUID { UUID(uuid: (0x57, byte, 0x5E, 0x17, 0, byte, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, byte)) }
+        let now = Date()
+        func visit(_ site: String, _ arrival: WarmUpSiteVisit.Arrival = .address, _ outcome: WarmUpSiteVisit.Outcome = .visited,
+                   pages: Int = 2, seconds: Double = 84, cookies: Int = 0, detail: String? = nil) -> WarmUpSiteVisit {
+            WarmUpSiteVisit(site: site, arrival: arrival, outcome: outcome, pages: pages, seconds: seconds, cookies: cookies, detail: detail)
+        }
+        let germanSites = [visit("google.de", .query, pages: 3, seconds: 100, cookies: 9), visit("idealo.de", .search, pages: 4, seconds: 171, cookies: 31),
+                           visit("otto.de", pages: 3, seconds: 132, cookies: 28), visit("spiegel.de", .search, pages: 3, seconds: 125, cookies: 22),
+                           visit("chefkoch.de", cookies: 19), visit("wetter.de", seconds: 72, cookies: 12), visit("tagesschau.de", .search, cookies: 11),
+                           visit("kleinanzeigen.de", .address, .timedOut, pages: 0, seconds: 30), visit("amazon.de", .search, pages: 3, seconds: 146, cookies: 17),
+                           visit("youtube.com", pages: 1, seconds: 58, cookies: 8), visit("zeit.de", seconds: 69, cookies: 14)]
+        func run(_ ago: TimeInterval, _ result: WarmUpRunResult = .finished, sites: [WarmUpSiteVisit], planned: Int = 18, pages: Int = 41,
+                 visited: Int = 198, other: Int = 14, country: String = "de", scheduled: Bool = false) -> WarmUpRun {
+            WarmUpRun(startedAt: now.addingTimeInterval(-ago - 1_440), endedAt: now.addingTimeInterval(-ago), result: result, scheduled: scheduled,
+                      templates: ["day", "shop"], intensity: .normal, countryCode: country, plannedSites: planned, pages: pages, searches: 3, consents: 5,
+                      cookiesVisited: visited, cookiesOther: other, sites: sites)
+        }
+        let fine = run(600, sites: germanSites)
+        let blocked = run(2_400, sites: [visit("weather.com", cookies: 14), visit("nytimes.com", .search, pages: 3, cookies: 21),
+                                         visit("google.com", .query, .blocked, pages: 0, seconds: 3, detail: "google"),
+                                         visit("walmart.com", .address, .blocked, pages: 0, seconds: 3, detail: "perimeterx"),
+                                         visit("zillow.com", .address, .blocked, pages: 0, seconds: 4, detail: "perimeterx"),
+                                         visit("yelp.com", .address, .blocked, pages: 0, seconds: 3, detail: "datadome"), visit("cnn.com", cookies: 23)],
+                          planned: 16, pages: 23, visited: 58, other: 0, country: "us")
+        let dead = run(3_300, .proxyNotAnswering, sites: [visit("weather.com", seconds: 96, cookies: 7),
+                                                          visit("walmart.com", .address, .failed, pages: 0, seconds: 10),
+                                                          visit("cnn.com", .address, .failed, pages: 0, seconds: 10)],
+                       planned: 18, pages: 2, visited: 7, other: 0, country: "us")
+        var status = WarmUpStatus(phase: .running, visited: 7, total: 20, cookies: 84, secondsRemaining: 540, currentHost: "spiegel.de")
+        status.step = "read"
+        status.siteNumber = 7
+        status.siteCount = 18
+        status.pagesRead = 14
+        status.searchesTyped = 2
+        status.consents = 3
+        status.siteVisits = Array(germanSites.prefix(5))
+        var typing = WarmUpStatus(phase: .running, visited: 2, total: 24, cookies: 19, secondsRemaining: 1_260, currentHost: "google.com")
+        typing.step = "search"
+        let template = WarmUpTemplate(name: "Shops DE", addresses: ["https://zalando.de/", "https://www.mediamarkt.de/", "https://lidl.de/", "https://dm.de/"],
+                                      searches: ["sneaker sale", "drogerie angebote"])
+        let profiles = [
+            WarmUpProfileItem(id: id(1), name: "Northwind", tags: ["ads", "DE"], countryCode: "DE", state: .running(status), history: [run(86_400 * 3, sites: germanSites)]),
+            WarmUpProfileItem(id: id(2), name: "Ads US 11", tags: ["ads"], countryCode: "US", state: .running(typing)),
+            WarmUpProfileItem(id: id(3), name: "Ads US 12", tags: ["ads"], countryCode: "US", state: .waiting(next: true)),
+            WarmUpProfileItem(id: id(4), name: "Berlin Shop 05", tags: ["shop"], countryCode: "DE", state: .waiting(next: false)),
+            WarmUpProfileItem(id: id(5), name: "Marketplace US", tags: ["clients"], countryCode: "US", state: .attention(dead), history: [dead]),
+            WarmUpProfileItem(id: id(6), name: "Ads US 07", tags: ["ads"], countryCode: "US", state: .partly(blocked), history: [blocked]),
+            WarmUpProfileItem(id: id(7), name: "Research", countryCode: "NL", state: .never),
+            WarmUpProfileItem(id: id(8), name: "Atlas", tags: ["clients"], countryCode: "GB", state: .never),
+            WarmUpProfileItem(id: id(9), name: "Berlin Shop 04", tags: ["shop"], countryCode: "DE", state: .warmed(fine, fine.endedAt),
+                              history: [fine, run(86_400 * 3, sites: germanSites, visited: 174), run(86_400 * 6, .stopped, sites: Array(germanSites.prefix(4)), pages: 9, visited: 61, other: 0)],
+                              repeatHours: 24, nextRun: now.addingTimeInterval(18 * 3_600)),
+            WarmUpProfileItem(id: id(10), name: "Personal", countryCode: nil, state: .warmed(nil, now.addingTimeInterval(-86_400))),
+            WarmUpProfileItem(id: id(11), name: "Travel", countryCode: "PT", state: .warmed(nil, now.addingTimeInterval(-86_400 * 9))),
+        ]
+        let queue = WarmUpQueueSummary(done: 5, total: 21, atOnce: 4, secondsLeft: 6_000)
+        let section = CGSize(width: 1208, height: 860)
+        func screen(_ profiles: [WarmUpProfileItem], queue: WarmUpQueueSummary? = nil, tab: WarmUpScreen.Tab = .profiles, selected: UUID? = nil) -> some View {
+            WarmUpScreen(profiles: profiles, queue: queue, templates: [template], tab: tab, selected: selected)
+                .background(Theme.backdrop)
+        }
+        problems += await Shot(name: "warmup-section-live", size: section) { screen(profiles, queue: queue, selected: id(1)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-paused", size: section) {
+            screen(profiles, queue: WarmUpQueueSummary(done: 5, total: 21, paused: true, atOnce: 2, automatic: false))
+        }.capture(into: folder)
+        let after = profiles.filter { !$0.isRunning && !$0.isWaiting }
+        problems += await Shot(name: "warmup-section-warmed", size: section) {
+            screen(after, queue: WarmUpQueueSummary(done: 21, total: 21, atOnce: 4, failed: 2), selected: id(9))
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-dead-proxy", size: section) { screen(after, selected: id(5)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-captcha", size: section) { screen(after, selected: id(6)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-section-narrow", size: CGSize(width: 700, height: 620)) { screen(profiles, queue: queue, selected: id(1)) }.capture(into: folder)
+        problems += await Shot(name: "warmup-templates", size: section) { screen(profiles, tab: .templates) }.capture(into: folder)
+        problems += await Shot(name: "warmup-history", size: section) { screen(profiles, tab: .history) }.capture(into: folder)
+        problems += await Shot(name: "warmup-empty", size: section) {
+            screen(profiles.map { item in
+                var item = item
+                item.state = .never
+                item.history = []
+                return item
+            })
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-one", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: [id(9)], templates: ["day", "shop"]), profiles: profiles, templates: [template], actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-selection", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: after.map(\.id), templates: ["day", "news", "shop"]), profiles: profiles, templates: [template],
+                           actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-new-nothing-chosen", size: CGSize(width: 940, height: 680), titled: false) {
+            WarmUpNewSheet(request: WarmUpNewRequest(profiles: []), profiles: profiles, templates: [template], actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[8], run: fine), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report-captcha", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[5], run: blocked), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-report-dead-proxy", size: CGSize(width: 760, height: 620), titled: false) {
+            WarmUpReportSheet(request: WarmUpReportRequest(profile: profiles[4], run: dead), templates: [template], again: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-own-list", size: CGSize(width: 820, height: 620), titled: false) {
+            WarmUpTemplateEditor(template: template, actions: WarmUpActions())
+        }.capture(into: folder)
+        problems += await Shot(name: "warmup-own-list-new", size: CGSize(width: 820, height: 620), titled: false) {
+            WarmUpTemplateEditor(template: nil, actions: WarmUpActions())
+        }.capture(into: folder)
+        return problems
+    }
+}
+
 private struct Shot {
     let name: String
     let size: CGSize
@@ -1511,6 +1971,7 @@ private struct Shot {
 
     /// Shows the window, lets SwiftUI and AppKit settle, writes `<name>.png` (the whole window,
     /// title bar included) and returns the number of problems (`extra` runs before the window closes).
+    @MainActor
     func capture(into folder: URL, extra: ((NSWindow) async -> Int)? = nil) async -> Int {
         let style: NSWindow.StyleMask = titled
             ? [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
@@ -1666,11 +2127,13 @@ private struct ProfilesPreview: View {
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
     var updateOffer: UpdateOffer?
+    var order: ProfileListOrder = .created
 
     var body: some View {
         ProfilesScreen(rows: rows, isWorking: isWorking, sync: sync, filter: $filter, search: $search, actions: actions,
                        section: .constant(section), proxyCount: proxyCount, proxies: proxies, indexNotice: indexNotice,
-                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), inspectorInfo: inspectorInfo,
+                       keptDeleted: keptDeleted, showsInspector: .constant(showsInspector), order: .constant(order),
+                       inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
                        updateOffer: updateOffer, updatedTo: updatedTo)
@@ -1860,9 +2323,13 @@ private struct BrandSheet: View {
                 }
             }
             HStack(alignment: .center, spacing: 28) {
+                LumenBrandLockup.large
+                LumenBrandLockup.sidebar
+                ForEach([40, 24, 16] as [CGFloat], id: \.self) { size in LumenGlyph(size: size) }
+            }
+            HStack(alignment: .center, spacing: 28) {
                 LumenLockup.large
                 LumenLockup.sidebar
-                ForEach([40, 24, 16] as [CGFloat], id: \.self) { size in LumenGlyph(size: size) }
             }
             VStack(alignment: .leading, spacing: 12) {
                 LumenWordmark(height: 40)

@@ -5,7 +5,7 @@ import WebKit
 
 /// A scenario recorded from what a person does in a profile's window (docs/AUTOMATION.md,
 /// "Recording"): the page's side (`ScenarioRecorderScript`, a world of its own) says each click,
-/// each field's text and each Enter with a selector, and each page that loads; this side hands
+/// each field's text, each choice in a list and each Enter with a selector, and each page that loads; this side hands
 /// them on as they come — to the app's process, through the profile's channel when the window is
 /// in a process of its own — where `ScenarioRecording` makes the scenario's steps of them.
 ///
@@ -106,6 +106,7 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         // whatever the page's side sent.
         let secret = body["secret"] as? Bool == true
         onEvent?(.acted(RecordedStep(kind, selector: body["selector"] as? String, value: secret ? nil : body["value"] as? String,
-                                     secret: secret ? true : nil, replaces: body["replaces"] as? Bool == true ? true : nil)))
+                                     secret: secret ? true : nil, replaces: body["replaces"] as? Bool == true ? true : nil,
+                                     label: secret ? nil : body["label"] as? String)))
     }
 }

@@ -78,12 +78,19 @@ enum MachineConfiguration {
             configuration.networkDevices = [card]
         }
 
-        configuration.pointingDevices = [VZMacTrackpadConfiguration(), VZUSBScreenCoordinatePointingDeviceConfiguration()]
+        // A machine whose state is kept (instant wake) is made of what Apple's framework can save
+        // and bring back: a Mac's own trackpad and keyboard, and neither the USB pointer, nor a
+        // source of random numbers of the framework's, nor sound — a machine with any of them is
+        // refused a saved state (`validateSaveRestoreSupport`). Its macOS has its own randomness;
+        // the pointer is the trackpad's; and it is silent, which the setting says.
+        let keepsState = request.keepsState == true
+        configuration.pointingDevices = keepsState ? [VZMacTrackpadConfiguration()]
+            : [VZMacTrackpadConfiguration(), VZUSBScreenCoordinatePointingDeviceConfiguration()]
         configuration.keyboards = [VZMacKeyboardConfiguration()]
-        configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
+        if !keepsState { configuration.entropyDevices = [VZVirtioEntropyDeviceConfiguration()] }
         if extras.balloon { configuration.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()] }
 
-        if extras.sound {
+        if extras.sound && !keepsState {
             // Speakers, as every Mac has: what the guest plays is heard here. A microphone that
             // hears nothing — no source is given to it, so nothing of this Mac's is recorded — as
             // a Mac has one too.
@@ -116,10 +123,33 @@ enum MachineCatalog {
             DispatchQueue.main.async {
                 switch result {
                 case .failure(let error):
+                    // Whatever stopped the question (no connection, a filter, Apple's server) is
+                    // said as Apple not being asked, with what to do; a full disk stays itself.
+                    HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .catalog)
+                case .success(let image):
+                    guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
+                        HelperIO.fail("The macOS Apple offers now cannot run in a virtual machine on this Mac. Update this Mac's macOS and try again.",
+                                      kind: .nothingOffered)
+                    }
+                    HelperIO.emit(VMHelperEvent(kind: .catalog, image: restoreImage(image)))
+                    exit(0)
+                }
+            }
+        }
+    }
+
+    /// A restore image the person already has: loaded as the installer would load it, and said
+    /// as Apple's would be — which macOS, which build, and that it runs on this Mac — or why not.
+    static func inspect(_ path: String?) {
+        guard let path, !path.isEmpty else { HelperIO.fail("The request names no restore image.") }
+        VZMacOSRestoreImage.load(from: URL(fileURLWithPath: path)) { result in
+            DispatchQueue.main.async {
+                switch result {
+                case .failure(let error):
                     HelperIO.fail(error)
                 case .success(let image):
                     guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
-                        HelperIO.fail("The macOS Apple offers now cannot run in a virtual machine on this Mac. Update this Mac's macOS and try again.")
+                        HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.", kind: .notSupportedHere)
                     }
                     HelperIO.emit(VMHelperEvent(kind: .catalog, image: restoreImage(image)))
                     exit(0)
@@ -158,7 +188,9 @@ final class MachineInstaller {
         VZMacOSRestoreImage.load(from: imageURL) { result in
             DispatchQueue.main.async {
                 switch result {
-                case .failure(let error): HelperIO.fail(error)
+                // A downloaded image that does not load is damaged or cut short: said so, with
+                // what to do, whatever error the framework had for it.
+                case .failure(let error): HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .image)
                 case .success(let image): self.install(image, from: imageURL, into: files)
                 }
             }
@@ -167,7 +199,7 @@ final class MachineInstaller {
 
     private func install(_ image: VZMacOSRestoreImage, from imageURL: URL, into files: VMLibrary.MachineFiles) {
         guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
-            HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.")
+            HelperIO.fail("This restore image's macOS cannot run in a virtual machine on this Mac.", kind: .notSupportedHere)
         }
         do {
             try FileManager.default.createDirectory(at: files.directory, withIntermediateDirectories: true)
@@ -204,7 +236,8 @@ final class MachineInstaller {
                 DispatchQueue.main.async {
                     switch result {
                     case .failure(let error):
-                        HelperIO.fail(error)
+                        // The installation did not finish, whatever the framework's code for it.
+                        HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .installation)
                     case .success:
                         HelperIO.emit(VMHelperEvent(kind: .installed, image: MachineCatalog.restoreImage(image)))
                         exit(0)

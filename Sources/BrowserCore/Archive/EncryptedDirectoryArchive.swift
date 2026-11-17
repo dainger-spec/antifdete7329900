@@ -23,6 +23,9 @@ public enum EncryptedDirectoryArchive {
         public var files = 0
         public var bytes: UInt64 = 0
         public var skipped: [String] = []
+        /// From `seal`: the stamp of what the archive read, each entry as it was before it was
+        /// read (`DirectoryStamp`). Nil from anything else, and when an entry could not be looked at.
+        public var stamp: DirectoryStamp?
 
         public init() {}
     }
@@ -46,6 +49,7 @@ public enum EncryptedDirectoryArchive {
             throw CoreError.io("cannot create \(temp.path)")
         }
         var stats = Stats()
+        let stamp = DirectoryStampBuilder()
         do {
             let handle = try FileHandle(forWritingTo: temp)
             defer { try? handle.close() }
@@ -56,7 +60,8 @@ public enum EncryptedDirectoryArchive {
                 guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory), isDirectory.boolValue else {
                     continue
                 }
-                try walk(directory: root.path, archivePath: label, writer: writer, stats: &stats)
+                stamp.add(label, at: root.path)
+                try walk(directory: root.path, archivePath: label, writer: writer, stats: &stats, stamp: stamp)
             }
             try writer.write(Data([Kind.end.rawValue]))
             try writer.finish()
@@ -66,6 +71,7 @@ public enum EncryptedDirectoryArchive {
             throw error
         }
         try SecureFile.replace(archiveURL, with: temp)
+        stats.stamp = stamp.stamp
         return stats
     }
 
@@ -232,14 +238,19 @@ public enum EncryptedDirectoryArchive {
     }
 
     /// An archive to write, after `prefix` (bytes the file starts with), under `key`.
+    /// `writtenWhenEmpty`: written, as an archive with no root, even when no root was routed to it
+    /// — a file that must exist whatever the sources held (a profile's export), and that replaces
+    /// whatever was at `url` before.
     public struct TranscodeDestination {
         public let url: URL
         public let key: SymmetricKey
         public let prefix: Data
-        public init(url: URL, key: SymmetricKey, prefix: Data = Data()) {
+        public let writtenWhenEmpty: Bool
+        public init(url: URL, key: SymmetricKey, prefix: Data = Data(), writtenWhenEmpty: Bool = false) {
             self.url = url
             self.key = key
             self.prefix = prefix
+            self.writtenWhenEmpty = writtenWhenEmpty
         }
     }
 
@@ -250,7 +261,8 @@ public enum EncryptedDirectoryArchive {
     /// `route(source, label)` names the destination (by index) and the new label of each root,
     /// or nil to leave the root out. A destination is written to a temporary file and moved into
     /// place only once every source has authenticated to its end, so a damaged or tampered source
-    /// leaves no destination behind; a destination no root was routed to is not written at all.
+    /// leaves no destination behind; a destination no root was routed to is not written at all,
+    /// unless it asks to be (`writtenWhenEmpty`).
     @discardableResult
     public static func transcode(sources: [TranscodeSource], to destinations: [TranscodeDestination],
                                  route: (_ source: Int, _ label: String) throws -> (destination: Int, label: String)?) throws -> Stats {
@@ -283,8 +295,11 @@ public enum EncryptedDirectoryArchive {
                 }
                 let handle = try FileHandle(forWritingTo: temp)
                 try handle.write(contentsOf: destination.prefix)
-                outputs.append(Output(temp: temp, handle: handle,
-                                      writer: try EncryptedChunkWriter(handle: handle, key: destination.key, chunkSize: defaultChunkSize)))
+                let output = Output(temp: temp, handle: handle,
+                                    writer: try EncryptedChunkWriter(handle: handle, key: destination.key, chunkSize: defaultChunkSize))
+                // Finished and moved into place below even if nothing is routed to it.
+                output.used = destination.writtenWhenEmpty
+                outputs.append(output)
             }
             for (index, source) in sources.enumerated() {
                 let handle = try FileHandle(forReadingFrom: source.url)
@@ -380,7 +395,10 @@ public enum EncryptedDirectoryArchive {
 
     // MARK: Private
 
-    private static func walk(directory: String, archivePath: String, writer: EncryptedChunkWriter, stats: inout Stats) throws {
+    /// `stamp` takes in every entry beneath `directory` (the caller gave it `directory` itself),
+    /// each before anything of it is read here: its attributes, its entries, its bytes.
+    private static func walk(directory: String, archivePath: String, writer: EncryptedChunkWriter, stats: inout Stats,
+                             stamp: DirectoryStampBuilder) throws {
         let fm = FileManager.default
         let attributes = try fm.attributesOfItem(atPath: directory)
         try writeHeader(kind: .directory, path: archivePath, mode: attributes[.posixPermissions] as? Int ?? 0o700, writer: writer)
@@ -390,13 +408,16 @@ public enum EncryptedDirectoryArchive {
             let fullPath = (directory as NSString).appendingPathComponent(name)
             let childPath = archivePath + "/" + name
             do { try validateComponent(name) } catch { stats.skipped.append(childPath); continue }
+            // For the stamp, first: a change made after this — before the size is read below,
+            // while the bytes are read, or later — shows in a stamp taken afterwards.
+            stamp.add(childPath, at: fullPath)
             // attributesOfItem uses lstat(2): symlinks are reported as links, not followed.
             let childAttributes = try fm.attributesOfItem(atPath: fullPath)
             let type = childAttributes[.type] as? FileAttributeType
             let mode = childAttributes[.posixPermissions] as? Int ?? 0o600
             switch type {
             case .typeDirectory?:
-                try walk(directory: fullPath, archivePath: childPath, writer: writer, stats: &stats)
+                try walk(directory: fullPath, archivePath: childPath, writer: writer, stats: &stats, stamp: stamp)
             case .typeRegular?:
                 let expectedSize = (childAttributes[.size] as? NSNumber)?.uint64Value ?? 0
                 try writeHeader(kind: .file, path: childPath, mode: mode, writer: writer)
@@ -452,7 +473,7 @@ public enum EncryptedDirectoryArchive {
         return target
     }
 
-    private static func validateComponent(_ component: String) throws {
+    static func validateComponent(_ component: String) throws {
         guard !component.isEmpty, component != ".", component != "..",
               !component.contains("/"), !component.contains("\0") else {
             throw CoreError.unsafeArchivePath(component)

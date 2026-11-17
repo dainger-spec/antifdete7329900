@@ -116,6 +116,22 @@ final class BrowserTests: LumenUITestCase {
         let again = app.webViews.staticTexts.matching(NSPredicate(format: "label MATCHES %@ AND label != %@", "served: [0-9]+", served)).firstMatch
         XCTAssertTrue(again.waitForExistence(timeout: 20), "reload brought the page again (it said \(served))")
         shot("17 reloaded")
+
+        // A long press on a link (audit 4): the app's own menu — no preview, no Share, no Add to
+        // Reading List, each of which fetches the link outside the session — and its new tab is a tab
+        // of this session.
+        go("\(site)/page/delta")
+        page("Страница delta")
+        app.webViews.links["Дальше"].press(forDuration: 1.5)
+        let newTab = wait(app.buttons["Открыть в новой вкладке"], "the link's menu is the app's own")
+        XCTAssertTrue(app.buttons["Скопировать ссылку"].exists, "the menu copies the link")
+        for system in ["Share…", "Add to Reading List", "Поделиться…", "Добавить в список для чтения"] {
+            XCTAssertFalse(app.buttons[system].exists, "the link's menu has no \(system)")
+        }
+        shot("18 a link's menu")
+        newTab.tap()
+        page("Страница delta-next")
+        XCTAssertEqual(app.buttons["tabsButton"].label, "Вкладки: 2", "the link opened in a new tab of the session")
     }
 
     /// A page moved by a slow finger, back up towards its top, follows the finger: no jump. Asked by

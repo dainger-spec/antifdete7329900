@@ -47,6 +47,15 @@ targets:
         NSAppTransportSecurity:
           NSAllowsArbitraryLoadsInWebContent: true
         ITSAppUsesNonExemptEncryption: false
+        # The sync's vault key is kept behind the person's presence (SyncKeychain): without this purpose
+        # iOS does not let the app use Face ID, and asks for the passcode instead. Its English is in
+        # Lumen/Resources/en.lproj/InfoPlist.strings.
+        NSFaceIDUsageDescription: "Face ID открывает ключ хранилища Lumen для Mac, сохранённый на этом iPhone."
+        # A site's file field offers «Снять фото или видео» (WebKit's own upload menu, which the app
+        # cannot replace): iOS ends an app that opens the camera without these purposes. Pages
+        # themselves never get the camera or microphone (BrowserTab refuses getUserMedia).
+        NSCameraUsageDescription: "Камера снимает фото или видео, которое вы загружаете на сайт через поле выбора файла."
+        NSMicrophoneUsageDescription: "Микрофон записывает звук видео, которое вы снимаете для загрузки на сайт."
         # The Lumen account (the server's CONTRACT.md §2, §7.2): the server, the site, and the keys
         # documents of rights are trusted by — key id -> base64 of the raw Ed25519 public key. The
         # key here is the production server's (v2026.11.10.3, the lead, 10 November 2026) — the same

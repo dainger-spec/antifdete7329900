@@ -32,6 +32,19 @@ public enum ProfileTags {
     public static func contains(_ tags: [String], _ tag: String) -> Bool {
         tags.contains { $0.caseInsensitiveCompare(tag) == .orderedSame }
     }
+
+    /// `tags` after a change made to several profiles at once (`ProfileRepository.changeTags`):
+    /// those of `removing` taken away, whatever their case, then those of `adding` the profile
+    /// does not have yet put after its own, in the order given. A profile holds at most
+    /// `maximumCount`: the tags there was no room for are `notAdded` — said, never dropped
+    /// silently. A tag in both lists is added: the removal is of what the profile had.
+    public static func changing(_ tags: [String], adding: [String], removing: [String]) -> (tags: [String], notAdded: [String]) {
+        let dropped = normalized(removing)
+        let kept = normalized(tags).filter { !contains(dropped, $0) }
+        let wanted = normalized(adding).filter { !contains(kept, $0) }
+        let room = max(0, maximumCount - kept.count)
+        return (kept + wanted.prefix(room), Array(wanted.dropFirst(room)))
+    }
 }
 
 /// How a profile's glyph looks (`ProfileConfiguration.avatar`): a colour of the app's palette,
@@ -68,5 +81,32 @@ public struct ProfileAvatarStyle: Codable, Equatable, Sendable {
         let letters = shown.isEmpty ? nil : String(shown)
         guard color != nil || letters != nil else { return nil }
         return ProfileAvatarStyle(color: color, letters: letters)
+    }
+}
+
+/// The title of a profile's browser window: the profile's name before the page's, so that the
+/// window is told from another profile's wherever the system lists windows by title — the Window
+/// menu, the Dock's menu, Mission Control — in a window of ours and in Safari's alike.
+public enum ProfileWindowTitle {
+    /// The profile's name as a title begins with it.
+    public static func mark(of profile: String) -> String {
+        "[\(profile.trimmingCharacters(in: .whitespacesAndNewlines))]"
+    }
+
+    /// `title` with the profile's name before it; one that has it already stays as it is, and a
+    /// window with no page yet is titled with the name alone. A profile without a name marks nothing.
+    public static func marked(_ title: String, profile: String) -> String {
+        guard !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return title }
+        let name = mark(of: profile)
+        if title == name || title.hasPrefix(name + " ") { return title }
+        return title.isEmpty ? name : name + " " + title
+    }
+
+    /// `title` without the profile's name before it, as the browser gave it.
+    public static func unmarked(_ title: String, profile: String) -> String {
+        guard !profile.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return title }
+        let name = mark(of: profile)
+        if title == name { return "" }
+        return title.hasPrefix(name + " ") ? String(title.dropFirst(name.count + 1)) : title
     }
 }

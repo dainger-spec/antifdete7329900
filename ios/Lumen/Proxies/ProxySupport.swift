@@ -308,7 +308,12 @@ final class SOCKSUDPProbe: @unchecked Sendable {
             try await send(tcp, Data([5, 1, withAuth ? 2 : 0]))
             let method = try await receive(tcp, 2)
             if method[1] == 2 {
+                // RFC 1929 carries at most 255 bytes of each; a longer login or password (a provider's
+                // session token) made UInt8(count) trap and the app end during the check. Such a
+                // proxy's UDP is left unchecked; its pages go through the relay, which sends the
+                // first 255 bytes as every SOCKS5 client does.
                 let user = Data(entry.username.utf8), pass = Data((password ?? "").utf8)
+                guard user.count <= 255, pass.count <= 255 else { return .unchecked }
                 try await send(tcp, Data([1, UInt8(user.count)]) + user + Data([UInt8(pass.count)]) + pass)
                 guard try await receive(tcp, 2)[1] == 0 else { return .unchecked }
             } else if method[1] != 0 {

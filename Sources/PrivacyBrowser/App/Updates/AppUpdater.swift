@@ -123,9 +123,18 @@ final class AppUpdater: ObservableObject, Updater {
     }
 
     /// How often automatic checks ask, and how long after a launch the first one waits (the
-    /// update scenarios of `UpdateSelfTest` shorten the wait).
-    static let interval: TimeInterval = 6 * 3600
-    static var firstCheckDelay: TimeInterval = 60
+    /// update scenarios of `UpdateSelfTest` shorten the wait). Every hour: it was six, and a Lumen
+    /// left open found a release up to six hours after it was out (the owner, 14 November, after
+    /// publishing 0.1.13). The appcast is a few kilobytes.
+    static let interval: TimeInterval = 3600
+    /// The first check comes a few seconds after a launch: it was a minute, and a person who quit
+    /// and opened Lumen to get a release looked before the minute was out (the owner, 16 November).
+    static var firstCheckDelay: TimeInterval = 3
+    /// The person comes back to Lumen — brings it to the front, or the Mac wakes — and the last
+    /// check is older than this: the feed is asked again then, a few seconds on, rather than at
+    /// the next hour. Zero: never (the update scenarios, which count the feed's requests).
+    static var checkWhenBackAfter: TimeInterval = 15 * 60
+    static let checkWhenBackDelay: TimeInterval = 5
     /// The appcast is small; anything larger is not one.
     static let feedLimit = 1 << 20
 
@@ -155,6 +164,8 @@ final class AppUpdater: ObservableObject, Updater {
     private let defaults: UserDefaults
     private let isPreview: Bool
     private var timer: Timer?
+    /// Coming back to the app, and the Mac waking (`start`): kept for the app's life.
+    private var backObservers: [NSObjectProtocol] = []
     private var helperStarted = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "Updates")
 
@@ -187,8 +198,37 @@ final class AppUpdater: ObservableObject, Updater {
     /// release that came out meanwhile is found when the person starts the app, not hours later
     /// (0.1.2 → 0.1.3 and 0.1.3 → 0.1.4 were never offered: the app had asked less than the
     /// interval before it was started again, and waited out the rest). Then every `interval`.
+    ///
+    /// And when the person comes back to Lumen — it is brought to the front, or the Mac wakes —
+    /// with the last check older than `checkWhenBackAfter`, it asks a few seconds on: a release
+    /// out while the app sat in the background is offered when the person looks, not at the next
+    /// hour.
     func start() {
         scheduleChecks(launching: true)
+        guard backObservers.isEmpty, !isPreview, Self.checkWhenBackAfter > 0 else { return }
+        backObservers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cameBack() }
+        })
+        backObservers.append(NotificationCenter.default.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.cameBack() }
+        })
+    }
+
+    /// The person is back: a check now (a few seconds on, for the network after a wake) if the
+    /// last one is older than `checkWhenBackAfter` and none is under way; the hourly timer then
+    /// counts from it.
+    private func cameBack() {
+        guard automaticChecks, !isPreview, Self.checkWhenBackAfter > 0 else { return }
+        let last = defaults.object(forKey: Key.lastCheck) as? Date ?? .distantPast
+        guard Date().timeIntervalSince(last) >= Self.checkWhenBackAfter else { return }
+        timer?.invalidate()
+        timer = Timer.scheduledTimer(withTimeInterval: Self.checkWhenBackDelay, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.automaticChecks else { return }
+                await self.checkNow()
+                self.scheduleChecks()
+            }
+        }
     }
 
     private func scheduleChecks(launching: Bool = false) {
@@ -249,7 +289,7 @@ final class AppUpdater: ObservableObject, Updater {
     func download() async {
         guard !isPreview, case .available(let item) = state else { return }
         state = .downloading(item)
-        let name = "PrivacyBrowser-\(item.build).zip"
+        let name = Self.archivePrefix + "\(item.build).zip"
         do {
             try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
@@ -258,6 +298,9 @@ final class AppUpdater: ObservableObject, Updater {
             try? FileManager.default.removeItem(at: archive)
             try FileManager.default.moveItem(at: downloaded, to: archive)
             try UpdateVerifier.checkArchive(at: archive, item: item, keys: configuration.keys)
+            // The release this one replaces, downloaded and never installed (a newer one came out
+            // before a quit), goes: it stayed in the folder for good.
+            if let previous = loadStaged(), previous.archive != name { removeArchive(named: previous.archive) }
             saveStaged(Staged(item: item, archive: name))
             state = .ready(item)
             log.notice("Update downloaded and checked; it installs at the next quit that seals every profile")
@@ -359,9 +402,32 @@ final class AppUpdater: ObservableObject, Updater {
         defaults.removeObject(forKey: Key.staged)
     }
 
+    /// What every release's archive is called in the staging folder, before its build.
+    private static let archivePrefix = "PrivacyBrowser-"
+
+    /// Removes a release's archive from the staging folder — never the one a request hands the
+    /// installer, nor anything named as no archive of ours is.
+    private func removeArchive(named name: String) {
+        guard name.hasPrefix(Self.archivePrefix), name.hasSuffix(".zip"), !name.contains("/") else { return }
+        if let request = try? UpdateRequest.read(from: configuration.staging), request.archive == name { return }
+        try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
+    }
+
+    /// At launch: the archives of releases downloaded and never installed that nothing names any
+    /// more — each replaced by a newer one before a quit, by a build that did not remove it — go.
+    /// The one staged stays (`restoreStaged` decides about it), and the one a request names.
+    private func removeSupersededArchives() {
+        let staged = loadStaged()?.archive
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: configuration.staging.path)) ?? [] where name != staged {
+            removeArchive(named: name)
+        }
+    }
+
     /// At launch: a staged release still newer than this build, with its archive, is ready again;
-    /// anything else staged (installed meanwhile, or gone) is removed.
+    /// anything else staged (installed meanwhile, or gone) is removed, and so is every archive
+    /// nothing names (`removeSupersededArchives`).
     private func restoreStaged() {
+        defer { removeSupersededArchives() }
         guard let staged = loadStaged() else { return }
         if let build = BuildVersion(staged.item.build), build > configuration.build, archiveExists(staged) {
             state = .ready(staged.item)

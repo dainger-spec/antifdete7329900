@@ -47,12 +47,20 @@ checks.
 `/pb-warmup/<name>?run=<id>` are pages for the session warm-up robot: each sets a cookie
 (`pbwarm_<name>=<id>`), is tall enough to scroll, and has, in view, one plain link to the same site
 (`Next article` → `/pb-warmup/<name>-next`) next to links the robot must never follow (sign-out,
-another site, a file, a new window); a page-world listener reports the page's scroll, wheel and
+another site, a file, a new window); its first click anywhere opens a window by script, as a
+popunder does (`/pb-warmup/popunder`, which the warm-up refuses); a page-world listener reports the page's scroll, wheel and
 click events and whether they were trusted (`/pb-warmup/event/<id>/<name>-<what>`), and what its page
 world can see of a robot (`window.webkit`, globals named like one) at its first scroll and click; a
 jump to a fragment `#x` is rewritten to `#/x`, as a single-page app's router might. `<name>` `alert`
-shows an alert; `broken` closes the connection without an answer (a page that does not load). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
+shows an alert; `broken` closes the connection without an answer (a page that does not load). `captcha` bears a challenge page's title, `signin` has a
+password field in view, `banner` a consent tool's banner whose accept button reports its click
+(`banner-consent`). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
+
+`/pb-download/<name>?bytes=<n>` is a file to save, `n` bytes of a known pattern (0, 1, … 255, 0, …):
+sent as an attachment of a type a browser could show (`Content-Disposition: attachment`), or with
+`attachment=0` as `application/octet-stream` with no such header — the two ways a response is a
+download (the self-test's downloads in Safari's window).
 
 `/pb-automation/form` and `/pb-automation/two` are the pages of the automation commands' checks
 (`automation_page`): elements to click, type into, wait for and scroll to, and a recorder of every
@@ -71,6 +79,12 @@ about:blank frame) to `/pb-leak/report`. Through this proxy every one of those r
 address or a DNS query with the run id in it, which a capture on the machine sees.
 `/pb-leak/log.json?run=<id>` lists, for that run, every request this proxy answered (its via,
 target and path), the page's reports, and the connections the canary listener took for the run.
+
+`/pb-leak/usertop-go?run=<id>` sends its own window to `http://127.0.0.1:1@usertop-<id>.leak.example.com/pb-leak/usertop?run=<id>`:
+its own site, at an address whose user name and password ("127.0.0.1", "1") read as this Mac, as
+a site could send itself to pass for a page on this Mac (the fourth audit, NET-1). That page loads
+the canary's port on 127.0.0.1, localhost and ::1 by fetches, an image and a WebSocket, and reports
+what each did (and the address it sees itself at) to `/pb-leak/report`, as `userTop`.
 
 `/pb-leak/secure?run=<id>` is the leak page's secure-context half, for a profile to open at
 `http://127.0.0.1:<port>/` (loopback is a secure context): WebTransport and WebRTC exist only
@@ -127,8 +141,6 @@ import tempfile
 import threading
 import time
 from urllib.parse import parse_qs
-
-import cores_page  # scripts/cores_page.py: the processor-count page, served at /pb-cores
 
 
 def read_until_blank_line(conn: socket.socket) -> bytes:
@@ -233,8 +245,9 @@ def header(request: str, name: str) -> str:
 def automation_page(name: str) -> bytes:
     """Pages for the automation commands' checks (SelfTest's `automationCommands`): `form` has a
     button, a field, an element that appears after 0.8 s, one that goes after 0.8 s, five items,
-    a button far below (reached by scrolling), and a link to `two`; both record every input event
-    with what a detector reads of it (`window.__take()`)."""
+    a button far below (reached by scrolling), a link to `two`, a list to choose in (`#choice`,
+    whose choice `#chosen` repeats) and a link that goes to `two` 0.4 s after its click (`#slow`);
+    both record every input event with what a detector reads of it (`window.__take()`)."""
     recorder = (
         "<script>(() => { const log = [];"
         " const types = ['pointerover','pointermove','pointerdown','pointerup','mousedown','mouseup','click','dblclick',"
@@ -258,6 +271,12 @@ def automation_page(name: str) -> bytes:
             "<p><input id=field autocomplete=off data-kind=text></p>"
             "<p id=gone>Going away</p>" + items +
             "<p><a id=next href=\"/pb-automation/two\">To page two</a></p>"
+            # A list to choose in, and a link whose page comes 0.4 s after the click (a form that a
+            # script checks first): the click has returned before anything begins to load.
+            "<p><select id=choice onchange=\"document.getElementById('chosen').textContent = this.value\">"
+            "<option value=\"\">Choose</option><option value=a>Alpha</option><option value=b>Beta</option></select>"
+            " <span id=chosen>none</span></p>"
+            "<p><a id=slow href=\"#\" onclick=\"setTimeout(() => { location.href = '/pb-automation/two'; }, 400); return false;\">Slow link</a></p>"
             "<div style=\"height:2400px\"></div>"
             "<button id=far onclick=\"this.textContent='far clicked'\">Far button</button>"
             "<script>setTimeout(() => { const p = document.createElement('p'); p.id = 'late'; p.textContent = 'Late';"
@@ -300,6 +319,9 @@ def warmup_page(name: str, run: str) -> bytes:
         " addEventListener('wheel', (e) => report(e.isTrusted ? 'wheel' : 'wheel-untrusted'), {passive: true});"
         " document.addEventListener('click', (e) => { report(e.isTrusted ? 'click' : 'click-untrusted');"
         " try { localStorage.setItem('pbwarm-click', name + '-' + probe()); } catch (e) {} }, true);"
+        # A popunder: the first click anywhere opens a window by script, which the click lets through.
+        " let opened = false; document.addEventListener('click', () => { if (opened) return; opened = true;"
+        " try { window.open('/pb-warmup/popunder?run=' + encodeURIComponent(run), '_blank'); } catch (e) {} }, true);"
         # A router that writes `#part` as `#/part`, at load and when the fragment changes, as a
         # single-page app's might: WebKit 27 makes a new document of a jump to a fragment of a page
         # loaded through a proxy, where WebKit 26 keeps the page and sends it a hashchange.
@@ -309,8 +331,20 @@ def warmup_page(name: str, run: str) -> bytes:
         + (" setTimeout(() => alert('PB warm-up'), 300);" if name == "alert" else "")
         + " })();</script>"
     )
-    return (f'<!doctype html><html><head><meta charset="utf-8"><title>PB warm-up {esc(name)}</title></head>'
-            f'<body style="font: 15px -apple-system; margin: 20px">{links}{filler}{script}</body></html>').encode()
+    # Pages the robot must tell from pages to read: a check ("captcha": the title a challenge page
+    # bears), a sign-in page ("signin": a password field in view) — both left at once, nothing
+    # pressed, no link followed — and a page with a consent tool's banner ("banner"), whose accept
+    # button reports its click (`banner-consent`) and takes the banner away.
+    title = "Just a moment..." if name == "captcha" else f"PB warm-up {esc(name)}"
+    extra = ""
+    if name == "signin":
+        extra = '<form><p><input type="text" name="user"> <input type="password" name="pass"> <button type="button">Sign in</button></p></form>'
+    if name == "banner":
+        extra = ('<div id="onetrust-banner-sdk" style="position:fixed;left:0;right:0;bottom:0;padding:16px;background:#eee">We use cookies. '
+                 '<button id="onetrust-accept-btn-handler" onclick="fetch(\'/pb-warmup/event/\' + encodeURIComponent(\'' + esc(run) + '\') + '
+                 '\'/banner-consent\'); this.parentElement.remove()">Accept all</button></div>')
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title></head>'
+            f'<body style="font: 15px -apple-system; margin: 20px">{extra}{links}{filler}{script}</body></html>').encode()
 
 
 def leak_page(run: str) -> bytes:
@@ -442,6 +476,16 @@ def leak_page(run: str) -> bytes:
     return page.replace("RUN", run).replace("CANARY", str(CANARY_PORT)).encode()
 
 
+# What tells the engine's own Date from a function put in its place: the order of its own
+# properties, and whose function is on top of the error thrown for a wrong receiver. The same
+# text in the secure page and in a worker loaded from a URL, which no page script reaches.
+DATE_SHAPE = r"""function dateShape() {
+  let top = 'no error';
+  try { Date.prototype.getHours.call({}); } catch (e) { top = String(e && e.stack || '').split('\n')[0].split('@')[0]; }
+  return [Object.getOwnPropertyNames(Date).join(), top].join('|');
+}"""
+
+
 def leak_secure_page(run: str, connect: bool = True) -> bytes:
     """The leak page's secure-context half (see the module docstring). `connect=0` in the query
     (a profile without a proxy, the self-test's control) only says what exists: it tries no
@@ -475,6 +519,16 @@ def leak_secure_page(run: str, connect: bool = True) -> bytes:
       worker.onmessage = (e) => resolve(e.data);
     });
   } catch (e) { result.workerTZ = 'error ' + e; }
+  // The page's Date beside such a worker's: the engine's own in both, where the engine is in the
+  // profile's zone itself.
+  DATE_SHAPE
+  try { result.date = dateShape(); } catch (e) { result.date = 'error ' + e; }
+  try {
+    result.workerDate = await fromWorker((resolve) => {
+      const worker = new Worker('/pb-leak/dateworker.js?run=RUN');
+      worker.onmessage = (e) => resolve(e.data);
+    });
+  } catch (e) { result.workerDate = 'error ' + e; }
   try {
     await navigator.serviceWorker.register('/pb-leak/sw.js?run=RUN&connect=' + (CONNECT ? '1' : '0'));
     result.sw = 'registered';
@@ -488,7 +542,7 @@ def leak_secure_page(run: str, connect: bool = True) -> bytes:
   await fetch('/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
 })();
 </script></body></html>"""
-    return page.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
+    return page.replace("DATE_SHAPE", DATE_SHAPE).replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
 
 
 def leak_service_worker(run: str, connect: bool = True) -> bytes:
@@ -508,6 +562,46 @@ def leak_service_worker(run: str, connect: bool = True) -> bytes:
 });
 """
     return script.replace("RUN", run).replace("CONNECT", "true" if connect else "false").encode()
+
+
+def leak_user_top_go(run: str) -> bytes:
+    """A page that sends its own window to its site at an address with user info that reads as
+    this Mac (see the module docstring)."""
+    page = r"""<!doctype html><html><head><title>PB user-info top RUN</title></head><body>to the user-info address RUN<script>
+location.href = 'http://127.0.0.1:1@usertop-RUN.leak.example.com/pb-leak/usertop?run=RUN';
+</script></body></html>"""
+    return page.replace("RUN", run).encode()
+
+
+def leak_user_top(run: str) -> bytes:
+    """The page at that address: its loads of this Mac, and what each did. A fetch the rule list
+    refuses is rejected; one it lets by reaches the canary, which answers it. Reported to its own
+    site without the user info, which fetch() refuses an address to carry."""
+    page = r"""<!doctype html><html><head><title>PB user-info top page RUN</title></head><body>usertop RUN<script>
+(async () => {
+  const result = { userTop: true, run: 'RUN', href: String(location.href), url: String(document.URL), errors: {} };
+  const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+  const attempt = async (name, body) => {
+    try { result[name] = await Promise.race([body(), timeout(4000, 'timeout')]); }
+    catch (e) { result[name] = 'rejected'; result.errors[name] = String((e && e.message) || e); }
+  };
+  const noCors = (url) => async () => { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return 'resolved'; };
+  await attempt('userTop4', noCors('http://127.0.0.1:CANARY/pb-leak/utop4?run=RUN'));
+  await attempt('userTopName', noCors('http://localhost:CANARY/pb-leak/utophost?run=RUN'));
+  await attempt('userTop6', noCors('http://[::1]:CANARY/pb-leak/utop6?run=RUN'));
+  await attempt('userTopImage', () => new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve('loaded'); image.onerror = () => resolve('error');
+    image.src = 'http://127.0.0.1:CANARY/pb-leak/utopimg?run=RUN';
+  }));
+  await attempt('userTopWS', () => new Promise((resolve) => {
+    const ws = new WebSocket('ws://127.0.0.1:CANARY/pb-leak/utopws?run=RUN');
+    ws.onopen = () => resolve('open'); ws.onerror = () => resolve('error');
+  }));
+  await fetch('http://usertop-RUN.leak.example.com/pb-leak/report?run=RUN&data=' + encodeURIComponent(JSON.stringify(result)), { cache: 'no-store' });
+})();
+</script></body></html>"""
+    return page.replace("RUN", run).replace("CANARY", str(CANARY_PORT)).encode()
 
 
 def leak_frame(run: str) -> bytes:
@@ -596,20 +690,14 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = leak_service_worker(safe_run(query), parse_qs(query).get("connect", ["1"])[0] != "0"), "text/javascript"
     elif plain_path == "/pb-leak/tzworker.js":
         body, content_type = b"postMessage(Intl.DateTimeFormat().resolvedOptions().timeZone)", "text/javascript"
+    elif plain_path == "/pb-leak/dateworker.js":
+        body, content_type = (DATE_SHAPE + "\npostMessage(dateShape())").encode(), "text/javascript"
     elif plain_path == "/pb-leak/frame":
         body, content_type = leak_frame(safe_run(query)), "text/html; charset=utf-8"
-    elif plain_path == "/pb-cores":
-        # What a page is told of the processor count, everywhere it can ask (scripts/cores_page.py);
-        # the other-origin frame on "localhost" of the same port, the report into the leak log.
-        port = header(request, "Host").rpartition(":")[2] or "80"
-        body = cores_page.page_html(f"/pb-leak/report?run={safe_run(query)}&data=", f"http://localhost:{port}", "/pb-cores").encode()
-        content_type = "text/html; charset=utf-8"
-    elif plain_path == "/pb-cores/worker.js":
-        body, content_type = cores_page.URL_WORKER_SCRIPT.encode(), "text/javascript"
-    elif plain_path == "/pb-cores/sw.js":
-        body, content_type = cores_page.SW_SCRIPT.encode(), "text/javascript"
-    elif plain_path == "/pb-cores/frame":
-        body, content_type = ("<!doctype html><script>" + cores_page.FRAME_SCRIPT + "</script>").encode(), "text/html; charset=utf-8"
+    elif plain_path == "/pb-leak/usertop-go":
+        body, content_type = leak_user_top_go(safe_run(query)), "text/html; charset=utf-8"
+    elif plain_path == "/pb-leak/usertop":
+        body, content_type = leak_user_top(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-rtc":
         params = parse_qs(query)
         body, content_type = rtc_page(safe_run(query), params.get("mode", ["presence"])[0]), "text/html; charset=utf-8"
@@ -675,6 +763,22 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path.startswith("/pb-download/"):
+        # A file to save (SelfTest's downloads in Safari's window): `bytes` of a known pattern, sent
+        # either to be saved — an attachment of a type a browser could show — or, with
+        # `attachment=0`, as a type no browser shows, without a word about saving it.
+        params = parse_qs(query)
+        name = "".join(c for c in plain_path[len("/pb-download/"):] if c.isalnum() or c in "._-")[:80] or "file.bin"
+        try:
+            size = max(0, min(int(params.get("bytes", ["4096"])[0]), 4_000_000))
+        except ValueError:
+            size = 4096
+        body = (bytes(range(256)) * (size // 256 + 1))[:size]
+        if params.get("attachment", ["1"])[0] != "0":
+            content_type = "text/plain"
+            extra_headers = f'Content-Disposition: attachment; filename="{name}"\r\n'
+        else:
+            content_type = "application/octet-stream"
     elif plain_path == "/pb-app-banner":
         # A Smart App Banner, as youtube.com has one. Measured (CI 564): Safari's chrome brings no
         # banner tracker up for it; the tracker that ended profiles belongs to the app-link banner
@@ -895,6 +999,27 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   document.body.appendChild(frame);
   const presence = { rtc: typeof RTCPeerConnection, rtcFrame: typeof frame.contentWindow.RTCPeerConnection,
                      dataChannel: typeof RTCDataChannel };
+  if ('MODE' !== 'call' && typeof RTCPeerConnection === 'function') {
+    // Present: what it gathers for the page's own STUN server, named after the run. WebRTC that
+    // must not connect (present, connecting nowhere) gathers nothing and asks that server nothing:
+    // a DNS question for it, or a packet to it, is a leak the capture sees.
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun-RUN.leak.example.com:3478' }] });
+    const seen = [];
+    pc.onicecandidate = (event) => { if (event.candidate && event.candidate.candidate) seen.push(event.candidate.candidate); };
+    pc.createDataChannel('presence');
+    try {
+      await pc.setLocalDescription(await pc.createOffer());
+      await Promise.race([new Promise((resolve) => {
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+        if (pc.iceGatheringState === 'complete') resolve();
+      }), timeout(8000)]);
+    } catch (e) { presence.gatherError = String(e); }
+    presence.gathered = seen.length;
+    presence.gathering = pc.iceGatheringState;
+    presence.policySeen = pc.getConfiguration().iceTransportPolicy;
+    presence.offer = !!(pc.localDescription && pc.localDescription.sdp && pc.localDescription.sdp.includes('m=application'));
+    pc.close();
+  }
   if ('MODE' !== 'call' || typeof RTCPeerConnection !== 'function') { await report(presence); return; }
   // The page's own STUN server, named after the run: through the relay it is never asked, and a
   // DNS question for it, or a packet to it, is a leak the capture sees.

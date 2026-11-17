@@ -46,6 +46,9 @@ final class SessionRuntime: ObservableObject {
     private let store: LumenStore
     /// The session's relay: its data store's only proxy (Relay.swift).
     private let relay: Relay
+    /// The page shim's family channel for this runtime's pages (`PageSettings.ShimConfig.channel`):
+    /// one for every tab and window of the session, made anew at each launch, read by no page.
+    private let channel: String
     @Published private(set) var tabs: [BrowserTab] = []
     @Published private(set) var selectedID: UUID?
     @Published private(set) var history: [HistoryEntry]
@@ -61,18 +64,25 @@ final class SessionRuntime: ObservableObject {
         self.proxy = proxy
         self.locked = locked
         self.store = store
-        // The session's own store; the planted fault puts every session on WebKit's default one.
-        dataStore = Faults.isActive(.sharedStore) ? .default() : WKWebsiteDataStore(forIdentifier: session.storeID)
+        // The session's own store — the one the sync's run wrote its cookies into, if it did
+        // (SyncedDataStores); the planted fault puts every session on WebKit's default one.
+        dataStore = Faults.isActive(.sharedStore) ? .default()
+            : SyncedDataStores.existing(session.storeID) ?? WKWebsiteDataStore(forIdentifier: session.storeID)
         relay = Relay(label: session.id.uuidString)
-        history = store.loadHistory(of: session.id)
+        channel = PageSettings.makeChannel()
+        // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
+        let saved = store.loadHistory(of: session.id)
+        let kept = HistoryRetention.kept(saved)
+        history = kept
+        if kept.count != saved.count { store.saveHistory(kept, of: session.id) }
         // Until the relay listens, a proxy nothing answers on, without fallback: nothing leaves.
         dataStore.proxyConfigurations = Relay.configurations(port: nil, password: relay.password)
         applyProxy()
         applyPageSettings()
-        let saved = store.loadTabs(of: session.id)
-        tabs = saved.tabs.map { makeTab($0, configuration: nil) }
+        let savedTabs = store.loadTabs(of: session.id)
+        tabs = savedTabs.tabs.map { makeTab($0, configuration: nil) }
         if tabs.isEmpty { tabs = [makeTab(TabRecord(), configuration: nil)] }
-        selectedID = saved.selected.flatMap { id in tabs.contains { $0.id == id } ? id : nil } ?? tabs.last?.id
+        selectedID = savedTabs.selected.flatMap { id in tabs.contains { $0.id == id } ? id : nil } ?? tabs.last?.id
         relay.onPort = { [weak self] port in
             guard let runtime = self else { return }
             Task { @MainActor in runtime.relayListens(on: port) }
@@ -122,10 +132,15 @@ final class SessionRuntime: ObservableObject {
             configuration.webExtensionController = controller
         }
         configuration.allowsInlineMediaPlayback = true
+        // No Safe Browsing lookups, as on the Mac by default (its ProfileConfiguration.safeBrowsingEnabled):
+        // the system makes them outside the session's data store, so from the iPhone's own address
+        // whatever the session's proxy. Off in every session: a proxy given to a session later
+        // reaches its open tabs, whose configuration stays the one they were made with.
+        configuration.preferences.isFraudulentWebsiteWarningEnabled = false
         // Safari's application name after WebKit's own string: the User-Agent Safari on this iPhone sends.
         configuration.applicationNameForUserAgent = UserAgentPreset.safariApplicationName(systemVersion: UIDevice.current.systemVersion)
         if proxy != nil, let rules = ContentRules.proxied { configuration.userContentController.add(rules) }
-        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy))
+        configuration.userContentController.addUserScript(PageSettings.script(for: session, proxy: proxy, channel: channel))
         return configuration
     }
 
@@ -143,8 +158,8 @@ final class SessionRuntime: ObservableObject {
         applyPageSettings()
     }
 
-    /// What the pages were last given (User-Agent and shim configuration); a change reaches every
-    /// open tab, from its next page on.
+    /// What the pages were last given (User-Agent and shim configuration, without the runtime's
+    /// channel, which never changes); a change reaches every open tab, from its next page on.
     private var appliedPage: String?
 
     private func applyPageSettings() {
@@ -154,7 +169,7 @@ final class SessionRuntime: ObservableObject {
         let first = appliedPage == nil
         appliedPage = key
         guard !first else { return }   // the tabs were built with these already
-        let script = PageSettings.script(for: session, proxy: proxy)
+        let script = PageSettings.script(for: session, proxy: proxy, channel: channel)
         for tab in tabs {
             let controller = tab.webView.configuration.userContentController
             controller.removeAllUserScripts()
@@ -208,11 +223,13 @@ final class SessionRuntime: ObservableObject {
 
     // MARK: Tabs
 
-    func newTab() {
+    /// A new tab, shown; with `url`, loading it (a link's "Open in New Tab").
+    func newTab(opening url: URL? = nil) {
         guard !Faults.isActive(.newTabNotOpened) else { return }
         let tab = makeTab(TabRecord(), configuration: nil)
         tabs.append(tab)
         selectedID = tab.id
+        if let url { tab.load(url) }
         saveTabs()
     }
 
@@ -253,6 +270,7 @@ final class SessionRuntime: ObservableObject {
 
     // MARK: History
 
+    /// Kept for `HistoryRetention`'s time and count; written off the main thread (`LumenStore.saveHistory`).
     func recordVisit(url: URL, title: String) {
         guard !Faults.isActive(.historyNotRecorded), let scheme = url.scheme, scheme == "http" || scheme == "https" else { return }
         if let last = history.last, last.url == url.absoluteString {
@@ -260,6 +278,7 @@ final class SessionRuntime: ObservableObject {
             history[history.count - 1].title = title.isEmpty ? last.title : title
         } else {
             history.append(HistoryEntry(url: url.absoluteString, title: title))
+            history = HistoryRetention.kept(history)
         }
         store.saveHistory(history, of: sessionID)
     }

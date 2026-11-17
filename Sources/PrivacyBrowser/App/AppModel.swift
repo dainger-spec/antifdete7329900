@@ -13,6 +13,9 @@ final class AppModel: ObservableObject {
     @Published private(set) var profiles: [ProfileSummary] = []
     /// What the Profiles list shows about each profile beyond its summary (see `ProfileDetails`).
     @Published private(set) var details: [UUID: ProfileDetails] = [:]
+    /// Each profile's details, kept while its stored settings are the same file
+    /// (`profileDetails(of:)`); emptied at Lock.
+    private let profileDetailsCache = ProfileSettingsCache<ProfileDetails>()
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
@@ -41,9 +44,32 @@ final class AppModel: ObservableObject {
     /// `scenarios.bin` did not open at this unlock (a newer version's, or unreadable): `scenarios`
     /// is empty, not the library — no schedule is dropped for a scenario that is not in it.
     private var scenariosUnread = false
+    /// Each profile's own values for scenarios (`scenario-values.bin`): what `params` holds in a
+    /// run on it that the editor or a schedule starts. This Mac's.
+    @Published private(set) var scenarioValues = ScenarioValues()
+    /// Runs of a scenario on many profiles, and the runs kept (`ScenarioBatchCoordinator`).
+    private(set) lazy var scenarioBatches = ScenarioBatchCoordinator(model: self)
+    /// Counted up to show the Scenarios section of the Profiles window (File › Scenarios).
+    @Published var scenariosRequested = 0
+    /// The profiles selected in the list for a scenario: chosen already in the next run's chooser.
+    @Published var scenarioProfilesRequest: [UUID] = []
+    /// `scenario-values.bin` is a newer version's, or does not open: shown as none, and nothing
+    /// is written over it.
+    @Published private(set) var scenarioValuesRefused = false
     /// The last unlock attempt failed with a wrong password (the unlock screen then shows which
     /// vault it tried).
     @Published private(set) var unlockFailed = false
+    /// Unlocking with Touch ID, as the lock screen and Settings › Security show it (AppModel+TouchID).
+    @Published var touchID = TouchIDStatus()
+    /// What the lock screen says of Touch ID under the password's field: why it did not unlock, or
+    /// why it was turned off.
+    @Published var touchIDNote: String?
+    /// Touch ID did not recognise the finger on this showing of the lock screen: the master
+    /// password is typed, and Touch ID is offered again after it.
+    @Published var touchIDSpent = false
+    /// Touch ID was asked by itself once in this run of the app (at its start): after a Lock it is a
+    /// button, not a question that follows the click.
+    var touchIDAskedAtStart = false
     /// Where `startOver()` moved the previous vault (shown on the setup screen).
     @Published private(set) var movedAsideVaultPath: String?
     /// The vault's profile index not read as it should be, or profile folders on disk that it does
@@ -89,6 +115,9 @@ final class AppModel: ObservableObject {
     @Published var helpTopic: HelpTopic = .start
     /// A section of Settings to show when it next appears (the command palette).
     @Published var settingsSection: SettingsSection?
+    /// With `settingsSection`, set before it: a setting on that page to mark, by its row's title
+    /// (the palette's "Settings: Page zoom").
+    var settingsReveal: String?
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
@@ -172,6 +201,13 @@ final class AppModel: ObservableObject {
     /// The master password's screen is the first this run shows (no sign-in before it): the
     /// interface's language is offered on it (`FirstLaunchLanguagePicker`).
     let setupIsFirstScreen: Bool
+    /// The launch screen of this start of the app (WelcomeSplash), decided as the app starts
+    /// (`WelcomeLaunch`); nil: none — not the app a person opened, the setting off, or the app's own
+    /// restart.
+    let welcome: WelcomeLaunch.Decision?
+    /// The launch screen has opened into the window (or its window was closed): it is not shown
+    /// again while this process runs, whatever window opens.
+    @Published var welcomeFinished = false
     private var licenseObservation: AnyCancellable?
 
     init() {
@@ -183,8 +219,17 @@ final class AppModel: ObservableObject {
         AppEnvironment.removeStandaloneSafariHome(in: root)
         // Partial plaintext an unseal that did not finish left (R8): no profile runs yet.
         AppEnvironment.removeUnsealLeftovers(vault: root)
+        // A camera's video an earlier run left in plaintext for its preview (`CameraPreview`).
+        CameraPreview.removeLeftovers()
+        // A vault brought back from its sync location (`VaultRestore`) whose move into place was cut
+        // short — the app quit, the power lost — is put in place now, before a vault is looked for:
+        // this Mac then has that vault, whole, and never half of one.
+        if VaultRestore.finishInterruptedMoves(in: root) {
+            Logger(subsystem: "PrivacyBrowser", category: "Vault").notice("A restored vault's move into place, cut short before, was finished")
+        }
         let firstPhase: Phase = MasterVault.exists(in: root) ? .locked : .setup
         phase = firstPhase
+        welcome = WelcomeLaunch.decide(firstLaunch: firstPhase == .setup)
         license = LicenseModel(root: root)
         let accountDone = !license.isConfigured || license.record.isSignedIn
         accountStepDone = accountDone
@@ -215,6 +260,7 @@ final class AppModel: ObservableObject {
             ExpiryNotifications.update(at: .stateChanged, license: self.license)
         }
         license.start()
+        refreshTouchID()
     }
 
     /// The unlocked vault, for the license's key (`AccountKeyVault`); nil while locked.
@@ -260,6 +306,22 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A vault brought back from its sync location (`RestoreModel`, `VaultRestore`) and moved into
+    /// place is this Mac's vault: it opens, as an unlock opens one — with the place it came from as
+    /// this Mac's sync target, kept in its `settings.bin`. `warning`: its master password is the
+    /// account's password or the license's key (§10.1, later) — said, as after an unlock.
+    func adoptRestoredVault(_ vault: UnlockedVault, warning: String?) {
+        guard phase == .setup, !isWorking else { return }
+        do {
+            try didUnlock(vault)
+            masterPasswordWarning = warning
+            masterPasswordRefusal = nil
+            license.forgetComparisons()
+        } catch {
+            showError(errorText(error))
+        }
+    }
+
     /// §10.1: a new master password that is the account's password (typed in this session) or the
     /// license's key (typed in this session, or kept in the vault) — the refusal's text; nil when it
     /// is neither. Compared in memory only; nothing is derived from either, nothing is tried with them.
@@ -300,6 +362,8 @@ final class AppModel: ObservableObject {
                 throw CoreError.wrongPassword
             }
             try self.didUnlock(vault)
+            // With Touch ID unlocking on: the days start anew from this typing of the password.
+            self.touchIDAfterPasswordUnlock(vault)
             // §10.1 later: the account's password and the master password typed in one session are
             // the same — the data is already locked with it, so it is said, not refused; the same for
             // the license's key (typed in this session, or kept in the vault just opened).
@@ -310,6 +374,41 @@ final class AppModel: ObservableObject {
             }
             self.license.forgetComparisons()
         }
+    }
+
+    /// Unlock with Touch ID (`TouchIDUnlock`, `BiometricUnlock`): offered while the rule allows it —
+    /// turned on, the master password typed since this Mac started and within the days, the same
+    /// master password and fingerprints. Touch ID's own question is asked; the key it releases
+    /// opens the vault exactly as the password does. Cancelled, it changes nothing: the password's
+    /// field is right there. Not recognised, or the key gone: said under the field, and the
+    /// password is typed.
+    func unlockWithTouchID() async {
+        guard phase == .locked, !isWorking else { return }
+        refreshTouchID()
+        guard touchID.unlocksNow, !touchIDSpent, let record = BiometricUnlock.load(in: root) else { return }
+        touchIDNote = nil
+        unlockFailed = false
+        isWorking = true
+        defer { isWorking = false }
+        switch await TouchIDUnlock.open(root: root, record: record, reason: L("touchid.reason"), cancelTitle: L("touchid.prompt.cancel")) {
+        case .vault(let vault):
+            do {
+                try didUnlock(vault)
+                license.forgetComparisons()
+            } catch {
+                showError(errorText(error))
+            }
+        case .cancelled:
+            break
+        case .keyGone, .recordRefused:
+            // What was kept no longer opens the vault: it goes, and is turned on again in Settings.
+            forgetTouchID()
+            touchIDNote = L("touchid.ended.fingerprintsChanged")
+        case .failed:
+            touchIDSpent = true
+            touchIDNote = L("touchid.failed")
+        }
+        refreshTouchID()
     }
 
     /// For the unlock screen after a wrong password: when the vault this build opens was created
@@ -350,6 +449,8 @@ final class AppModel: ObservableObject {
             movedAsideVaultPath = Self.displayPath(backup)
             unlockFailed = false
             phase = .setup
+            // The vault set aside is not opened with Touch ID if it is put back: its key goes.
+            forgetTouchID()
         } catch {
             showError(errorText(error))
         }
@@ -463,8 +564,9 @@ final class AppModel: ObservableObject {
         self.manager = manager
         // Queued and scheduled warm-ups start the way the warm-up screen does (startWarmUp).
         let warmUps = WarmUpCoordinator(manager: manager, repository: repository) { [weak self] plan, id in
-            await self?.startWarmUp(plan, for: id) ?? false
+            await self?.startWarmUp(plan, for: id, quiet: true) ?? false
         }
+        warmUps.userTemplates = { [weak self] in self?.warmUpTemplates() ?? [] }
         warmUps.forwardChanges(to: self)
         // The profile's journal says it was warmed, and the inspector of a profile it has shown
         // reads its last warm-up again.
@@ -500,9 +602,12 @@ final class AppModel: ObservableObject {
             isBusy: { [weak self] id in
                 guard let self else { return true }
                 return self.isBusy(id) || self.scenarioRun(of: id)?.isRunning == true || self.recordingProfile == id
+                    || self.automationServer?.webDriver?.hasSession(id) == true
             },
             // A schedule's run: in front, but without the keyboard or the app's activation.
-            runScenario: { [weak self] scenario, id in await self?.runScenario(scenario, on: id, inBackground: true) ?? false },
+            runScenario: { [weak self] scenario, id, run in
+                await self?.runScenario(scenario, on: id, inBackground: true, runID: run) ?? false
+            },
             warmUp: { [weak self] id in
                 guard let self, let warmUps = self.warmUps else { return false }
                 warmUps.enqueue([id]) { self.warmUpPlan(for: $0).plan }
@@ -540,6 +645,10 @@ final class AppModel: ObservableObject {
         manager.refusesFailingProxy = { [weak self] in self?.settings.proxyFailure == .doNotLaunch }
         loadTagColors(from: vault)
         loadScenarios(from: vault)
+        loadScenarioValues(from: vault)
+        scenarioBatches.load(from: vault)
+        // How a run ended, for the schedule that started it (its row says so).
+        manager.onScenarioEnded = { [weak self] _, run, outcome in self?.scheduleCoordinator?.runEnded(run, outcome) }
         manager.onProxyLaunchRefused = { [weak self] id, proxy, diagnosis in
             self?.reportProxyProblem(of: id, proxy: proxy, diagnosis: diagnosis, notStarted: true)
         }
@@ -632,13 +741,17 @@ final class AppModel: ObservableObject {
         automationServer?.stop()
         automationServer = nil
         automationState = .stopped
-        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
+        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again,
+        // nor a run on many profiles start its next (it would change a proxy's IP for a launch
+        // that cannot happen, and write the profile down as one that did not start).
         warmUps?.shutDown()
         warmUps = nil
+        scenarioBatches.shutDown()
         scheduleCoordinator?.shutDown()
         scheduleCoordinator = nil
         scenarioSchedules = ScenarioSchedules()
         recordingProfile = nil
+        recordingScenario = nil
         recorded = ScenarioRecording()
         await manager?.shutDown()
         // The machines' macOS is shut down, as a Mac's is, before the vault that holds their
@@ -653,14 +766,27 @@ final class AppModel: ObservableObject {
         scenarios = ScenarioLibrary()
         scenariosRefused = false
         scenariosUnread = false
+        scenarioValues = ScenarioValues()
+        scenarioValuesRefused = false
+        scenarioBatches.reset()
+        scenarioProfilesRequest = []
         managerObservation = nil
         manager = nil
         repository = nil
         profiles = []
         details = [:]
+        profileDetailsCache.removeAll()
         deviceSettings = DeviceSettings()
         deviceSettingsUnreadable = false
         phase = MasterVault.exists(in: root) ? .locked : .setup
+        // The lock screen offers Touch ID as the rule stands now (AppModel+TouchID).
+        touchIDSpent = false
+        touchIDNote = nil
+        refreshTouchID()
+        // The camera preview's window, its copy of a video in plaintext and its decoded image go
+        // with the vault (the editor went with the profiles).
+        CameraPreviewWindowController.closeIfOpen()
+        CameraPreview.discardAll()
     }
 
     /// Changes the master password: the vault's key is wrapped anew under it, and nothing else
@@ -668,13 +794,15 @@ final class AppModel: ObservableObject {
     /// the data saved after the change included (docs/ARCHITECTURE.md, Changing the master
     /// password). With sync set up, the new header goes to the sync location right away, so that a
     /// new device joins with the new password and not the old; out of reach, it goes at the next
-    /// sync, and the person is told so.
-    func changePassword(current: String, new: String) async {
-        guard let repository else { return }
+    /// sync, and the person is told so. True when the password was changed, whatever was said
+    /// after: the sheet closes on it, not on there being no message.
+    @discardableResult
+    func changePassword(current: String, new: String) async -> Bool {
+        guard let repository else { return false }
         // §10.1: the new master password is held to the rule a first one is.
         if let refusal = refusalOfMasterPassword(new) {
             masterPasswordRefusal = refusal
-            return
+            return false
         }
         masterPasswordRefusal = nil
         let vault = repository.vault
@@ -689,11 +817,16 @@ final class AppModel: ObservableObject {
             }.value
             changed = true
         }
+        // A new master password ends unlocking with Touch ID: it is turned on again with the new one.
+        if changed { forgetTouchID() }
         if changed, let target { await publishPasswordChange(target, repository: repository) }
+        return changed
     }
 
     private func passwordRevisionThere(_ target: DeviceSettings.SyncTarget?, repository: ProfileRepository) async -> Int? {
         guard let target, !isSyncing else { return nil }
+        // Through the account, as a sync: after a renewal of this run (CONTRACT §16.1).
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -708,6 +841,7 @@ final class AppModel: ObservableObject {
     /// The header of a change of the master password made here, to the sync location (header only:
     /// no profile's files, so not held back by running profiles).
     private func publishPasswordChange(_ target: DeviceSettings.SyncTarget, repository: ProfileRepository) async {
+        if target == .account { _ = await license.renewForSync() }
         var folder: URL?
         defer { folder?.stopAccessingSecurityScopedResource() }
         do {
@@ -735,15 +869,25 @@ final class AppModel: ObservableObject {
         updateIndexNotice()
         let kept = repository?.keptDeletedProfiles() ?? []
         if kept != keptDeletedProfiles { keptDeletedProfiles = kept }
+        details = profileDetails(of: profiles)
+    }
+
+    /// The details of `profiles` (`ProfileDetails`), each profile's settings read only when they
+    /// changed since they were last read (`ProfileSettingsCache`: the same `config.bin` file is not
+    /// decrypted and decoded again). `refresh` runs on the main thread after every launch, stop,
+    /// edit and save, and read every profile's settings each time — a camera's image or video
+    /// inside them included. Settings that do not read give no details, as before. `profiles`: the
+    /// whole list (the details of a profile not in it are let go).
+    func profileDetails(of profiles: [ProfileSummary]) -> [UUID: ProfileDetails] {
+        guard let repository else { return [:] }
         var details: [UUID: ProfileDetails] = [:]
-        if let repository {
-            for profile in profiles {
-                if let configuration = try? repository.loadConfiguration(profile.id) {
-                    details[profile.id] = ProfileDetails(configuration)
-                }
+        for profile in profiles {
+            if let found = try? profileDetailsCache.value(of: profile.id, in: repository, { ProfileDetails($0) }) {
+                details[profile.id] = found
             }
         }
-        self.details = details
+        profileDetailsCache.keep(only: Set(profiles.map(\.id)))
+        return details
     }
 
     /// The new profile's id.
@@ -773,6 +917,8 @@ final class AppModel: ObservableObject {
     func duplicateProfile(_ id: UUID, count: Int, proxies: CopyProxies) -> (made: [UUID], problem: String?) {
         guard let repository else { return ([], nil) }
         var made: [UUID] = []
+        // The list is read again once, at the end: it was before each copy, and every profile's
+        // settings with it, in one call on the main thread.
         defer { if !made.isEmpty { refresh() } }
         do {
             try refuseWhileTheIndexIsUnreadable(repository)
@@ -793,9 +939,8 @@ final class AppModel: ObservableObject {
                 chosen = picked.map(\.proxy)
             }
             for (name, proxy) in zip(names, chosen) {
-                // The plan's limit counts the profiles made so far.
-                if !made.isEmpty { refresh() }
-                if let refusal = license.refusalToCreate() { return (made, refusal.text) }
+                // The plan's limit counts the profiles made so far: those listed, and the copies.
+                if let refusal = license.refusalToCreate(adding: made.count) { return (made, refusal.text) }
                 let summary = try repository.create(name: name, configuration: ProfileClone.configuration(from: original, proxy: proxy))
                 made.append(summary.id)
                 recordInJournal(.copied, detail: originalName, for: summary.id)
@@ -893,7 +1038,8 @@ final class AppModel: ObservableObject {
         // The settings this edit is of. Settings that cannot be read stop the save (R1): the form
         // was opened without them, and saved, the profile would start without its proxy.
         let stored = try repository.loadConfiguration(id)
-        let saved = configuration.savingEdit(over: stored)
+        // Another proxy: the location its check found in the editor, not the old proxy's.
+        let saved = configuration.savingEditorEdit(over: stored)
         try repository.saveConfiguration(saved, for: id)
         if saved.proxy != stored.proxy {
             let entry = saved.proxy.flatMap { proxyList?.list.entry(for: $0) }
@@ -948,8 +1094,9 @@ final class AppModel: ObservableObject {
     /// The Profiles window's Delete, once the person confirmed it (one profile, or each of several):
     /// the only caller of the one path that deletes a profile's data.
     func deleteProfile(_ id: UUID) async {
-        await perform { try await self.manager?.deleteBecauseThePersonAsked(id) }
+        await perform(for: id) { try await self.manager?.deleteBecauseThePersonAsked(id) }
         refresh()
+        forgetScenarioValues(ofDeleted: id)
     }
 
     func launch(_ id: UUID, openingWindow: Bool = true) async {
@@ -957,7 +1104,7 @@ final class AppModel: ObservableObject {
         while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
         await changeIPBeforeLaunch(id)
         let wasRunning = isRunning(id)
-        await perform { try await self.manager?.launch(id, openingWindow: openingWindow) }
+        await perform(for: id) { try await self.manager?.launch(id, openingWindow: openingWindow) }
         if !wasRunning, isRunning(id) { recordInJournal(.launched, for: id) }
         refresh()
     }
@@ -1054,7 +1201,7 @@ final class AppModel: ObservableObject {
     }
 
     func stop(_ id: UUID) async {
-        await perform { try await self.manager?.stop(id) }
+        await perform(for: id) { try await self.manager?.stop(id) }
     }
 
     func isRunning(_ id: UUID) -> Bool { manager?.runningProfileIDs.contains(id) ?? false }
@@ -1112,7 +1259,10 @@ final class AppModel: ObservableObject {
 
     /// Remembers `plan` for the profile and starts it, launching the profile first when it is
     /// stopped. False when it did not start (the launch failed, and said why).
-    func startWarmUp(_ plan: WarmUpPlan, for id: UUID) async -> Bool {
+    ///
+    /// `quiet`: a run of the queue — what goes wrong is kept in the profile's warm-up history and
+    /// shown in the Warm-up section, among the others, not in an alert for each profile.
+    func startWarmUp(_ plan: WarmUpPlan, for id: UUID, quiet: Bool = false) async -> Bool {
         guard let repository, let manager else { return false }
         // The person's traffic setting, whoever started the run.
         var plan = plan
@@ -1120,22 +1270,84 @@ final class AppModel: ObservableObject {
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {
-            showError(error.localizedDescription)
+            if !quiet { showError(error.localizedDescription) }
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
         // A profile that is not running is started for the warm-up alone: no window of its own
         // appears, the robot browses in one the user never sees, and when the run ends the profile
         // stops and seals again. This is what "warm up without a window in my face" means.
-        if !manager.isRunning(id) { await launch(id, openingWindow: false) }
+        if !manager.isRunning(id) {
+            if quiet {
+                while isSyncing { try? await Task.sleep(nanoseconds: 100_000_000) }
+                await changeIPBeforeLaunch(id)
+                try? await manager.launch(id, openingWindow: false)
+                if isRunning(id) { recordInJournal(.launched, for: id) }
+                refresh()
+            } else {
+                await launch(id, openingWindow: false)
+            }
+        }
         // The manager of this unlock: a Lock while the profile started ends it.
         guard let current = self.manager, current === manager, current.isRunning(id) else { return false }
         guard current.startWarmUp(id, plan: plan) else {
             let name = profiles.first { $0.id == id }?.name ?? ""
-            showError(String(format: L("warmup.error.notStarted"), name))
+            if !quiet { showError(String(format: L("warmup.error.notStarted"), name)) }
             return false
         }
         return true
+    }
+
+    // MARK: Warm-up templates of the person's own
+
+    /// The person's own lists (`warmup-templates.bin`); none when the vault's cannot be read.
+    func warmUpTemplates() -> [WarmUpTemplate] {
+        guard let vault = repository?.vault else { return [] }
+        return (try? WarmUpTemplates.load(from: vault))?.templates ?? []
+    }
+
+    /// Keeps a list (new, or in place of the one with its id or its name); false when it could not
+    /// be kept — said.
+    @discardableResult
+    func saveWarmUpTemplate(_ template: WarmUpTemplate) -> Bool {
+        guard let vault = repository?.vault else { return false }
+        do {
+            var stored = try WarmUpTemplates.load(from: vault)
+            guard stored.save(template) else {
+                showError(String(format: L("warmup.templates.full"), WarmUpTemplates.maximumCount))
+                return false
+            }
+            try stored.save(to: vault)
+            objectWillChange.send()
+            return true
+        } catch {
+            showError(error.localizedDescription)
+            return false
+        }
+    }
+
+    func deleteWarmUpTemplate(_ id: UUID) {
+        guard let vault = repository?.vault else { return }
+        do {
+            var stored = try WarmUpTemplates.load(from: vault)
+            stored.remove(id)
+            try stored.save(to: vault)
+            objectWillChange.send()
+        } catch {
+            showError(error.localizedDescription)
+        }
+    }
+
+    /// Puts profiles into the warm-up queue with a choice of templates: each gets a plan of its own,
+    /// for the country its proxy exits in. The choice is kept as each profile's plan when its turn
+    /// comes (`startWarmUp`).
+    func warmUp(_ ids: [UUID], with choice: WarmUpChoice) {
+        guard let warmUps else { return }
+        let templates = warmUpTemplates()
+        let details = self.details
+        warmUps.enqueue(ids) { id in
+            choice.plan(countryCode: details[id]?.exitCountryCode, templates: templates) ?? WarmUpPlan()
+        }
     }
 
     /// Stops the profile's warm-up; the profile keeps running.
@@ -1170,6 +1382,11 @@ final class AppModel: ObservableObject {
     var syncTarget: DeviceSettings.SyncTarget? { deviceSettings.syncTarget }
     var lastSyncStatus: DeviceSettings.SyncStatus? { deviceSettings.lastSync }
 
+    /// The open vault's ID — the one its header and the sync location name it by. Shown where this
+    /// Mac syncs to a server of one's own, which lists no vaults: a Mac without a vault is asked
+    /// for it to bring this one back (`RestoreModel.chooseServer`). Not a secret.
+    var syncVaultID: UUID? { repository?.vault.vaultID }
+
     /// LOCAL-ONLY transport: a folder (NAS, external disk). Stored as a security-scoped
     /// bookmark so the App Sandbox grants access again after relaunch.
     func setSyncFolder(_ folder: URL) {
@@ -1198,6 +1415,25 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// Sync through the Lumen account (`AccountSync`): the account server, with this Mac's device token;
+    /// nothing to type. Offered while this Mac is signed in (`accountSyncOffered`).
+    func setSyncThroughAccount() {
+        guard accountSyncOffered else { return }
+        do {
+            try updateDeviceSettings { $0.syncTarget = .account }
+            // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
+            refresh()
+        } catch {
+            showError(errorText(error))
+        }
+    }
+
+    /// "Lumen account" is offered among the places to sync to: this Mac is signed in to an account
+    /// (`AccountSync.isOffered`).
+    var accountSyncOffered: Bool {
+        license.isConfigured && AccountSync.isOffered(signedIn: license.record.isSignedIn, entitlement: license.state?.entitlement)
+    }
+
     func clearSyncTarget() {
         do {
             try updateDeviceSettings { $0.syncTarget = nil }
@@ -1215,6 +1451,11 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account, a device the server holds back is not asked again before its time (§16.1).
+        if target == .account, let held = deviceSettings.lastSync?.heldUntil, held > Date() {
+            showError(AccountSyncText.onHold(held))
+            return
+        }
         isWorking = true
         defer { isWorking = false }
         isSyncing = true
@@ -1225,13 +1466,24 @@ final class AppModel: ObservableObject {
             showError(L("sync.error.profilesRunning"))
             return
         }
+        // Through the account: after a renewal of this run reached the server, this Mac still signed
+        // in (CONTRACT §16.1); `syncTransport` refuses before.
+        if target == .account { _ = await license.renewForSync() }
         var scopedFolder: URL?
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
-        let status: DeviceSettings.SyncStatus
+        var status: DeviceSettings.SyncStatus?
         do {
             let (transport, folder) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             scopedFolder = folder
-            let report = try await SyncEngine(repository: repository, transport: transport).sync()
+            let report: SyncReport
+            do {
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            } catch {
+                // The server's data changed under the run (§16.2): nothing more was written, and the
+                // next run starts over from the list — this one, at once, once. Nothing is said.
+                guard (error as? SyncServerRefusal)?.isGenerationChanged == true else { throw error }
+                report = try await SyncEngine(repository: repository, transport: transport).sync()
+            }
             if report.pulled.contains("labels") { loadTagColors(from: repository.vault) }
             // A profile deleted on another device: nothing of it is deleted here. Its folder stays
             // for the person to bring back or remove (R3); WebKit's store of it outside the vault —
@@ -1247,14 +1499,71 @@ final class AppModel: ObservableObject {
             for id in report.settingsVersionsToReview {
                 showError(String(format: L("sync.versions.review"), name(id), repository.keptSettings(for: id).count))
             }
+            // Objects the server refused for the plan's space or their size wait; the rest synced (§16.1).
+            if !report.deferredOverQuota.isEmpty { showError(L("sync.account.overQuota")) }
+            if !report.deferredTooLarge.isEmpty {
+                Logger(subsystem: "PrivacyBrowser", category: "Sync")
+                    .notice("Sync: \(report.deferredTooLarge.count, privacy: .public) object(s) larger than the server takes, deferred")
+                for text in Self.tooLargeTexts(report, name: name) { showError(text) }
+            }
             status = DeviceSettings.SyncStatus(report: report)
         } catch {
-            let message = errorText(error)
-            status = DeviceSettings.SyncStatus(error: message)
-            showError(String(format: L("sync.error.failed"), message))
+            status = await syncFailure(error, target: target)
         }
-        try? updateDeviceSettings { $0.lastSync = status }
+        if let status { try? updateDeviceSettings { $0.lastSync = status } }
         refresh()
+    }
+
+    /// What is said of the objects the server refused for their size (`SyncReport.tooLargeByProfile`):
+    /// the profiles whose settings wait, by name, and why — the camera's image and video are kept in
+    /// them (the editor keeps the two under `CameraSubstitution.maxMediaBytes` now; a profile saved
+    /// before may hold more), and what to do; any other file of a profile, by its name; and anything
+    /// else (the index, the tags' colours) as before.
+    static func tooLargeTexts(_ report: SyncReport, name: (UUID) -> String) -> [String] {
+        let byProfile = report.tooLargeByProfile
+        var texts: [String] = []
+        let settings = byProfile.filter { $0.files.contains("config.bin") }.map { String(format: L("sync.tooLarge.name"), name($0.profileID)) }
+        if !settings.isEmpty {
+            var listed = settings.prefix(5).joined(separator: ", ")
+            if settings.count > 5 { listed += " " + String(format: L("sync.tooLarge.more"), settings.count - 5) }
+            texts.append(String(format: L("sync.tooLarge.settings"), listed, CameraSubstitution.maxMediaBytes / (1024 * 1024)))
+        }
+        for entry in byProfile {
+            let others = entry.files.filter { $0 != "config.bin" }
+            if !others.isEmpty { texts.append(String(format: L("sync.tooLarge.files"), others.joined(separator: ", "), name(entry.profileID))) }
+        }
+        if byProfile.reduce(0, { $0 + $1.files.count }) < report.deferredTooLarge.count { texts.append(L("sync.account.tooLarge")) }
+        return texts
+    }
+
+    /// A sync that failed: said, and its status to keep (nil: nothing to say or keep). Through the
+    /// account the server's refusals are states, each in its own words (CONTRACT §16.1); nothing on this
+    /// Mac is changed by any of them.
+    private func syncFailure(_ error: Error, target: DeviceSettings.SyncTarget) async -> DeviceSettings.SyncStatus? {
+        guard target == .account else {
+            let message = errorText(error)
+            showError(String(format: L("sync.error.failed"), message))
+            return DeviceSettings.SyncStatus(error: message)
+        }
+        let outcome = AccountSync.outcome(of: error)
+        switch outcome {
+        case .generationChanged:
+            // Twice in a row: the next sync starts over (§16.2, 7) — not a failure to show.
+            return nil
+        case .unauthorized:
+            // The token is no longer the server's: the renewal says why — `device_revoked` signs this
+            // Mac out (§9.4), and the status says so.
+            _ = await license.renewForSync(again: true)
+        case .onHold(let until):
+            let text = AccountSyncText.onHold(until)
+            showError(text)
+            return DeviceSettings.SyncStatus(error: text, heldUntil: until)
+        default:
+            break
+        }
+        let message = AccountSyncText.text(outcome, error: error, signedIn: license.record.isSignedIn)
+        showError(String(format: L("sync.error.failed"), message))
+        return DeviceSettings.SyncStatus(error: message)
     }
 
     // MARK: Scenarios
@@ -1314,14 +1623,78 @@ final class AppModel: ObservableObject {
     /// Runs `scenario` on profile `id`, starting the profile first when it is not running. False
     /// when the plan has no automation, the profile did not start, or a run of it is going.
     /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
-    /// doing (`SafariChromeHost.openScenarioPage`).
-    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false) async -> Bool {
+    /// doing (`SafariChromeHost.openScenarioPage`). The run's `params` are the profile's own
+    /// values (`scenarioValues`) that the scenario's text names — none it reads otherwise: the same
+    /// scenario on another profile has that one's.
+    func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false, runID: UUID = UUID()) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
         // in. With the profile's as well there were two, one of them empty (the owner, 10 November).
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
-        return manager.runScenario(id, name: scenario.name, source: scenario.source, inBackground: inBackground)
+        return manager.runScenario(id, name: scenario.name, source: scenario.source,
+                                   parametersJSON: scenarioValues.parametersJSON(for: id, readBy: scenario.source), runID: runID,
+                                   inBackground: inBackground)
+    }
+
+    // MARK: A profile's values for scenarios
+
+    /// `scenario-values.bin` as it is. One that does not open is kept and said once; a save moves
+    /// it aside as `scenario-values.bin.unreadable`, never over it. A newer version's is said, and
+    /// nothing is written over it.
+    private func loadScenarioValues(from vault: UnlockedVault) {
+        do {
+            scenarioValues = try ScenarioValues.load(from: vault)
+            scenarioValuesRefused = false
+        } catch {
+            scenarioValues = ScenarioValues()
+            if case CoreError.newerFormat = error {
+                scenarioValuesRefused = true
+                showError(errorText(error))
+            } else {
+                Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                    .error("scenario-values.bin could not be read: \(error.logKind, privacy: .public); kept, moved aside at the next save")
+                showError(L("scenarios.values.unreadable"))
+            }
+        }
+    }
+
+    /// Puts `values` in place of profile `id`'s own. False when they were not written.
+    @discardableResult
+    func saveScenarioValues(_ values: [ScenarioValues.Value], for id: UUID) -> Bool {
+        guard let repository else { return false }
+        guard !scenarioValuesRefused else {
+            showError(L("scenarios.values.newer"))
+            return false
+        }
+        var next = scenarioValues
+        next.set(values, for: id)
+        guard next != scenarioValues else { return true }
+        do {
+            try next.save(to: repository.vault)
+            scenarioValues = next
+            return true
+        } catch {
+            showError(errorText(error))
+            return false
+        }
+    }
+
+    /// A profile the person deleted takes its values with it: a password kept for a profile that
+    /// is gone is of no use to anyone but a thief. Only when the list was read and says the
+    /// profile is gone (a deletion that failed keeps them).
+    private func forgetScenarioValues(ofDeleted id: UUID) {
+        guard let repository, repository.indexState == .read, !profiles.contains(where: { $0.id == id }),
+              !scenarioValuesRefused, !scenarioValues.values(of: id).isEmpty else { return }
+        var next = scenarioValues
+        next.set([], for: id)
+        do {
+            try next.save(to: repository.vault)
+            scenarioValues = next
+        } catch {
+            Logger(subsystem: "PrivacyBrowser", category: "Vault")
+                .error("scenario-values.bin could not be written: \(error.logKind, privacy: .public)")
+        }
     }
 
     func stopScenario(on id: UUID) {
@@ -1333,11 +1706,14 @@ final class AppModel: ObservableObject {
     /// The profile a scenario is being recorded in, and what has been recorded so far.
     @Published private(set) var recordingProfile: UUID?
     @Published private(set) var recorded = ScenarioRecording()
+    /// The scenario the recording is for: its steps go there when it ends, whichever scenario the
+    /// editor shows by then — its window may have been closed and opened again meanwhile.
+    @Published private(set) var recordingScenario: UUID?
 
-    /// Begins recording what the person does in profile `id`'s window, starting the profile first
-    /// when it is not running. False when the plan has no automation, a recording is going
-    /// already, or the profile did not start.
-    func startRecording(on id: UUID) async -> Bool {
+    /// Begins recording what the person does in profile `id`'s window, for `scenario`, starting
+    /// the profile first when it is not running. False when the plan has no automation, a
+    /// recording is going already, or the profile did not start.
+    func startRecording(on id: UUID, for scenario: UUID? = nil) async -> Bool {
         guard license.allowsAutomation, manager != nil, recordingProfile == nil else { return false }
         if !isRunning(id) { await launch(id) }
         guard let manager, isRunning(id) else { return false }
@@ -1352,18 +1728,22 @@ final class AppModel: ObservableObject {
         // Set before the recording begins: a profile run in this process says its first page —
         // the one in front — as it begins, and what is said of another profile is dropped above.
         recordingProfile = id
+        recordingScenario = scenario
         guard manager.startRecording(id) else {
             recordingProfile = nil
+            recordingScenario = nil
             return false
         }
         return true
     }
 
-    /// Ends the recording; its steps are the caller's to put into a scenario.
+    /// Ends the recording; its steps are the caller's to put into the scenario it was for
+    /// (`recordingScenario`, read before this).
     @discardableResult
     func stopRecording() -> [RecordedStep] {
         if let id = recordingProfile { manager?.stopRecording(id) }
         recordingProfile = nil
+        recordingScenario = nil
         return recorded.steps
     }
 
@@ -1453,6 +1833,17 @@ final class AppModel: ObservableObject {
             return (LocalDirectorySyncTransport(directory: folder), scoped)
         case let .server(baseURL, token):
             return (try HTTPSyncTransport(configuration: .init(baseURL: baseURL, vaultID: vaultID, bearerToken: token)), nil)
+        case .account:
+            // The account server and this Mac's device token (CONTRACT §16.1), once a renewal of this
+            // run reached the server with this Mac signed in. A development build's own server on this
+            // Mac may be plain HTTP, as its license's is (`AccountConfiguration`).
+            guard let configuration = license.configuration, let token = license.record.deviceToken, !token.isEmpty else {
+                throw AccountSyncUnavailable(reason: .notSignedIn)
+            }
+            guard license.renewedForSync else { throw AccountSyncUnavailable(reason: .notChecked) }
+            return (try AccountSync.transport(server: configuration.serverURL, deviceToken: token, vaultID: vaultID,
+                                              allowInsecureLocalhost: configuration.source == .environment,
+                                              session: AccountSyncText.session), nil)
         }
     }
 
@@ -1544,6 +1935,10 @@ final class AppModel: ObservableObject {
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil
         }
+        // A saved scenario run through the API has the profile's own values that it names, under the request's.
+        handler.profileParameters = { [weak self] id, scenario, given in
+            self?.scenarioValues.parametersJSON(for: id, readBy: scenario.source, over: given) ?? given
+        }
         let server = AutomationServer(settings: settings, handler: handler)
         // WebDriver, on the same listener: a session starts a profile as the API's start does.
         let webDriver = WebDriverService(manager: manager, repository: repository)
@@ -1561,6 +1956,7 @@ final class AppModel: ObservableObject {
             }
         }
         webDriver.stop = { [weak self] id in await self?.stop(id) }
+        handler.hasWebDriverSession = { [weak webDriver] id in webDriver?.hasSession(id) ?? false }
         server.webDriver = webDriver
         server.onStateChange = { [weak self] state in self?.automationState = state }
         automationServer = server
@@ -1685,14 +2081,33 @@ final class AppModel: ObservableObject {
         errorMessage = shown.suffix(5).joined(separator: "\n\n")
     }
 
-    private func perform(_ work: () async throws -> Void) async {
+    /// `id`: the profile the work is on — what goes wrong is then said with its name
+    /// (`named(_:for:)`): with thirty profiles starting at once, "the profile doesn't open" alone
+    /// does not say which.
+    private func perform(for id: UUID? = nil, _ work: () async throws -> Void) async {
         isWorking = true
         defer { isWorking = false }
         do {
             try await work()
         } catch {
-            showError(errorText(error))
+            let text = errorText(error)
+            showError(id.map { named(text, for: $0) } ?? text)
         }
+    }
+
+    /// What went wrong with profile `id`, said with its name (`profileErrorText(_:naming:)`); as it is for
+    /// a profile that is no longer listed.
+    func named(_ text: String, for id: UUID) -> String {
+        guard let name = profiles.first(where: { $0.id == id })?.name else { return text }
+        return Self.profileErrorText(text, naming: name)
+    }
+
+    /// `text` with the profile's name before it — "“Shop 14”: …" — unless it names the profile
+    /// already, in quotes, as the core's errors about a profile's files do.
+    static func profileErrorText(_ text: String, naming name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !text.contains("“\(trimmed)”"), !text.contains("«\(trimmed)»") else { return text }
+        return String(format: L("profiles.error.named"), trimmed, text)
     }
 }
 
@@ -1724,6 +2139,11 @@ struct ProfileDetails: Equatable {
     /// The WebRTC choice stored; what it amounts to with a proxy depends on the gate at launch
     /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
     var webRTCChoice: WebRTCPolicy
+    /// The choice as the editor shows it, Automatic included, and what of the proxy decides what it
+    /// comes to (`WebRTCGate.outlook`): its kind, and whether some sites bypass it.
+    var webRTCMode: WebRTCMode
+    var proxyKindValue: ProxySettings.Kind?
+    var proxyBypassesSites: Bool
     /// It would carry WebRTC through its SOCKS5 proxy if the network guard worked
     /// (`WebRTCProtectionNotice`): the profiles window says when the guard does not.
     var wantsNetworkGuard: Bool
@@ -1759,7 +2179,10 @@ struct ProfileDetails: Equatable {
             timeZone = L("inspector.asThisMac")
         }
         webRTCChoice = configuration.webRTCPolicy
-        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCPolicy)
+        webRTCMode = configuration.webRTCMode
+        proxyKindValue = configuration.proxy?.kind
+        proxyBypassesSites = !(configuration.proxy?.excludedDomains.isEmpty ?? true)
+        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCLaunchPolicy)
         // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
         languages = configuration.languageOverride
             ?? (configuration.needsProxyLocation

@@ -42,6 +42,53 @@ struct FakeAddressPool {
 
     var count: Int { slots.count }
 
+    /// Every name with its address, the one unused the longest first.
+    var entries: [VMNetKnownName] {
+        var list: [VMNetKnownName] = []
+        list.reserveCapacity(slots.count)
+        var slot = oldest
+        while slot >= 0 {
+            list.append(VMNetKnownName(name: slots[slot].name, address: slots[slot].address))
+            slot = slots[slot].newer
+        }
+        return list
+    }
+
+    /// Which of the pool's addresses, in the order they are first given out, `address` is; nil
+    /// for an address the pool never gives.
+    static func index(of address: UInt32) -> Int? {
+        guard address >= network, address - network < 512 * 256 else { return nil }
+        let offset = Int(address - network)
+        let last = offset % 256
+        guard (1...254).contains(last) else { return nil }
+        return offset / 256 * 254 + last - 1
+    }
+
+    /// A pool that knows the names of an earlier one (`entries`, the one unused the longest
+    /// first) by the same addresses. What is no entry of a pool — an address it never gives, a
+    /// name or an address twice — is left out; of more than `capacity`, the last are kept.
+    init(capacity: Int = 60_000, restoring known: [VMNetKnownName]) {
+        self.init(capacity: capacity)
+        var highest = -1
+        for entry in known.suffix(self.capacity) {
+            guard let index = Self.index(of: entry.address), !entry.name.isEmpty,
+                  slotByName[entry.name] == nil, slotByAddress[entry.address] == nil else { continue }
+            let slot = slots.count
+            slots.append(Slot(name: entry.name, address: entry.address, newer: -1, older: -1))
+            slotByName[entry.name] = slot
+            slotByAddress[entry.address] = slot
+            linkAsNewest(slot)
+            highest = max(highest, index)
+        }
+        // Fresh addresses go on after the highest one known; those below it that nobody has are
+        // given out again when the fresh ones have run out, as the ones a pool has forgotten are.
+        nextFresh = highest + 1
+        for index in 0..<nextFresh {
+            let address = Self.network + UInt32(index / 254) * 256 + UInt32(index % 254) + 1
+            if slotByAddress[address] == nil { released.append(address) }
+        }
+    }
+
     /// The address of `name` (already in lower case), given now if it had none.
     mutating func address(for name: String) -> VMNetIPv4 {
         if let slot = slotByName[name] {
@@ -115,8 +162,11 @@ struct FakeAddressPool {
 
 /// The guest's DNS server. It answers every query itself and asks nobody: an address query gets
 /// a fake address (`FakeAddressPool`), a blocked name does not exist, and every other kind of
-/// record is "no such record" — so the guest never learns an IPv6 address or that a site speaks
-/// HTTP/3, and stays on TCP over IPv4, which is what the proxy carries.
+/// record is "no such record" — so the guest never learns an IPv6 address. HTTPS and SVCB records
+/// too: their real content cannot be known without the query leaving, and a made-up one would
+/// claim HTTP/3 for every name; a browser learns HTTP/3 from the site's Alt-Svc header over TCP,
+/// and its QUIC then goes to the same fake address, through the proxy's relay where the run
+/// carries UDP (docs/VM_NETWORK.md).
 struct DNSResponder {
     enum Outcome: Equatable {
         /// A well-formed query, answered.
@@ -137,12 +187,35 @@ struct DNSResponder {
     private static let notImplemented: UInt16 = 4
 
     private(set) var pool: FakeAddressPool
-    private let blockedSuffixes: [String]
+    private var blockedSuffixes: [String]
+    /// The name of the last question answered "no such name" because it is blocked, until taken.
+    private var lastBlocked: String?
 
-    init(blockedHostSuffixes: [String], poolCapacity: Int = 60_000) {
-        pool = FakeAddressPool(capacity: poolCapacity)
+    init(blockedHostSuffixes: [String], poolCapacity: Int = 60_000, knownNames: [VMNetKnownName] = []) {
+        // Only names this responder would itself give an address for are taken back.
+        let known = knownNames.filter { entry in
+            entry.name == Self.normalized(entry.name)
+                && Self.isResolvable(labels: entry.name.split(separator: ".", omittingEmptySubsequences: false).map(String.init), name: entry.name)
+        }
+        pool = known.isEmpty ? FakeAddressPool(capacity: poolCapacity) : FakeAddressPool(capacity: poolCapacity, restoring: known)
         blockedSuffixes = blockedHostSuffixes.map(Self.normalized).filter { !$0.isEmpty }
     }
+
+    /// Blocks a name and everything under it from now on, while the network runs.
+    mutating func block(_ suffix: String) {
+        let name = Self.normalized(suffix)
+        guard !name.isEmpty, !blockedSuffixes.contains(name) else { return }
+        blockedSuffixes.append(name)
+    }
+
+    /// The blocked name last asked for, once.
+    mutating func takeBlockedName() -> String? {
+        defer { lastBlocked = nil }
+        return lastBlocked
+    }
+
+    /// Every name the guest was given an address for, with it.
+    var knownNames: [VMNetKnownName] { pool.entries }
 
     /// A host name as the responder compares it: lower case, without dots at its ends.
     static func normalized(_ name: String) -> String {
@@ -205,6 +278,7 @@ struct DNSResponder {
         } else if isBlocked(name) {
             code = Self.noSuchName
             outcome = .blocked
+            lastBlocked = name
         } else if type == Self.typeA && questionClass == Self.classIN {
             let address = pool.address(for: name).value
             // The name is a pointer to the question's; type A, class IN, the TTL, four bytes.

@@ -31,6 +31,19 @@ enum PageSettings {
         var safariObject = false
         var storageQuota: Double?
         var fingerprint: Fingerprint
+        /// The type of the event by which a page's same-origin windows (its frames, a window it
+        /// opens) find the shim's one registry of replacements — the Mac's
+        /// `PrivacyScripts.ShimConfiguration.channel`. Made at random for each session's runtime when
+        /// it starts (`makeChannel`, kept by `SessionRuntime`), so no page can name it: a page that
+        /// could would be handed the list of what the shim replaced. Never given to a worker (the
+        /// shim's `WORKER_KEYS`). Empty: each window is a family of its own, and a frame's
+        /// `Function.prototype.toString` prints its parent's replacements as no engine would.
+        var channel = ""
+    }
+
+    /// A runtime's own event type for the shim's family of windows: 122 random bits, as text.
+    nonisolated static func makeChannel() -> String {
+        UUID().uuidString.lowercased()
     }
 
     /// The time zone and language a session's pages get: its proxy's exit country (its last check),
@@ -47,7 +60,9 @@ enum PageSettings {
         }
     }
 
-    static func config(for session: Session, proxy: ProxyEntry?) -> ShimConfig {
+    /// What the shim is given; `channel` is the runtime's (`makeChannel`), empty for the comparison
+    /// of what the pages were last given (`SessionRuntime.applyPageSettings`).
+    static func config(for session: Session, proxy: ProxyEntry?, channel: String = "") -> ShimConfig {
         let locale = locale(of: session, proxy: proxy)
         let settings = session.settings
         return ShimConfig(
@@ -58,11 +73,12 @@ enum PageSettings {
             fingerprint: .init(seed: settings.noiseSeed, canvas: settings.canvas.rawValue, webgl: settings.webGL.rawValue,
                                audio: settings.audio.rawValue, language: locale.language,
                                unstable: Faults.isActive(.noiseUnstable), naive: Faults.isActive(.unmaskedReplacement),
-                               lowBit: Faults.isActive(.canvasNoiseLowBit)))
+                               lowBit: Faults.isActive(.canvasNoiseLowBit)),
+            channel: channel)
     }
 
-    static func script(for session: Session, proxy: ProxyEntry?) -> WKUserScript {
-        let json = (try? String(data: JSONEncoder().encode(config(for: session, proxy: proxy)), encoding: .utf8)) ?? "{}"
+    static func script(for session: Session, proxy: ProxyEntry?, channel: String) -> WKUserScript {
+        let json = (try? String(data: JSONEncoder().encode(config(for: session, proxy: proxy, channel: channel)), encoding: .utf8)) ?? "{}"
         // The planted fault: the blob-worker hook on its old condition, the time zone alone — the shim as
         // it was before the mac app's fix of 8 November (a noised page, a worker with the real canvas).
         let body = Faults.isActive(.workerHookTimeZoneOnly)

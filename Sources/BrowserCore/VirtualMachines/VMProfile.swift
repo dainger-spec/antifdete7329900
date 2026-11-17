@@ -93,6 +93,25 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// an address is. Off: the Mac's time zone and the base system's language (or set by hand,
     /// `localeFollowsProxy` off). With a proxy it means nothing: `localeFollowsProxy` does.
     public var localeFollowsConnection: Bool
+    /// The keyboard's layouts in the machine: nil — the base system's, as they are; "auto"
+    /// (`VMKeyboardLayout.automatic`) — those that go with the machine's language, whoever chose
+    /// it; or one layout's name (`VMKeyboardLayout`). The base's layouts are the ones its person
+    /// chose in macOS's setup, the same in every machine made from it — a Russian one in a machine
+    /// whose language follows a proxy in the United States, unless this says otherwise.
+    public var keyboard: String?
+    /// Closing the machine keeps it as it is — every app and page open — and opening it brings it
+    /// back in seconds, instead of shutting its macOS down and starting it again (docs/VM.md,
+    /// "Instant wake"). The kept state takes about as much disk as the machine has memory.
+    public var instantWake: Bool
+    /// The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock
+    /// out of sight (docs/VM.md, "Browser mode").
+    public var browserMode: Bool
+    /// The machine's display goes to sleep while its window has been out of sight for a while, and
+    /// wakes when the window is seen again (`VMScreenSleep`, guest tools 14): it spares this Mac's
+    /// processor and graphics, and a site in the machine sees its page hidden meanwhile — as on a
+    /// Mac whose display slept. The person's choice, off unless made (docs/VM.md, "How smooth a
+    /// machine is").
+    public var sleepsScreenWhenHidden: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -103,7 +122,9 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 computerName: String? = nil, opensSafari: Bool = true, colorIndex: Int? = nil, lumenWallpaper: Bool = true,
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
-                blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false) {
+                blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false,
+                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false,
+                sleepsScreenWhenHidden: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -137,13 +158,18 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.blockedHosts = blockedHosts
         self.startsFullScreen = startsFullScreen
         self.localeFollowsConnection = localeFollowsConnection
+        self.keyboard = keyboard
+        self.instantWake = instantWake
+        self.browserMode = browserMode
+        self.sleepsScreenWhenHidden = sleepsScreenWhenHidden
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, name, createdAt, lastLaunchedAt, proxy, timeZoneIdentifier, language, countryCode, localeFollowsProxy,
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
-             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection
+             scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard,
+             instantWake, browserMode, sleepsScreenWhenHidden
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -183,6 +209,10 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         blockedHosts = try c.decodeIfPresent([String].self, forKey: .blockedHosts) ?? []
         startsFullScreen = try c.decodeIfPresent(Bool.self, forKey: .startsFullScreen) ?? false
         localeFollowsConnection = try c.decodeIfPresent(Bool.self, forKey: .localeFollowsConnection) ?? false
+        keyboard = try c.decodeIfPresent(String.self, forKey: .keyboard)
+        instantWake = try c.decodeIfPresent(Bool.self, forKey: .instantWake) ?? false
+        browserMode = try c.decodeIfPresent(Bool.self, forKey: .browserMode) ?? false
+        sleepsScreenWhenHidden = try c.decodeIfPresent(Bool.self, forKey: .sleepsScreenWhenHidden) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.
@@ -235,6 +265,47 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         var bytes = (0..<6).map { _ in UInt8.random(in: 0...255, using: &generator) }
         bytes[0] = (bytes[0] | 0x02) & 0xFE
         return bytes.map { String(format: "%02x", $0) }.joined(separator: ":")
+    }
+
+    /// A new machine with this one's settings: another Mac, with none of this one's data. What is
+    /// a machine's own is made anew — its id, and with it its disk and the identifier its macOS
+    /// sees, both made at its first start; its network card's address; and its accent colour,
+    /// drawn again as for any new machine (Macs differ in theirs). What the person set — the
+    /// proxy, the screen, the memory, the system's habits, what is blocked — stays, for them to
+    /// change what differs. It has never been started.
+    public func duplicate(named name: String) -> VMProfile {
+        var generator = SystemRandomNumberGenerator()
+        return duplicate(named: name, using: &generator)
+    }
+
+    public func duplicate<G: RandomNumberGenerator>(named name: String, using generator: inout G) -> VMProfile {
+        var copy = self
+        copy.id = UUID()
+        copy.name = name
+        copy.createdAt = Date()
+        copy.lastLaunchedAt = nil
+        copy.macAddress = VMProfile.randomMACAddress(using: &generator)
+        if accent != nil { copy.accent = VMAccent.random(using: &generator).rawValue }
+        return copy
+    }
+
+    /// The name a new machine made like the one named `name` gets: the same with the next number
+    /// no machine in `taken` has — "Shop DE" → "Shop DE 2", "Shop DE 2" → "Shop DE 3" — and never
+    /// longer than a name may be (64 characters).
+    public static func nameForDuplicate(of name: String, taken: Set<String>) -> String {
+        var stem = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var number = 2
+        // A name that ends in a number goes on from it.
+        if let space = stem.lastIndex(of: " "), let last = Int(stem[stem.index(after: space)...]), (1..<10_000).contains(last) {
+            number = last + 1
+            stem = String(stem[..<space])
+        }
+        while true {
+            let suffix = " \(number)"
+            let candidate = String(stem.prefix(64 - suffix.count)) + suffix
+            if !taken.contains(candidate) { return candidate }
+            number += 1
+        }
     }
 
     /// The name as kept: one line, 1–64 characters.
@@ -302,6 +373,9 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         }
         if let scrollBars, VMScrollBars(rawValue: scrollBars) == nil {
             throw CoreError.invalidConfiguration("unknown scroll bar setting")
+        }
+        if let keyboard, keyboard != VMKeyboardLayout.automatic, VMKeyboardLayout(rawValue: keyboard) == nil {
+            throw CoreError.invalidConfiguration("unknown keyboard layout")
         }
         guard moreStartURLs.count <= Self.moreStartURLsLimit, moreStartURLs.allSatisfy({ VMGuestSettings.startURL($0) != nil }) else {
             throw CoreError.invalidConfiguration("every start page must be an http or https address, and there may be \(Self.moreStartURLsLimit + 1) of them")
@@ -394,6 +468,68 @@ public enum VMScrollBars: String, CaseIterable, Sendable {
     }
 }
 
+/// A keyboard layout of the guest's macOS that Lumen can set: the raw value is what the boot script
+/// is told, and the script has macOS's own number, name and identifier for each. Only layouts
+/// whose three are known for certain are here; a language none of them is for gets the plain Latin
+/// one (`abc`) when it is written in Latin letters, and is left with the base's otherwise.
+public enum VMKeyboardLayout: String, CaseIterable, Sendable {
+    case us, british, german, french, spanish, russian, abc
+
+    /// A profile's `keyboard` for "what goes with the machine's language".
+    public static let automatic = "auto"
+
+    /// macOS's identifier of the layout (`AppleCurrentKeyboardLayoutInputSourceID`).
+    public var source: String {
+        switch self {
+        case .us: return "com.apple.keylayout.US"
+        case .british: return "com.apple.keylayout.British"
+        case .german: return "com.apple.keylayout.German"
+        case .french: return "com.apple.keylayout.French"
+        case .spanish: return "com.apple.keylayout.Spanish-ISO"
+        case .russian: return "com.apple.keylayout.Russian"
+        case .abc: return "com.apple.keylayout.ABC"
+        }
+    }
+
+    /// Types Latin letters: a layout that does not is given the plain Latin one beside it, as
+    /// macOS's own setup does — an address cannot be typed in Cyrillic.
+    public var isLatin: Bool { self != .russian }
+
+    /// The layouts a machine is given, the first the one in use: for a profile's `keyboard` and
+    /// the language the machine will have. Empty: the machine's own are left as they are.
+    public static func layouts(setting: String?, language: String?) -> [VMKeyboardLayout] {
+        guard let setting else { return [] }
+        if setting == automatic { return language.map(layouts(for:)) ?? [] }
+        guard let layout = VMKeyboardLayout(rawValue: setting) else { return [] }
+        return layout.isLatin ? [layout] : [layout, .abc]
+    }
+
+    /// Languages written in Latin letters that the plain Latin layout serves where none of their
+    /// own is known here.
+    private static let latin: Set<String> = [
+        "en", "de", "fr", "es", "it", "pt", "nl", "sv", "nb", "no", "da", "fi", "pl", "cs", "sk", "hu", "ro", "tr",
+        "id", "ms", "vi", "hr", "sl", "et", "lv", "lt", "ca", "is", "ga", "sq", "fil", "tl", "sw", "af",
+    ]
+
+    /// The layouts that go with a language tag ("en-US", "de-AT", "ru"): the country's own where
+    /// it is known for certain, the plain Latin one for other Latin-letter languages and
+    /// countries, nothing for the rest.
+    static func layouts(for language: String) -> [VMKeyboardLayout] {
+        let parts = language.split(separator: "-").map { $0.lowercased() }
+        guard let primary = parts.first else { return [] }
+        let region = parts.dropFirst().last { $0.count == 2 }?.uppercased()
+        switch (primary, region) {
+        case ("en", "GB"), ("en", "IE"): return [.british]
+        case ("en", _): return [.us]
+        case ("de", nil), ("de", "DE"), ("de", "AT"): return [.german]
+        case ("fr", nil), ("fr", "FR"): return [.french]
+        case ("es", nil), ("es", "ES"): return [.spanish]
+        case ("ru", _): return [.russian, .abc]
+        default: return latin.contains(primary) ? [.abc] : []
+        }
+    }
+}
+
 /// The guest system's appearance: what a page reads as `prefers-color-scheme`.
 public enum VMAppearance: String, CaseIterable, Sendable {
     case light, dark
@@ -475,6 +611,26 @@ public struct VMProfiles: Codable, Equatable, Sendable {
     public mutating func remove(_ id: UUID) -> VMProfile? {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return nil }
         return profiles.remove(at: index)
+    }
+
+    /// The machines whose proxy is `previous` — the same connection (`ProxyList.sameConnection`) —
+    /// given `proxy` instead: an entry of the Proxies section edited there (a password the
+    /// provider changed, a new port) reaches the machines that use it, as it reaches the Safari
+    /// profiles (`ProxyAssignment.follow`). A machine keeps a copy of its proxy, and the copy used
+    /// to stay as it was: its start then failed on the old password however often the person
+    /// corrected it in the Proxies section. A proxy a machine cannot use (TLS to the proxy) is not
+    /// given; the machine keeps its own. Returns the ids of the machines changed.
+    public mutating func follow(_ proxy: ProxySettings, previous: ProxySettings) -> [UUID] {
+        var changed: [UUID] = []
+        for index in profiles.indices {
+            guard let current = profiles[index].proxy, ProxyList.sameConnection(current, previous) else { continue }
+            var followed = profiles[index]
+            followed.proxy = current.withConnection(of: proxy)
+            guard followed != profiles[index], (try? followed.validate()) != nil else { continue }
+            profiles[index] = followed
+            changed.append(followed.id)
+        }
+        return changed
     }
 
     public mutating func markLaunched(_ id: UUID, at date: Date = Date()) {

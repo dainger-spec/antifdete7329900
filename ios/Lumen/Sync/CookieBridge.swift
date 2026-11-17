@@ -24,6 +24,10 @@ final class CookieBridge: SyncCookieStores, @unchecked Sendable {
         return all.compactMap(Self.cookie(from:))
     }
 
+    /// The session's own data store: one deleted and made again has another (SyncCookieRun measures a
+    /// baseline only against the store it was taken from).
+    func storeID(profileID: UUID) async -> UUID? { stores[profileID] }
+
     func apply(set: [SyncedCookie], delete: [SyncedCookie], profileID: UUID) async {
         guard let storeID = stores[profileID] else { return }
         let all = await Self.allCookies(storeID)
@@ -40,9 +44,11 @@ final class CookieBridge: SyncCookieStores, @unchecked Sendable {
 
     // MARK: WebKit
 
+    /// The session's cookie store, of its data store as `SyncedDataStores` holds it — never of one
+    /// made for this call alone, which is let go before WebKit has done the call (see there).
     @MainActor
     private static func cookieStore(_ storeID: UUID) -> WKHTTPCookieStore {
-        WKWebsiteDataStore(forIdentifier: storeID).httpCookieStore
+        SyncedDataStores.store(storeID).httpCookieStore
     }
 
     private static func allCookies(_ storeID: UUID) async -> [HTTPCookie] {

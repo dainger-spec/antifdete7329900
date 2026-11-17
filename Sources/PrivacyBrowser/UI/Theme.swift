@@ -260,7 +260,8 @@ struct LumenButtonStyle: ButtonStyle {
         var body: some View {
             let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
             configuration.label
-                .font(height >= Theme.buttonHeight ? Font.lumenLabel : Font.system(size: 12.5, weight: .medium))
+                .font(kind == .primary ? Font.system(size: 13, weight: .semibold)
+                      : (height >= Theme.buttonHeight ? Font.lumenLabel : Font.system(size: 12.5, weight: .medium)))
                 .lineLimit(1)
                 .fixedSize(horizontal: !fullWidth, vertical: false)
                 .padding(.horizontal, height >= Theme.buttonHeight ? 14 : 11)
@@ -268,8 +269,11 @@ struct LumenButtonStyle: ButtonStyle {
                 .frame(height: height)
                 .foregroundStyle(foreground)
                 .background(shape.fill(fill))
+                // The main button is lit from above: a lighter face toward its top.
+                .background(shape.fill(LinearGradient(colors: [Color.white.opacity(kind == .primary ? 0.05 : 0), Color.clear],
+                                                      startPoint: .top, endPoint: .bottom)))
                 .overlay(shape.strokeBorder(border, lineWidth: 1))
-                .shadow(color: Theme.rim.opacity(isContour && hovered ? 0.16 : 0), radius: 15, y: 8)
+                .shadow(color: Theme.rim.opacity(isContour && hovered ? 0.16 : (kind == .primary && isEnabled ? 0.07 : 0)), radius: 15, y: 8)
                 .contentShape(shape)
                 .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
                 .opacity(isEnabled ? 1 : 0.4)
@@ -291,16 +295,24 @@ struct LumenButtonStyle: ButtonStyle {
 
         private var fill: Color {
             switch kind {
-            case .primary, .secondary: return hovered ? Theme.raisedInset : Theme.card
+            case .primary: return hovered ? Theme.raisedInset : Theme.card
+            case .secondary: return hovered ? Theme.raisedInset : Theme.card.opacity(0.6)
             case .ghost: return hovered ? Theme.rowHover : .clear
             case .destructive: return hovered ? Theme.dangerTint : .clear
             }
         }
 
-        private var border: Color {
-            guard isContour else { return .clear }
-            // Increase Contrast: the contour at the strength it has under the pointer.
-            return hovered || contrast == .increased ? Theme.edgeStrong : Theme.edge
+        /// The main button's contour is brighter along its top (the light falls from above); a
+        /// secondary one's is quiet (16 %), so that a screen has one button that leads. Under the
+        /// pointer, and with Increase Contrast, both are at full strength.
+        private var border: AnyShapeStyle {
+            guard isContour else { return AnyShapeStyle(Color.clear) }
+            if hovered || contrast == .increased { return AnyShapeStyle(Theme.edgeStrong) }
+            if kind == .primary {
+                return AnyShapeStyle(LinearGradient(colors: [Color.white.opacity(0.46), Theme.edge.opacity(0.8)],
+                                                    startPoint: .top, endPoint: .bottom))
+            }
+            return AnyShapeStyle(Theme.strongBorder)
         }
     }
 }
@@ -310,6 +322,8 @@ extension ButtonStyle where Self == LumenButtonStyle {
     static var lumenSecondary: LumenButtonStyle { LumenButtonStyle(kind: .secondary) }
     static var lumenGhost: LumenButtonStyle { LumenButtonStyle(kind: .ghost) }
     static var lumenDestructive: LumenButtonStyle { LumenButtonStyle(kind: .destructive) }
+    /// Beside a 32 pt field (Check, Apply, Add, Icons…): the field's height, so that their edges line up.
+    static var lumenFieldButton: LumenButtonStyle { LumenButtonStyle(kind: .secondary, height: Theme.buttonHeight) }
 }
 
 /// An icon-only button (the design's `ib`: ⋯, close, the inspector's toggle): `t2`, a tone of white
@@ -515,6 +529,59 @@ struct IconBadge: View {
             .foregroundStyle(tint)
             .frame(width: size, height: size)
             .accessibilityHidden(true)
+    }
+}
+
+/// An empty state on the horizon in small (the lock screen's order, `LockScreen`): the title and a
+/// sentence above the light, what to do under it. `small`: a quieter one, for a state that passes
+/// (nothing found). The light is decoration: hidden from VoiceOver, never in the way of a click.
+struct LumenEmptyState<Actions: View>: View {
+    let title: String
+    let text: String
+    var small = false
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: small ? 20 : 24, weight: .bold))
+                    .tracking(small ? -0.4 : -0.5)
+                    .foregroundStyle(Theme.textPrimary)
+                    .multilineTextAlignment(.center)
+                    .accessibilityAddTraits(.isHeader)
+                Text(text)
+                    .font(.system(size: small ? 13 : 14))
+                    .lineSpacing(3)
+                    .foregroundStyle(Theme.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: 480)
+            .background(alignment: .bottom) {
+                // The picture's middle — the rim's top — 26 pt under the sentence; it fades to
+                // nothing before its own edges, so that no edge of it shows on the window's light.
+                Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+                    context.withCGContext { cg in
+                        LumenHorizon.draw(in: cg, width: size.width, height: size.height, haze: true,
+                                          placed: LumenHorizon.Geometry(width: size.width, top: size.height / 2,
+                                                                        radius: small ? 1000 : 1150),
+                                          lift: false)
+                    }
+                }
+                .frame(width: small ? 520 : 680, height: 260)
+                .mask(EllipticalGradient(colors: [.black, .black, .clear], center: .center,
+                                         startRadiusFraction: 0, endRadiusFraction: 0.5))
+                .opacity(small ? 0.6 : 0.9)
+                .offset(y: 130 + 26)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
+            actions()
+                .padding(.top, 26 + 40)
+        }
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

@@ -67,9 +67,7 @@ struct ProfileDraft {
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
     var menusInAppLanguage = false
-    /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
-    var phoneFullDisguise = true
-    var webRTC: WebRTCPolicy = .disabled
+    var webRTC: WebRTCMode = .disabled
     /// What a page's camera (and, with it, the microphone) is handed; `.off` by default
     /// (`CameraSubstitution`). Bound field by field in the editor's Camera part.
     var camera = CameraSubstitution.off
@@ -111,6 +109,8 @@ struct ProfileDraft {
     var cookieText = ""
     var cookieFileName: String?
     var cookieReport: CookieImportReport?
+    /// The pasted text (trimmed) `cookieReport` was read from: nil for a file's, or none.
+    var cookieReportText: String?
 
     /// The window size as the editor holds it (`WindowSize`).
     enum WindowChoice: Hashable {
@@ -211,8 +211,7 @@ struct ProfileDraft {
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
         menusInAppLanguage = c.menusInAppLanguage
-        phoneFullDisguise = c.phoneDisguise == .full
-        webRTC = c.webRTCPolicy
+        webRTC = c.webRTCMode
         camera = c.cameraSubstitution
         cameraWidth = String(c.cameraSubstitution.width)
         cameraHeight = String(c.cameraSubstitution.height)
@@ -242,6 +241,34 @@ struct ProfileDraft {
         let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
         cookieFileName = nil
         cookieReport = text.isEmpty ? nil : CookieImporter.read(Data(text.utf8))
+        cookieReportText = text
+    }
+
+    /// `readCookieText` in two halves, for the editor, which reads off the main thread
+    /// (`CookiePaste`): what changes at once, and the text to read — nil when there is none.
+    mutating func cookieTextChanged() -> String? {
+        let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        cookieFileName = nil
+        guard !text.isEmpty else {
+            cookieReport = nil
+            cookieReportText = text
+            return nil
+        }
+        return text
+    }
+
+    /// What reading `text` found, taken while `text` is still what is pasted.
+    mutating func takeCookieReport(_ report: CookieImportReport, readFrom text: String) {
+        guard cookieFileName == nil, cookieText.trimmingCharacters(in: .whitespacesAndNewlines) == text else { return }
+        cookieReport = report
+        cookieReportText = text
+    }
+
+    /// Pasted text that was not read as it is now (its reading is still under way), else nil.
+    var unreadCookieText: String? {
+        guard cookieFileName == nil else { return nil }
+        let text = cookieText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text == (cookieReportText ?? "") ? nil : text
     }
 
     /// A cookie file read instead of pasted text.
@@ -249,12 +276,14 @@ struct ProfileDraft {
         cookieText = ""
         cookieFileName = name
         cookieReport = report
+        cookieReportText = nil
     }
 
     mutating func clearCookies() {
         cookieText = ""
         cookieFileName = nil
         cookieReport = nil
+        cookieReportText = nil
     }
 
     /// The place a random choice picked, when the time zone and language are one.
@@ -423,11 +452,10 @@ struct ProfileDraft {
         }
         configuration.proxy = try makeProxy()
         if geoMode == .fixed {
-            // "55,75": a decimal comma, as it is written in Russian, reads as a point.
-            func number(_ text: String) -> Double? {
-                Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: "."))
-            }
-            guard let lat = number(latitude), let lon = number(longitude), let acc = number(accuracy) else {
+            // "55,75": a decimal comma, as it is written in Russian, reads as a point. Finite numbers
+            // only; the accuracy held to what the picker shows (5–500 m), so the map and the page agree.
+            guard let lat = GeolocationSetting.number(fromField: latitude), let lon = GeolocationSetting.number(fromField: longitude),
+                  let acc = GeolocationSetting.accuracy(fromField: accuracy) else {
                 throw CoreError.invalidConfiguration(L("editor.error.coords"))
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)
@@ -453,8 +481,7 @@ struct ProfileDraft {
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.menusInAppLanguage = menusInAppLanguage
-        configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
-        configuration.webRTCPolicy = webRTC
+        configuration.webRTCMode = webRTC
         configuration.cameraSubstitution = try makeCamera()
         configuration.ephemeral = ephemeral
         configuration.safeBrowsingEnabled = safeBrowsing
@@ -555,8 +582,7 @@ struct ProfileEditorView: View {
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
-                                                                            launch: { await model.launch($0) }),
-                                 mobileView: DeviceGenerations.resolved(id: draft.deviceGenerationID).platform != .macOS)
+                                                                            launch: { await model.launch($0) }))
             }
         }
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
@@ -582,15 +608,27 @@ struct ProfileEditorView: View {
 
     /// An image or video chosen for the substituted camera: its bytes are read into the draft (the
     /// app reads the file; the profile's pages never touch the disk). Too large, or unreadable, and
-    /// the camera part shows why.
+    /// the camera part shows why. Both are kept in the profile's settings, whichever is the source,
+    /// and synced with them: an image up to `maxImageBytes`, and the two together no more than one
+    /// sync object holds (`CameraSubstitution.maxMediaBytes`, `mediaFitsSync`) — before, a video of
+    /// up to 12 MB was taken, and the profile's settings then never synced.
     private func readCameraMedia(_ url: URL, isVideo: Bool) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        let limit = isVideo ? CameraSubstitution.maxVideoBytes : CameraSubstitution.maxImageBytes
+        let limit = isVideo ? CameraSubstitution.maxMediaBytes : min(CameraSubstitution.maxImageBytes, CameraSubstitution.maxMediaBytes)
+        let tooLarge = String(format: L("editor.camera.error.tooLarge"), CameraSubstitution.maxImageBytes / (1024 * 1024),
+                              CameraSubstitution.maxMediaBytes / (1024 * 1024))
+        // A file far over it is not read at all.
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > limit {
+            error = tooLarge
+            return
+        }
         do {
             let data = try Data(contentsOf: url)
-            guard data.count <= limit else {
-                error = String(format: L("editor.camera.error.tooLarge"), limit / (1024 * 1024))
+            var camera = draft.camera
+            if isVideo { camera.videoData = data } else { camera.imageData = data }
+            guard data.count <= limit, camera.mediaFitsSync else {
+                error = tooLarge
                 return
             }
             let type = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType
@@ -623,7 +661,7 @@ struct ProfileEditorView: View {
 
     private func form(saved: [ProxyListEntry]) -> some View {
         ProfileEditorForm(draft: $draft, topic: $topic, isNew: target.isNew, avatarID: avatarID, error: error,
-                          guardReady: networkGuard.state == .ready,
+                          guardReady: networkGuard.state == .ready, guardState: networkGuard.state,
                           onCancel: cancel, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
@@ -671,6 +709,8 @@ struct ProfileEditorView: View {
             }
             draft.searchEngine = model.settings.newProfileSearchEngine
             draft.localRequests = model.settings.newProfileBlocksLocalRequests ? .protected : .allowed
+            // WebRTC the way the connection goes (Settings → New Profiles), or off as before.
+            draft.webRTC = model.settings.newProfileWebRTCAutomatic ? .automatic : .disabled
             if model.settings.newProfileRandomWindowSize, let visible = WindowSizing.visibleScreen {
                 var generator = SystemRandomNumberGenerator()
                 draft.setWindowSize(WindowSize.randomSafe(fitting: (Int(visible.width), Int(visible.height)), using: &generator))
@@ -812,6 +852,8 @@ struct ProfileEditorView: View {
                 try model.updateProfile(summary.id, name: draft.name, configuration: configuration)
                 id = summary.id
             }
+            // Pasted a moment ago, and its reading (off the main thread) not over: read now.
+            if draft.unreadCookieText != nil { draft.readCookieText() }
             // The cookies pasted or dropped: into the profile now if it runs, else queued
             // (encrypted) for its next launch, before its first page loads — as Import Cookies.
             if let id, let cookies = draft.cookieReport?.cookies, !cookies.isEmpty {

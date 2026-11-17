@@ -473,7 +473,13 @@ enum ProfileNetworkGuard {
                 continue
             }
             let original = unsafeBitCast(method_getImplementation(method), to: ObjectSetter.self)
-            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, delegate in
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { receiver, given in
+                var delegate = given
+                // In Safari's window the profile's downloads are taken at WebKit's own interface
+                // (`HostedDownloads`): a navigation delegate of Safari's hands them over, and a
+                // download Safari gives a delegate of its own gets the profile's.
+                if let given, setter == "setNavigationDelegate:" { HostedDownloads.cover(navigationDelegate: given) }
+                if let given, setter == "setDelegate:" { delegate = HostedDownloads.delegate(inPlaceOf: given) }
                 if let delegate { answerChallenges(of: delegate, question, takesSubject: takesSubject, policy) }
                 original(receiver, selector, delegate)
             }
@@ -1182,6 +1188,9 @@ enum ProfileNetworkGuard {
         report.trustRefused = trust.refused
         report.trustFetchAllowed = ServerTrust.tally.fetchAllowed
         report.pasteAsTypedInMenu = SafariChrome.pasteAsTypedInMenu
+        report.downloads = HostedDownloads.counts.text
+        report.downloadsInMenu = HostedDownloads.shared.isRouted
+        report.profileMarkerDropped = SafariProfileMarker.droppedForGeometry
         if let menu = NSApp?.mainMenu {
             let pdf = NSSelectorFromString("saveDocumentToPDF:")
             // The File menu's submenus filled first, as AppKit fills one before it shows it.
@@ -1240,7 +1249,10 @@ enum ProfileNetworkGuard {
             if let address = parts.url { report.openedInAnotherApp = NSWorkspace.shared.open(address) }
         }
         report.sharingServices = NSSharingService.sharingServices(forItems: [probe ?? URL(string: "https://example.org/")!]).count
-        NSPasteboard.general.clearContents()
+        // The copy is the self-test's alone (it always passes a probe): clearing the pasteboard
+        // empties the system's, whatever another app put there, so the person's own check
+        // ("Check the Profile", no probe) never does it.
+        if probe != nil { NSPasteboard.general.clearContents() }
         report.credentialsKept = URLCredential(user: "pb", password: "pb", persistence: .permanent).persistence != .forSession
         report.handOffsRefused = HandOffs.refused
         if report.hasProxy {
@@ -1362,6 +1374,13 @@ struct ProfileNetworkReport: Codable, Equatable {
     var trustFetchAllowed = 0
     /// Safari's Edit menu has Paste as Typed (`SafariChrome.addPasteAsTyped`).
     var pasteAsTypedInMenu = false
+    /// What became of downloads in Safari's window (`HostedDownloads.Counts`), and whether View ›
+    /// Show Downloads lists the profile's.
+    var downloads = ""
+    var downloadsInMenu = false
+    /// The profile's chip changed what a page can measure of Safari's window and was taken out
+    /// (`SafariProfileMarker`): false is right.
+    var profileMarkerDropped = false
     /// Safari's File menu has Safari's own import and export of the profile's bookmarks, whichever
     /// File menu Safari built, and whether they were put back where the Browsing Data items were
     /// (`SafariChrome.keepBookmarksImportAndExport`).

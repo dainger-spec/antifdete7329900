@@ -48,6 +48,13 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// APPROXIMATION: JavaScript removal/wrapping of `RTCPeerConnection`.
     public var webRTCPolicy: WebRTCPolicy
 
+    /// WebRTC goes the way the profile's connection goes, by itself (`WebRTCMode.automatic`): through
+    /// a SOCKS5 proxy where the network guard can hold it there, as Safari's without a proxy, and
+    /// present but connecting nowhere where neither can be (an HTTP proxy). Stored beside the policy
+    /// rather than as a fourth policy, so that a build that does not know it reads the profile as
+    /// "Relay (TURN) only" (`webRTCPolicy`, set with it) instead of failing to read it.
+    public var webRTCAutomatic: Bool
+
     /// NATIVE: use `WKWebsiteDataStore.nonPersistent()` — no website data written to disk,
     /// everything discarded when the profile stops. History is kept in memory only;
     /// bookmarks (explicit user data) are still saved, encrypted.
@@ -66,11 +73,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// Target Apple OS generation (`DeviceGenerations`). Supplies the self-declared User-Agent
     /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
+    /// An iPhone or iPad view's id (`DeviceGenerations.retiredIDs`) is read as the default
+    /// generation's: such a profile opens as a Mac's.
     public var deviceGenerationID: String?
-
-    /// An iPhone view: the whole phone, or only what the engine answers (`PhoneDisguise`). Default
-    /// `full`; older configurations decode as `full`.
-    public var phoneDisguise: PhoneDisguise
 
     /// APPROXIMATION: what a page's `getUserMedia` is handed instead of the real camera (and, with
     /// it, the microphone). A JavaScript shim over the media capture APIs (`PrivacyScripts`), in a
@@ -104,6 +109,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// carries this profile's WebRTC through its SOCKS5 proxy. Nil unless `WebRTCGate` decided so.
     public var webRTCRelay: WebRTCRelay?
 
+    /// Set by the app for one launch, never stored: with a proxy, WebRTC that must not connect stays
+    /// in the pages, as Safari has it, connecting nowhere (`WebRTCRouting.silent`) — the network guard
+    /// holds the profile's process to its proxy (`WebRTCGate.silence`). Without a proxy that is so
+    /// without it.
+    public var webRTCSilent = false
+
     /// What the address bar searches with (and the warm-up's searches). Nil: `SearchEngine.standard`
     /// — every profile from before there was a choice, and one a later build gave an engine this
     /// one does not know.
@@ -128,7 +139,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// The Safari version a macOS profile names in its User-Agent ("26.0"); nil: this Mac's own
     /// (`userAgent(hostSafariVersion:)`). Only the name changes, never the engine
-    /// (`SafariVersions`); a mobile generation and a typed User-Agent ignore it.
+    /// (`SafariVersions`); a typed User-Agent ignores it.
     public var safariVersion: String?
 
     /// Whether the profile's pages may reach this Mac and the local network (`LocalRequests`);
@@ -173,6 +184,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 geolocation: GeolocationSetting = .deny,
                 timeZoneIdentifier: String? = nil,
                 webRTCPolicy: WebRTCPolicy = .disabled,
+                webRTCAutomatic: Bool = false,
                 ephemeral: Bool = false,
                 safeBrowsingEnabled: Bool = false,
                 historyEnabled: Bool = true,
@@ -195,7 +207,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 languageOverride: String? = nil,
                 localeSource: LocaleSource? = nil,
                 menusInAppLanguage: Bool = false,
-                phoneDisguise: PhoneDisguise = .full,
                 cameraSubstitution: CameraSubstitution = .off) {
         self.startURL = startURL
         self.userAgent = userAgent
@@ -203,11 +214,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.geolocation = geolocation
         self.timeZoneIdentifier = timeZoneIdentifier
         self.webRTCPolicy = webRTCPolicy
+        self.webRTCAutomatic = webRTCAutomatic
         self.ephemeral = ephemeral
         self.safeBrowsingEnabled = safeBrowsingEnabled
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
-        self.deviceGenerationID = deviceGenerationID
+        self.deviceGenerationID = DeviceGenerations.migrated(id: deviceGenerationID)
         self.matchProxyLocation = matchProxyLocation
         self.lastProxyLocation = lastProxyLocation
         self.warnOnProxyIPChange = warnOnProxyIPChange
@@ -225,7 +237,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.languageOverride = languageOverride
         self.localeSource = localeSource
         self.menusInAppLanguage = menusInAppLanguage
-        self.phoneDisguise = phoneDisguise
         self.cameraSubstitution = cameraSubstitution
     }
 
@@ -266,22 +277,45 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// (`webRTCRelay`, set at launch when `WebRTCGate` allows it: a SOCKS5 proxy that carries UDP,
     /// the network guard holding the profile's process); otherwise it is switched off. The stored
     /// choice is kept either way.
+    ///
+    /// WebRTC that must not connect is `.silent` — present in the pages, connecting nowhere — where
+    /// that is safe (`WebRTCGate.silence`): always without a proxy (the engine's own WebRTC would go
+    /// out as this Mac, as the pages do), and with one where the launch had the network guard hold
+    /// the process (`webRTCSilent`).
     public var webRTCRouting: WebRTCRouting {
-        if webRTCPolicy == .disabled { return .off }
-        guard let proxy else { return .native(webRTCPolicy) }
+        let policy = webRTCLaunchPolicy
+        if policy == .disabled { return proxy == nil || webRTCSilent ? .silent : .off }
+        guard let proxy else { return .native(policy) }
         if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
-        return .off
+        return webRTCSilent ? .silent : .off
     }
 
     /// The policy the routing amounts to: `.disabled` when WebRTC is off, `.relayOnly` through the
-    /// app's relay, the stored policy without a proxy.
+    /// app's relay or present and connecting nowhere (the engine's WebRTC is on, the page's script
+    /// gives it relay-only), the stored policy without a proxy.
     public var effectiveWebRTCPolicy: WebRTCPolicy {
         switch webRTCRouting {
         case .off: return .disabled
         case let .native(policy): return policy
-        case .relay: return .relayOnly
+        case .relay, .silent: return .relayOnly
         }
     }
+
+    /// The choice as the editor shows it: Automatic, or one of the three policies.
+    public var webRTCMode: WebRTCMode {
+        get { webRTCAutomatic ? .automatic : WebRTCMode(webRTCPolicy) }
+        set {
+            webRTCAutomatic = newValue == .automatic
+            // What a build that does not know Automatic reads: relay only — through the proxy's
+            // relay where it can, otherwise only through a site's own TURN server, never around.
+            webRTCPolicy = newValue.policy ?? .relayOnly
+        }
+    }
+
+    /// The policy a launch decides with (`WebRTCGate`): the stored one, or for Automatic the one
+    /// that lets WebRTC go wherever the connection goes — the proxy's relay through a SOCKS5 proxy
+    /// (what Unrestricted and Relay only both amount to there), Safari's own without a proxy.
+    public var webRTCLaunchPolicy: WebRTCPolicy { webRTCAutomatic ? .unrestricted : webRTCPolicy }
 
     /// The profile runs in its proxy's time zone (`matchProxyLocation`).
     /// With no proxy too: a direct connection's exit is looked up as a proxy's is (the lead, 7 November).
@@ -336,6 +370,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             settings.settingsModifiedAt = nil
             settings.lastProxyLocation = nil
             settings.webRTCRelay = nil
+            settings.webRTCSilent = false
             return settings
         }
         return other.map { settings($0) == settings(self) } ?? false
@@ -360,11 +395,11 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, ephemeral,
+        case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, webRTCAutomatic, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
-             localRequests, languageOverride, localeSource, menusInAppLanguage, phoneDisguise,
+             localRequests, languageOverride, localeSource, menusInAppLanguage,
              cameraSubstitution
     }
 
@@ -379,13 +414,16 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         geolocation = try c.decodeIfPresent(GeolocationSetting.self, forKey: .geolocation) ?? defaults.geolocation
         timeZoneIdentifier = try c.decodeIfPresent(String.self, forKey: .timeZoneIdentifier)
         webRTCPolicy = try c.decodeIfPresent(WebRTCPolicy.self, forKey: .webRTCPolicy) ?? defaults.webRTCPolicy
+        webRTCAutomatic = (try? c.decodeIfPresent(Bool.self, forKey: .webRTCAutomatic)) ?? false
         ephemeral = try c.decodeIfPresent(Bool.self, forKey: .ephemeral) ?? defaults.ephemeral
         safeBrowsingEnabled = try c.decodeIfPresent(Bool.self, forKey: .safeBrowsingEnabled) ?? defaults.safeBrowsingEnabled
         historyEnabled = try c.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? defaults.historyEnabled
         historyRetentionDays = c.contains(.historyRetentionDays)
             ? try c.decodeIfPresent(Int.self, forKey: .historyRetentionDays)
             : defaults.historyRetentionDays
-        deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
+        // An iPhone or iPad view's, from before they were taken out, is a Mac's; the
+        // "phoneDisguise" such a profile may carry is not read.
+        deviceGenerationID = DeviceGenerations.migrated(id: try c.decodeIfPresent(String.self, forKey: .deviceGenerationID))
         matchProxyLocation = try c.decodeIfPresent(Bool.self, forKey: .matchProxyLocation) ?? defaults.matchProxyLocation
         // A cache: one that no longer decodes is dropped, never a reason to fail the profile.
         lastProxyLocation = (try? c.decodeIfPresent(ProxyLocation.self, forKey: .lastProxyLocation)) ?? nil
@@ -413,8 +451,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             .flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         localeSource = try? c.decodeIfPresent(LocaleSource.self, forKey: .localeSource)
         menusInAppLanguage = (try? c.decodeIfPresent(Bool.self, forKey: .menusInAppLanguage)) ?? false
-        // One a later build knows and this one does not is the full disguise here.
-        phoneDisguise = (try? c.decodeIfPresent(PhoneDisguise.self, forKey: .phoneDisguise)) ?? .full
         // One a later build wrote that this one cannot read is dropped (the camera as before),
         // never a reason to fail the profile.
         cameraSubstitution = (try? c.decodeIfPresent(CameraSubstitution.self, forKey: .cameraSubstitution)) ?? .off
@@ -430,6 +466,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(geolocation, forKey: .geolocation)
         try c.encodeIfPresent(timeZoneIdentifier, forKey: .timeZoneIdentifier)
         try c.encode(webRTCPolicy, forKey: .webRTCPolicy)
+        // Written only when it is on: a profile with one of the three policies is written as before.
+        if webRTCAutomatic { try c.encode(true, forKey: .webRTCAutomatic) }
         try c.encode(ephemeral, forKey: .ephemeral)
         try c.encode(safeBrowsingEnabled, forKey: .safeBrowsingEnabled)
         try c.encode(historyEnabled, forKey: .historyEnabled)
@@ -453,8 +491,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(languageOverride, forKey: .languageOverride)
         try c.encodeIfPresent(localeSource, forKey: .localeSource)
         try c.encode(menusInAppLanguage, forKey: .menusInAppLanguage)
-        // Written only when it is not the default: a profile with the full disguise is written as before.
-        if phoneDisguise != .full { try c.encode(phoneDisguise, forKey: .phoneDisguise) }
         // Written only when it is on: a profile that never substituted the camera is written as before.
         if cameraSubstitution.isActive { try c.encode(cameraSubstitution, forKey: .cameraSubstitution) }
     }
@@ -549,6 +585,23 @@ public enum GeolocationSetting: Codable, Equatable, Sendable {
     /// egress IP; set a matching proxy.
     case fixed(latitude: Double, longitude: Double, accuracyMeters: Double)
 
+    /// The accuracy the profile editor offers, in metres (its picker's slider and circle).
+    public static let accuracyRange: ClosedRange<Double> = 5...500
+
+    /// A number as the editor's fields read it — "55,75" with a decimal comma too — when it is a
+    /// finite one: `Double` reads "nan" and "inf" as well, which no field means.
+    public static func number(fromField text: String) -> Double? {
+        guard let value = Double(text.trimmingCharacters(in: .whitespaces).replacingOccurrences(of: ",", with: ".")),
+              value.isFinite else { return nil }
+        return value
+    }
+
+    /// The editor's Accuracy field as a page is told it: held to `accuracyRange`, as the picker
+    /// shows it, so the map and the profile say the same; nil when it is not a finite number.
+    public static func accuracy(fromField text: String) -> Double? {
+        number(fromField: text).map { min(max($0, accuracyRange.lowerBound), accuracyRange.upperBound) }
+    }
+
     public func validate() throws {
         if case let .fixed(latitude, longitude, accuracy) = self {
             guard (-90...90).contains(latitude), (-180...180).contains(longitude),
@@ -577,8 +630,36 @@ public enum WebRTCRouting: Equatable, Sendable {
     case native(WebRTCPolicy)
     /// Switched off in the engine.
     case off
+    /// Present as Safari has it — the engine's interfaces, codecs, capabilities, offers — and
+    /// connecting nowhere: the page's script gives the engine relay-only with no ICE server, so it
+    /// gathers no candidate and sends nothing (as Safari on a network that lets no UDP through).
+    case silent
     /// Relay-only through the app's TURN server on 127.0.0.1 and the profile's SOCKS5 proxy.
     case relay(WebRTCRelay)
+}
+
+/// The WebRTC choice the editor offers: Automatic (`ProfileConfiguration.webRTCAutomatic`), or one
+/// of the three stored policies.
+public enum WebRTCMode: String, CaseIterable, Sendable {
+    case automatic, disabled, relayOnly, unrestricted
+
+    public init(_ policy: WebRTCPolicy) {
+        switch policy {
+        case .disabled: self = .disabled
+        case .relayOnly: self = .relayOnly
+        case .unrestricted: self = .unrestricted
+        }
+    }
+
+    /// The stored policy it is; nil for Automatic.
+    public var policy: WebRTCPolicy? {
+        switch self {
+        case .automatic: return nil
+        case .disabled: return .disabled
+        case .relayOnly: return .relayOnly
+        case .unrestricted: return .unrestricted
+        }
+    }
 }
 
 public enum WebRTCPolicy: String, Codable, CaseIterable, Sendable {

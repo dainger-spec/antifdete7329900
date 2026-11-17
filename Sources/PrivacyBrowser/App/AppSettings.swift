@@ -7,7 +7,8 @@ import Foundation
 /// it starts and whenever the settings change.
 ///
 /// These apply to the app's own browser windows. A profile that shows Safari's own window (a build
-/// without the App Sandbox) browses by Safari's settings, in its window's Safari menu.
+/// without the App Sandbox) places its new tabs and zooms its pages as Safari does; where its
+/// downloads go and whether its tabs come back apply there too (`HostedDownloads`, `SafariTabs`).
 struct BrowsingPreferences: Codable, Equatable {
     /// Saved passwords are offered (and new ones asked about) at all; a profile has its own switch
     /// as well, and both must be on.
@@ -84,6 +85,7 @@ final class AppSettings: ObservableObject {
         static let newProfileSearchEngine = "PBSettingsNewProfileSearchEngine"
         static let newProfileRandomWindowSize = "PBSettingsNewProfileRandomWindowSize"
         static let newProfileBlocksLocalRequests = "PBSettingsNewProfileBlocksLocalRequests"
+        static let newProfileWebRTCAutomatic = "PBSettingsNewProfileWebRTCAutomatic"
         static let proxyFailure = "PBSettingsProxyFailure"
         static let passwordAutoFill = "PBSettingsPasswordAutoFill"
         static let newTabsNextToCurrent = "PBSettingsNewTabsNextToCurrent"
@@ -122,6 +124,13 @@ final class AppSettings: ObservableObject {
     @Published var newProfileBlocksLocalRequests: Bool {
         didSet { defaults.set(newProfileBlocksLocalRequests, forKey: Key.newProfileBlocksLocalRequests) }
     }
+    /// A new profile's WebRTC goes the way its connection goes (`WebRTCMode.automatic`): through a
+    /// SOCKS5 proxy where the network guard holds it there, as Safari's without a proxy, present and
+    /// connecting nowhere with an HTTP proxy. Off: a new profile starts with WebRTC Disabled, as before.
+    /// On by default (the owner, 16 November). Existing profiles keep their choice either way.
+    @Published var newProfileWebRTCAutomatic: Bool {
+        didSet { defaults.set(newProfileWebRTCAutomatic, forKey: Key.newProfileWebRTCAutomatic) }
+    }
     @Published var proxyFailure: ProxyFailure {
         didSet { defaults.set(proxyFailure.rawValue, forKey: Key.proxyFailure) }
     }
@@ -150,6 +159,7 @@ final class AppSettings: ObservableObject {
         newProfileSearchEngine = defaults.string(forKey: Key.newProfileSearchEngine).flatMap(SearchEngine.init) ?? .standard
         newProfileRandomWindowSize = defaults.object(forKey: Key.newProfileRandomWindowSize) as? Bool ?? true
         newProfileBlocksLocalRequests = defaults.object(forKey: Key.newProfileBlocksLocalRequests) as? Bool ?? true
+        newProfileWebRTCAutomatic = defaults.object(forKey: Key.newProfileWebRTCAutomatic) as? Bool ?? true
         proxyFailure = defaults.string(forKey: Key.proxyFailure).flatMap(ProxyFailure.init) ?? .launchAndExplain
         var browsing = BrowsingPreferences()
         browsing.passwordAutoFill = defaults.object(forKey: Key.passwordAutoFill) as? Bool ?? true

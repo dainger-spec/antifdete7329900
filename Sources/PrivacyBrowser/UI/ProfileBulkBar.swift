@@ -63,8 +63,9 @@ struct ProfileSelection: Equatable {
 
 /// The bar floating at the bottom of the Profiles list while several profiles are selected (the
 /// design's `bulk`): how many, and what can be done to all of them at once — launch the stopped
-/// ones, stop the running ones, warm them up, give them proxies of the list, delete them. Each goes
-/// out through `ProfileActions` with the profiles in the order the list shows them.
+/// ones, stop the running ones, warm them up, give them proxies of the list, change their tags,
+/// delete them. Each goes out through `ProfileActions` with the profiles in the order the list
+/// shows them.
 struct ProfileBulkBar: View {
     /// The selected rows, in the list's order.
     let rows: [ProfileRowItem]
@@ -80,9 +81,14 @@ struct ProfileBulkBar: View {
             bar(compact: true)
         }
         .padding(5)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-        .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
+        // Glass: it floats over the rows, which show through it blurred. The tone over the material
+        // keeps the bar dark where a picture of the window draws no material (the snapshots).
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised.opacity(0.72)))
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(LinearGradient(colors: [Color.white.opacity(0.22), Color.white.opacity(0.10)],
+                                         startPoint: .top, endPoint: .bottom), lineWidth: 1))
+        .shadow(color: .black.opacity(0.6), radius: 24, y: 12)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Text(String(format: L("profiles.bulk.selected"), rows.count)))
     }
@@ -116,9 +122,15 @@ struct ProfileBulkBar: View {
             Button { actions.warmUpSeveral(ids) } label: { label(L("profiles.bulk.warmUp"), "flame", compact) }
                 .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.warmUp.help"))
+            Button { actions.scenarioSeveral(ids) } label: { label(L("profiles.bulk.scenario"), "play.rectangle", compact) }
+                .buttonStyle(.lumenGhost)
+                .help(L("profiles.bulk.scenario.help"))
             Button { actions.assignProxies(ids) } label: { label(L("profiles.bulk.assignProxy"), "network", compact) }
                 .buttonStyle(.lumenGhost)
                 .help(L("profiles.bulk.assignProxy.help"))
+            Button { actions.tagSeveral(ids) } label: { label(L("profiles.bulk.tags"), "tag", compact) }
+                .buttonStyle(.lumenGhost)
+                .help(L("profiles.bulk.tags.help"))
             Button(role: .destructive) { actions.deleteSeveral(ids) } label: { label(L("profiles.bulk.delete"), "trash", compact) }
                 .buttonStyle(.lumenDestructive)
                 .help(L("profiles.bulk.delete.help"))

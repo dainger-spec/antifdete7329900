@@ -53,9 +53,10 @@ directories, disabling WebRTC at engine level) are noted in comments and in
 │  PasswordVault / HistoryStore / BookmarkStore ── per-profile encrypted documents           │
 │  EncryptedChunkStream / EncryptedDirectoryArchive / WebKitDataLayout ── WebKit data seal   │
 │  SyncCodec / SyncEngine ── encrypted sync client with per-record merges                    │
+│  VaultRestore ── a vault brought back from where it syncs: staged, read-only, resumable    │
 │  SyncTransport ── backend contract                                                         │
 │     ├── LocalDirectorySyncTransport  (local-only)                                          │
-│     └── HTTPSyncTransport            (server-ready client, docs/SYNC_SERVER_API.md)        │
+│     └── HTTPSyncTransport            (own server, or the Lumen account: AccountSync)       │
 └────────────────────────────────────────────────────────────────────────────────────────────┘
 ┌──────────── NetworkGuardExtension (system extension, NE=1 builds; docs/TUNNEL.md) ─────────┐
 │  GuardFilterProvider ── content filter: a held profile's flows to its proxy and loopback   │
@@ -103,6 +104,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
    ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
    ├─ HKDF "warm-up-last"      → warmup-last.bin               (AAD "warm-up-last:v1:<uuid>")
+   ├─ HKDF "warm-up-history"   → warmup-history.bin            (AAD "warm-up-history:v1:<uuid>")
    ├─ HKDF "journal"           → journal.bin                   (AAD "journal:v1:<uuid>")
    ├─ HKDF "restore-point"     → restore-points/<p>/point.bin  (AAD "restore-point:v1:<uuid>:<p>")
    └─ HKDF "webdata-archive", salt = random per archive → webdata.pbsa chunk key
@@ -121,6 +123,59 @@ back as `ProfileEvent.configurationSaved` for the manager to record).
 A new device unlocks with the master password because `vault.json` (salt, KDF parameters and
 wrapped VMK) is synced in plaintext.
 
+### Unlocking with Touch ID: what is kept, and when the password is still asked
+
+Off unless the person turns it on (**Settings → Security → Unlock with Touch ID**), with the master
+password typed once more. It is offered only where it can work: a Mac with Touch ID, and a build
+whose signature carries the application identifier, to which this Mac's data-protection keychain
+opens (`TouchIDUnlock.isOfferedHere`; a build made with the provisioning profile — `NE=1` or `CAM=1`
+in `scripts/build-app.sh`). Everywhere else the setting and the lock screen's button are absent.
+
+```
+Touch ID (the system's question: "Lumen is trying to unlock the vault")
+   │ releases, to this app only, on this Mac only
+   ▼
+K (random 256-bit) ── a generic-password item of the data-protection keychain: service
+   │                  io.lumenbrowser.Lumen.touch-id-unlock, account = the vault's id;
+   │                  access control biometryCurrentSet, WhenUnlockedThisDeviceOnly, not synchronizable
+   │ AES-256-GCM unwrap (unlock-touchid.json beside vault.json: wrappedMasterKey; AAD
+   │ "touch-id-unlock:v1:<vaultID>:<passwordRevision>:<passwordTypedAt>:<bootTime>:<fingerprints>")
+   ▼
+VMK ── the same key the master password unwraps; everything below it is as above
+```
+
+**What changes in "the keys live only in memory".** Without this setting the VMK exists only in
+memory, between an unlock and a Lock, and on disk only wrapped under the master password. With it
+on, the VMK is also on this Mac's disk wrapped under K, and K is in this Mac's keychain behind its
+Touch ID: whoever can pass Touch ID on this Mac, signed in to this account, with this copy of the
+app, opens the vault without the master password — within the limits below. Never kept: the master
+password itself, the VMK in the clear, anything on another device or in a backup (the item is
+this-device-only and never synced; the record is useless without it). Lock still forgets every key
+in memory, K included: it is read from the keychain for one unlock and its bytes are cleared.
+
+**The master password still rules** (`BiometricUnlock.decide`, tested without a Mac):
+- asked at the first unlock after this Mac restarts (`kern.boottime` is not the one the record
+  names, within 15 s for the clock's corrections), and after 14 days without typing it
+  (`passwordEveryDays`) — the record is rewritten, with a new K, at every unlock with the password;
+- asked when Touch ID does not recognise the finger or does not answer; cancelled, the question
+  goes away and the password's field is where it was;
+- asked for everything that asks for it by itself: changing it, showing saved passwords
+  (`verifyMasterPassword`), turning this setting on. None of them accepts Touch ID.
+
+**What ends it** (what is kept is removed, and it is turned on again in Settings): turning it off;
+changing the master password (the record names the header's `passwordRevision`, and one made before
+a change does not open the vault even with its key); a fingerprint added or removed (the keychain
+drops a `biometryCurrentSet` item, and the record names the system's hash of the enrolled set);
+"Forgot password…" (the vault set aside); a record that is another vault's.
+
+The dates in the record are in the clear, so that the rule is asked before Touch ID is; they are
+bound into the seal, so a record edited by hand — a later date, another start — does not open.
+
+**A profile's process cannot read K**: it is started from `LumenProfile`, signed without any
+entitlement that opens a keychain, and locks itself out of securityd before Safari's code loads
+(docs/IDENTITY.md, "The keychain"). The self-test keeps an item under this service and asks a
+profile's process for it, on a build that can keep one; elsewhere that check is skipped, by name.
+
 ### Changing the master password: what it does, and what it does not
 
 **What it does.** The VMK is wrapped anew under a key derived from the new password, and written
@@ -129,7 +184,8 @@ header counts the change (`passwordRevision`), and goes to the sync location rig
 (or at the next sync, when the location is out of reach): a new device then sets up with the new
 password and not with the old one. The sync location keeps the header with the most changes; a
 device whose header has fewer never puts it back (`SyncEngine.publishVaultHeader`), and says so in
-its sync status.
+its sync status. Unlocking with Touch ID, where it was on, is turned off by the change: what it kept
+is removed, and it is turned on again with the new password.
 
 **What it does not.**
 - A copy of `vault.json` made before the change — in a backup, in Time Machine, on another disk —
@@ -162,7 +218,10 @@ Application Support/PrivacyBrowser/      (0700)
   settings.bin                    AES-GCM(device-settings key, DeviceSettings JSON)   [after configuring sync]
   settings.bin.unreadable         a settings.bin that could not be read, moved aside at the next change of settings, never written over
   proxies.bin                     AES-GCM(proxy-list key, ProxyList JSON)             [after the first proxy is added; this Mac only]
-  sync-state.bin                  AES-GCM(sync key, per-object revision + hash)        [only after sync]
+  sync-state.bin                  AES-GCM(sync key, per-object revision + hash, and the place they are of) [only after sync]
+  restore-staging/<vault id>/     a vault being brought back from its sync location (VaultRestore): the same layout as this
+                                  folder's, built here and moved into place — vault.json last, by the renames move.json lists —
+                                  once all of it has come  [only while "I already have a vault" is under way or was left unfinished]
   profiles/<uuid>/
     config.bin                    AES-GCM(profile key, ProfileConfiguration JSON) — also the person's own tags,
                                   notes and glyph (written only when set; the Profiles list reads them into
@@ -177,6 +236,7 @@ Application Support/PrivacyBrowser/      (0700)
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     warmup-last.bin               AES-GCM(warm-up-last key, WarmUpRecord JSON)        [this Mac only, not exported: how the last run went]
+    warmup-history.bin            AES-GCM(warm-up-history key, WarmUpHistory JSON)    [this Mac only, not exported: the last 50 runs with their sites]
     journal.bin                   AES-GCM(journal key, ProfileJournal JSON)           [this Mac only, not exported: what happened to the profile]
     restore-points/<p>/           copies of webdata.pbsa, safarihome.pbsa, history.bin, cookies.bin, cookies-baseline.bin,
                                   tabs.bin as they were (still encrypted), and point.bin AES-GCM(restore-point key,
@@ -208,6 +268,19 @@ never leaves a half-written ciphertext.
 
 What a version does with a file a newer version wrote — refuses to read it, never writes over or
 deletes it — and which format each file carries: docs/UPDATES.md §4 (`DocumentFormat`).
+
+### No vault yet: one is made, or one is brought back
+
+With no `vault.json` the app is at its first launch (`AppModel.Phase.setup`): the sign-in and this
+Mac's connection first, where the build has an account server, then the master password's screen.
+That screen makes a new vault (`MasterVault.create`: a new vault ID, a new key) — or, by **I already
+have a vault**, brings back one a Mac synced to the Lumen account, a folder or a server of one's
+own, with that vault's own master password (`RestoreFlow`, `RestoreModel`, `VaultRestore`;
+docs/SYNC_FORMAT.md, *A Mac without a vault*). The brought vault is built in `restore-staging/`,
+moved into place whole, and opened as an unlock opens one (`AppModel.adoptRestoredVault`), with the
+place it came from as this Mac's sync target. A move into place that was cut short is finished when
+the app next starts, before the phase is decided (`VaultRestore.finishInterruptedMoves`). After
+"Forgot password…" moved a vault aside, the same screen is shown, with the same two ways.
 
 ### `index.bin` missing or unreadable
 
@@ -343,7 +416,12 @@ the web view, so the profile's data store stayed in use for as long as `terminat
 Only a logout, restart or shutdown still waits inside `terminate:` (cancelling it would cancel
 the logout). If WebKit still holds a store after every attempt, the quit forces the seal and
 leaves a `webdata.forced` marker so that whatever WebKit writes before the exit is discarded at
-the next launch or unlock instead of being taken for newer data.
+the next launch or unlock instead of being taken for newer data. Between attempts, and before a
+forced seal, the data is archived again only when it changed: an archive makes a stamp of what
+it reads — each entry's place, size, times and number, looked at before the entry is read
+(`DirectoryStamp`) — and data whose stamp is still that one is already in the archive. In a
+profile's own process WebKit keeps the store until the process ends, so every stop there used
+to archive the same data four times.
 
 Every seal does the same before it deletes what it sealed: once the archive holds the data, the
 marker (`webdata.forced` for the WebKit data, `home.sealed` for Safari's home) is written first and
@@ -415,20 +493,27 @@ session's data store is gone, or the tab has a dialog waiting. ISOLATION_AND_LIM
 ProxyListView (the Profiles window's Proxies section, its sidebar) ── ProxyListModel (AppModel.proxyList, made at unlock, dropped at lock)
    │  unlock    ProxyList.takeIn(profileProxies:) once: the profiles' own proxies become entries
    │  Import…   ProxyImportView: ProxyListImport.read(text) → report per line → ProxyList.add
-   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked)
+   │            (dedupe by host:port:user, limit; a line without a scheme: type unknown until checked;
+   │            a line not read as written is read once more as a table's row, ProxyListImport.columns)
+   │  shown     ProxyListFilter (all | working | failing | unchecked | unused) and the search, then
+   │            ProxyListOrder (a column title's click: name | country | latency | state; kept in defaults)
    │  Check     ProxyChecker.checkAll: ≤ 8 at a time, each
    │              1. ProxyProbe.run (on a thread, sockets only to the proxy): resolve → connect →
    │                 SOCKS5 and HTTP CONNECT handshakes at once → login → tunnel (target named to the
    │                 proxy) → 2 more tunnels for the latency → ProxyDiagnosis (one verdict per way of failing)
    │              2. working: ProxyGeoLookup.lookUp through the proxy, as the type found
    │                 (ProxyConfigurationFactory, allowFailover = false) → exit IP, country, city, network
-   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow
+   │            → ProxyCheckResult → ProxyList.record (a type found is the entry's) → profiles follow;
+   │            kept only while the entry still connects as it was checked (record(_:for:checked:)):
+   │            one edited during the run keeps what the edit left and is checked again after it
    │  Add/Edit  ProxyEditView: ProxyLineField (one line → ProxyListImport.readField; Check → ProxyChecker.check)
    │            → ProxyListModel.addOne / update (+ the check from the sheet → ProxyList.record)
    │            → ProfileRepository.follow (the profiles that use it as it was)
    │  Export…   ProxyExportView: plaintext warning → ProxyList.exportText → SecureFile.writeOwnerOnly (0600)
    │  Assign…   ProxyAssignView: ProxyList.rotation(of: proxies, over: profiles) → AppModel.assignProxies
    │            → ProfileRepository.assign → ProfileConfiguration.assigning (savingEdit of the proxy alone)
+   │  Replace…  a proxy with profiles on it: ProxyList.replacements (working, of the profiles' country,
+   │            unused first, faster first) → ProxyAssignView with those profiles and proxies ticked
    │  report    ProxyReport (ProxyReportView): the state, the step that failed, in words, with advice
    └─ every change saved at once (proxies.bin); check results when the run ends or is stopped
 
@@ -444,10 +529,12 @@ ProfileManager.launch ── a proxy: ProxyProbe (one tunnel, to the start page'
    ProxyListModel.checkProfileProxy; Show in Proxies)
 
 ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
-   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
-
-ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── ProfileBulkBar (2 or more selected)
-   └─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+   │  the same from a right click on a selected row (SelectionMenuItems) and the selection's inspector
+   ├─ ProfileActions.launchSeveral / stopSeveral / warmUpSeveral (hook) / assignProxies / deleteSeveral
+   ├─ ProfileActions.tagSeveral → ProfileTagsView → AppModel.changeTags → ProfileRepository.changeTags
+   │  (ProfileTags.changing per profile, saved as savingEdit; unreadable settings left alone and said)
+   └─ rows: ProfileFilter (collections, tags, .proxyFailing) and the search (name, tags, notes, exit),
+      then ProfileListOrder inside each group (created | name | lastUsed; kept in defaults)
 ```
 
 - The list (`ProxyList`, BrowserCore) is a vault-level document like `settings.bin`, under its own
@@ -483,7 +570,9 @@ ProfilesScreen ── ProfileSelection (click / ⌘-click / ⇧-click) ── Pr
   newer-wins time for sync moves only when the proxy changes; the location found through the old
   proxy goes (it is about another proxy), and the check's location of the new one is remembered,
   its exit IP only while the profile asks to be warned of changes. Rotation is round-robin in list
-  order. Running profiles get their new proxy at their next launch.
+  order. Running profiles get their new proxy at their next launch. The editor's Save of another
+  proxy does the same with what its own check found (`savingEditorEdit`): "From the list" takes
+  the entry's last check, "New" the Check made there; unchecked, nothing is remembered.
 - The Profiles list's selection lives in the screen (`ProfileSelection`): a plain click selects one
   row, ⌘-click toggles, ⇧-click extends in display order; rows the filter or search hides are never
   acted on. Warm-up of several profiles goes through `ProfileActions.warmUpSeveral`, which today
@@ -533,7 +622,10 @@ windows be merged and needs one `NSWindow` per tab.
 
 A profile targets an Apple OS generation (`DeviceGeneration` / `DeviceGenerations` in
 `BrowserCore`), stored as `ProfileConfiguration.deviceGenerationID` (tolerant decode; old
-configs read as the default generation).
+configs read as the default generation). The catalog holds the Mac's generation alone since the
+iPhone and iPad views were taken out (16 November): their ids (`DeviceGenerations.retiredIDs`)
+are read as the default generation's wherever a configuration is decoded or made
+(`DeviceGenerations.migrated(id:)`), and a stored `phoneDisguise` is ignored.
 
 - `ProfileConfiguration.effectiveUserAgent` = explicit `userAgent` override, else the
   generation's UA, else the WebKit default. `BrowserSession` applies it to every tab and
@@ -598,7 +690,11 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 Safari's engine (SafariChrome's search providers);
    │                 newProfileRandomWindowSize → WindowSize.randomSafe(fitting: visible screen) →
    │                 ProfileConfiguration.windowSize → WindowSizing.apply on each BrowserWindowController
-   │                 (and the first window of Safari's chrome): a real frame, never a declared screen
+   │                 (and the first window of Safari's chrome): a real frame, never a declared screen;
+   │                 newProfileWebRTCAutomatic (on) → ProfileDraft.webRTC = .automatic →
+   │                 ProfileConfiguration.webRTCAutomatic → webRTCLaunchPolicy → WebRTCGate (the relay
+   │                 through SOCKS5, Safari's own without a proxy, else WebRTCGate.silence: present,
+   │                 connecting nowhere where nothing can go around the connection)
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
    │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),
@@ -623,8 +719,25 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │  commands: ＋; per profile launch or new window and stop, edit, warm up (ProfileRowItem.paletteDetail:
    │  its exit country and tags, searched with the title); proxies; warm up several; Sync Now; Lock;
    │  each SettingsSection (AppModel.settingsSection → SettingsView's section); Copy Short Report
+   │  CommandPaletteView.offered → AppPalette.completed (the app's model from the environment,
+   │  \.appModelForCommands): the keys of the commands that have them (AppCommand), Lock through
+   │  AppCommands.lock (asks while profiles run), Check for Updates, and every single setting
+   │  (SettingsSearch.paletteCommands: listed only once typed, found only by words really in its
+   │  name — Command.foundBy; AppModel.settingsReveal → the row marked on its page)
    └  CommandPaletteView.rank → CommandSearch.score (BrowserCore): each word of the query the start
       of a word, inside a word, or its letters in order; best first, ties in the list's order
+
+The Settings search (SettingsView's field) ── SettingsSearch.hits: per page, its name (×100), its
+   │  settings' titles (×10), then title and description together (word starts only) — the keys
+   │  of the texts the pages themselves show (SettingsSearch.entries; the self-test checks every
+   │  key in both languages and that "zoom", «масштаб» and the like find their page)
+   │  TextSearch.score (BrowserCore): every word typed the start of a word; in a name also inside
+   │  one (4+ letters); a word of 7+ letters also by all but its last two
+   └  the sidebar lists the pages that answer, each with the setting found; Return: the best one;
+      the page marks that row (FoundSettingMark, \.settingsFound) and scrolls to it
+
+The app's keys ── AppCommand (one table): the menus' keyboardShortcut, the palette's key caps,
+      Settings › Keyboard Shortcuts' first group and Help › Keyboard Shortcuts' first list
 
 ⌃⌘V (Edit menu; in a profile's process Safari's Edit menu, SafariChrome.addPasteAsTyped)
    └  HumanPaste.pasteIntoKeyWindow ── the WKWebView at or above the key window's first responder

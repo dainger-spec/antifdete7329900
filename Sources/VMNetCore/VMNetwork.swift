@@ -5,9 +5,11 @@ import Foundation
 /// The guest's only network card is one end of a datagram socket; this is the other end. It
 /// answers the guest's ARP, DHCP and DNS itself and ends every TCP connection the guest opens,
 /// carrying its bytes on through the profile's proxy (SOCKS5 or HTTP CONNECT) — by host name
-/// where the guest asked for a name, so the proxy resolves it. There is no other way out: no
-/// route, no NAT, no socket that is not a connection to the proxy. What the proxy does not carry
-/// (UDP, IPv6, connections to private addresses) is refused here.
+/// where the guest asked for a name, so the proxy resolves it. Its UDP goes through the proxy's
+/// own relay (SOCKS5 UDP ASSOCIATE) where the run carries it (`VMNetConfiguration.relaysUDP`).
+/// There is no other way out: no route, no NAT, no socket that is not to the proxy or the relay
+/// it names. What the proxy does not carry (UDP without the relay, IPv6, anything to a private
+/// address) is refused here.
 ///
 /// No root and no kernel extension: it is all sockets this process may open anyway.
 public final class VMNetwork: @unchecked Sendable {
@@ -21,6 +23,8 @@ public final class VMNetwork: @unchecked Sendable {
     private var loop: NetworkLoop?
     private var loopThread: Thread?
     private var lastCounters = VMNetCounters()
+    private var lastHosts: [VMNetHost] = []
+    private var lastNames: [VMNetKnownName] = []
     private var logHandler: (@Sendable (String) -> Void)?
     private var optionsValue = NetworkLoop.Options()
 
@@ -109,6 +113,8 @@ public final class VMNetwork: @unchecked Sendable {
         running.waitUntilEnded()
         state.lock()
         lastCounters = running.snapshot
+        lastHosts = running.hostSnapshot
+        lastNames = running.namesAtEnd
         loop = nil
         loopThread = nil
         state.unlock()
@@ -119,6 +125,44 @@ public final class VMNetwork: @unchecked Sendable {
         state.lock()
         defer { state.unlock() }
         return loop?.snapshot ?? lastCounters
+    }
+
+    /// What went to and from each host the guest asked for, the one seen last first; at most
+    /// `NetworkLoop.hostLimit` of them. The person's browsing: for their eyes while the machine
+    /// runs, never for a log or a file. May be called from any thread.
+    public func hosts() -> [VMNetHost] {
+        state.lock()
+        defer { state.unlock() }
+        return loop?.hostSnapshot ?? lastHosts
+    }
+
+    /// Blocks a host name and every name under it from now on, while the network runs: questions
+    /// for it are answered "no such name", connections to it refused, and those open are ended.
+    /// May be called from any thread; does nothing when the network does not run.
+    public func block(host: String) {
+        state.lock()
+        let running = loop
+        state.unlock()
+        running?.block(host)
+    }
+
+    /// Ends every UDP association the network holds; the guest's next datagram from each port makes
+    /// a new one through the proxy. For after this Mac slept (`NetworkLoop.restartUDP`). May be
+    /// called from any thread; does nothing when the network does not run.
+    public func restartUDP() {
+        state.lock()
+        let running = loop
+        state.unlock()
+        running?.restartUDP()
+    }
+
+    /// After `stop()`: every name the guest was given a fake address for, with it — what a later
+    /// run is handed (`VMNetConfiguration.knownNames`) for a machine woken from a saved state.
+    /// Empty while the network runs. The person's browsing: kept only beside that saved state.
+    public func knownNames() -> [VMNetKnownName] {
+        state.lock()
+        defer { state.unlock() }
+        return lastNames
     }
 
     /// The loop's settings, for tests: shorter timeouts, smaller buffers. Read at `start()`.

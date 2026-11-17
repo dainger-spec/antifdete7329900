@@ -7,6 +7,11 @@ import SystemConfiguration
 // otherwise the SwiftUI app starts.
 // Top-level code runs on the main thread; Swift 5 mode does not infer main-actor isolation for it.
 MainActor.assumeIsolated {
+    // A write to a pipe nobody reads any more fails, and is not a signal that ends the process:
+    // the app's commands to a profile's process that has just exited, and a profile's process
+    // telling a manager that crashed or was force-quit that it is sealing — which is what it does
+    // then, on its own, and what SIGPIPE ended before it could (LumenVM/main.swift does the same).
+    signal(SIGPIPE, SIG_IGN)
     let arguments = CommandLine.arguments
     // A profile's process: started with the websites' languages, its interface's language fixed
     // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
@@ -133,6 +138,12 @@ MainActor.assumeIsolated {
         // scripts/scenario_safari_check.sh starts the proxy that serves the page).
         Localization.applyProcessLanguage()
         ScenarioSafariCheck.start(arguments: arguments)
+    } else if arguments.contains("--address-bar-check") {
+        // Typing into Safari's address bar in a profile's own process, one key press at a time, for
+        // each search engine: the field must hold what was typed, with no exception and no notice
+        // (CI; AddressBarCheck; scripts/address_bar_check.sh starts the proxy).
+        Localization.applyProcessLanguage()
+        AddressBarCheck.start(arguments: arguments)
     } else if arguments.contains("--camera-safari-check") {
         // A profile that substitutes the camera, in its own process with Safari's window: a secure
         // loopback page must get our synthetic stream from getUserMedia and list our camera from
@@ -226,6 +237,9 @@ MainActor.assumeIsolated {
         // English); set before AppKit builds its menus.
         Localization.applyProcessLanguage()
         SimplifiedModeNotice.presentsAutomatically = true
+        // The app as a person opens it: the one start that may show the launch screen
+        // (WelcomeLaunch) — not CI's Settings window check, which runs this same branch.
+        WelcomeLaunch.interactiveStart = !arguments.contains("--settings-window-check")
         PrivacyBrowserApp.main()
     }
 }

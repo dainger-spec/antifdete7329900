@@ -65,6 +65,18 @@ final class SessionsTests: LumenUITestCase {
         wait(sessionCard("Реклама"), "the other session is still there")
         XCTAssertFalse(sessionCard("Почта").exists, "the deleted session does not come back")
         shot("06 after delete and relaunch")
+
+        // From the list, deleting asks first too (audit 4): a swipe on the card only offers it — no
+        // full swipe deletes at once — and the editor's question comes before anything goes.
+        let delete = app.buttons["Удалить"]
+        for _ in 0..<3 where !delete.exists {
+            sessionCard("Реклама").swipeLeft()
+            _ = delete.waitForExistence(timeout: 5)
+        }
+        wait(delete, "the card's swipe offers to delete it").tap()
+        XCTAssertTrue(sessionCard("Реклама").exists, "nothing is deleted before the answer")
+        touchable("confirmDelete", "deleting from the list asks first").tap()
+        waitGone(sessionCard("Реклама"), "the answer deletes the session")
     }
 
     /// The owner (8 November): a profile that lived behind a proxy never opens directly when its proxy

@@ -6,11 +6,15 @@ import Foundation
 /// transport does not do yet:
 /// - `413 too_large` and `507 quota_exceeded` are about one object: it is deferred, as after a lost
 ///   compare-and-swap, and the run goes on (the engine defers a `syncConflict`) — never the whole run
-///   stopped. Which objects, `deferredForSpace` says.
+///   stopped. Which objects, `deferredForSpace` says (`deferredTooLarge`, `deferredOverQuota`: which
+///   for which reason), and the person is told (CONTRACT.md §16.1).
 /// - the server's generation (§16.2): read from the list, sent on every write; `409
 ///   generation_changed` stops the run, nothing more written. Resetting the sync state when the
 ///   generation is not the one kept is `SyncGeneration`'s.
-/// - `403 sync_not_in_plan`: the iPhone without a trial or a paid plan — said as a state.
+/// - `403 sync_not_in_plan`: the iPhone without a paid plan running — said as a state.
+/// - Any other refusal that names its code (`{"error": {"code": …}}`) is thrown as the Mac's
+///   `SyncServerRefusal`, with `availableAt` (`sync_on_hold`) and the wait of a `429`: each is a state
+///   with words of its own (`SyncRead.Failure`). A refusal without a code stays `CoreError.syncServer`.
 ///
 /// The requests go through `send`, the app's own (the device token, no profile's proxy: decision 1
 /// of the Mac's SYNC_FORMAT.md).
@@ -38,6 +42,8 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
     private let lock = NSLock()
     private var _generation: String?
     private var _deferredForSpace: [String] = []
+    private var _deferredTooLarge: [String] = []
+    private var _deferredOverQuota: [String] = []
     private var _readOnly = false
     private var _withheld: [String] = []
 
@@ -51,6 +57,9 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
     public var generation: String? { lock.withLock { _generation } }
     /// Objects the server refused for their size or the plan's space in this run (deferred).
     public var deferredForSpace: [String] { lock.withLock { _deferredForSpace } }
+    /// Of them, the ones refused for their size (`413 too_large`) and for the plan's space (`507`).
+    public var deferredTooLarge: [String] { lock.withLock { _deferredTooLarge } }
+    public var deferredOverQuota: [String] { lock.withLock { _deferredOverQuota } }
     /// A run that only reads (the sync's step 3): every write the engine asks for is withheld — never
     /// sent — and deferred, as after a lost compare-and-swap. Which ones, `withheld` says.
     public var readOnly: Bool {
@@ -65,9 +74,12 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
         if let value = answer.headers[Self.generationHeader.lowercased()] { lock.withLock { _generation = value } }
     }
 
-    private func refused(_ answer: Answer) -> CoreError {
-        let code = AccountWire.refusal(answer.data)?.code ?? String(data: answer.data.prefix(200), encoding: .utf8) ?? ""
-        return .syncServer(status: answer.status, message: code)
+    private func refused(_ answer: Answer) -> Error {
+        guard let refusal = AccountWire.refusal(answer.data) else {
+            return CoreError.syncServer(status: answer.status, message: String(data: answer.data.prefix(200), encoding: .utf8) ?? "")
+        }
+        let retryAfter = refusal.retryAfter ?? answer.headers["retry-after"].flatMap { Int($0.trimmingCharacters(in: .whitespaces)) }
+        return SyncServerRefusal(status: answer.status, code: refusal.code, availableAt: refusal.availableAt, retryAfter: retryAfter)
     }
 
     public func listObjects() async throws -> [RemoteObjectInfo] {
@@ -110,7 +122,10 @@ public final class LumenSyncTransport: SyncTransport, @unchecked Sendable {
             // The planted fault: the refusal stops the whole run, as the Mac's transport does today.
             if Faults.isActive(.spaceRefusalStopsSync) { throw refused(answer) }
             // One object too large, or the plan's space full: this object waits, the others go on.
-            lock.withLock { _deferredForSpace.append(objectID) }
+            lock.withLock {
+                _deferredForSpace.append(objectID)
+                if answer.status == 413 { _deferredTooLarge.append(objectID) } else { _deferredOverQuota.append(objectID) }
+            }
             throw CoreError.syncConflict(objectID: objectID, remoteRevision: expectedRevision ?? 0)
         default:
             noteGeneration(answer)

@@ -14,8 +14,11 @@ help, and they are kept apart on purpose:
   proxy and this Mac (127.0.0.1) only; everything else is dropped.
 
 A profile gets WebRTC through its proxy only when every condition holds (`WebRTCGate`); with the
-first that does not, WebRTC is off in the engine (no `RTCPeerConnection` at all) and the person is
-told why, in words, with what they can do.
+first that does not, WebRTC cannot connect. Where the guard is ready, it then holds the profile's
+process to its proxy all the same and WebRTC stays in the pages, as Safari has it, connecting
+nowhere (relay-only with no ICE server: `WebRTCGate.silence`, ISOLATION_AND_LIMITATIONS §5); where
+it is not, WebRTC is off in the engine (no `RTCPeerConnection` at all). The person is told why, in
+words, with what they can do (with Automatic, an HTTP proxy is not said: nothing to do about it).
 
 | Traffic of a proxied profile | Path | How it is known |
 |---|---|---|
@@ -25,7 +28,8 @@ told why, in words, with what they can do.
 | WebRTC: STUN, TURN, media, data channels (UDP) | **the relay** on 127.0.0.1 → the profile's SOCKS5 UDP association; the page's own ICE servers are never contacted | self-test (a video call inside a capture of every packet of the runner), leak check, unit tests |
 | A peer's candidate named by a host name (FQDN, mDNS `.local`) | dropped before the engine sees it: nothing is resolved | shim tests, self-test (no packet carries the name) |
 | Anything else a held profile's process or WebKit's processes for it open | dropped by the network guard | unit tests of its rules; on a Mac: the check below |
-| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, a proxy whose UDP leaves from another address than its TCP, the guard not ready | off, said why | self-test (the controls: off, not direct) |
+| WebRTC with an HTTP CONNECT proxy, a proxy without UDP, a proxy whose UDP leaves from another address than its TCP — the guard ready | present, connecting nowhere: no ICE server, nothing gathered; the guard holds the process | shim tests, unit tests, self-test (one address: no candidate) |
+| The same, the guard not ready | off, said why | self-test (the controls: off, not direct) |
 
 A page cannot send other UDP: WebRTC is the only UDP a web page can start.
 
@@ -226,8 +230,9 @@ itself: it comes only inside Lumen.app.
  profile process (pid P, SOCKS5 proxy X)          manager process (Lumen)
  ───────────────────────────────────────          ──────────────────────────────────────────────
  page: RTCPeerConnection                           WebRTCRelays: TURNUDPHost on 127.0.0.1:port
-   iceServers := [turn:127.0.0.1:port] (only)        per-launch username/password, 401 otherwise
-   iceTransportPolicy := relay                       allocation → SOCKS5 UDP ASSOCIATE @ X
+   iceServers := [turn:127.0.0.1:port] (only)        per-launch username/password, 401 otherwise;
+   iceTransportPolicy := relay                       a socket not counted for P → 403
+                                                     allocation → SOCKS5 UDP ASSOCIATE @ X
    (user script; the page sees its own config)       │                       (TCP control + UDP)
         │                                            ▼
  WebKit network process (for P)                    the proxy X ─────────► peers, STUN servers
@@ -245,7 +250,19 @@ itself: it comes only inside Lumen.app.
 - **The relay is in the manager**, not in the profile's process: a profile process with a proxy has
   the kernel refuse it every UDP datagram (`ProfileNetworkGuard.closeTheProcess`), and stays so.
   On 127.0.0.1 nothing outside this Mac can reach the relay; any process of this Mac can, and needs
-  the launch's own credentials (401 otherwise). Measured with WebKit's own TURN client (CI runs 609,
+  the launch's own credentials (401 otherwise) — and, since the third audit (14 November 2026), a
+  socket the kernel counts for the profile's process: the credentials are its pages' to use, a
+  script of a page could send them to a page of another profile or browser on this Mac, and with
+  them alone that page would get a relayed address at this profile's proxy exit. The relay asks the
+  kernel's table of UDP sockets whom the client's socket is counted for (`RelayClients`, the
+  attribution the guard holds flows by: WebKit's network process opens a page's WebRTC sockets on
+  the profile process's behalf); this process reads it where macOS shows it every socket (26), and
+  asks the guard, which reads it as root, where it shows a process that is not root only its own
+  (27). A socket of any other process, or one neither can read, gets 403 and no association. The
+  pages cannot read the credentials either: a blob worker's script carries no relay, and every
+  frame's `getConfiguration` hides it, also for a connection another frame made (`PrivacyScripts`).
+  The self-test's stand-in for the guard (CI cannot load one) and the capture harness let in a
+  client no table shows them. Measured with WebKit's own TURN client (CI runs 609,
   610, 612, macOS 26.6.2 and 27.0.1): relay candidates only, at the proxy's address; a data channel
   and a video call through the proxy; 0 packets of the app outside loopback but to the proxy.
 - **The order at a launch** (`ProfileManager.decideWebRTC`): the guard's state (once asking macOS
@@ -297,7 +314,10 @@ CreatePermission, ChannelBind, Send/Data indications, ChannelData. What libwebrt
   send theirs — which it keeps (the last 64) and logs one by one, with whom each was counted for.
 - **The rules for a held process** (`GuardPolicy.verdict`): loopback (the relay, this Mac's own
   services); the proxy, by the name the flow was opened by with its port, or by an address the app
-  resolved for it (any port: a proxy's UDP relay port is its own); DNS over UDP only when every
+  resolved for it (any port: a proxy's UDP relay port is its own) — or, for a process held only so
+  that its WebRTC can stay present and connect nowhere (`relaysUDP` false), TCP to the proxy's port
+  alone, never UDP and no other port of the proxy's host (a STUN or TURN server it might also run
+  would show a page this Mac's address); DNS over UDP only when every
   question asks for the proxy's own name (each datagram looked into); everything else — another
   host, the local network, multicast, DNS over TCP, a flow whose remote end is not known, another
   transport — is dropped.
@@ -442,14 +462,16 @@ the guard drops each of those flows, because they are counted for the held profi
 |---|---|---|
 | A build without the guard (no `NE=1`) | off | "this version has no network guard" (release) / how the developer builds it |
 | Not installed, awaiting approval, off, a restart needed | off | the state and the next step |
-| Installed, not answering (updating, crashed) | off; held profiles are stopped | "not answering", Check Again; a stopped profile says why |
+| Installed, not answering (updating, crashed) | off; held profiles are stopped — with the guard ready every proxied profile in its own process is held (through the relay, or present and connecting nowhere), so all of them are | "not answering", Check Again; a stopped profile says why |
 | Installed, not checked on this Mac / check failed | off | "being checked" / "the check failed", Check Again |
-| Ready, HTTP proxy | off | "an HTTP proxy cannot carry UDP" |
-| Ready, SOCKS5 without UDP / UDP unknown | off | "the proxy does not pass UDP" / "could not find out" |
-| Ready, the proxy's UDP leaves from another address than its TCP | off | "its proxy sends UDP out from another address than its TCP" |
-| Ready, the proxy's TCP exit could not be found out | off | "the address its proxy leaves from could not be found out" |
+| Ready, HTTP proxy | present, connecting nowhere, the process held | "an HTTP proxy cannot carry UDP" (not with Automatic) |
+| Ready, SOCKS5 without UDP / UDP unknown | present, connecting nowhere, the process held | "the proxy does not pass UDP" / "could not find out" |
+| Ready, the proxy's UDP leaves from another address than its TCP | present, connecting nowhere, the process held | "its proxy sends UDP out from another address than its TCP" |
+| Ready, the proxy's TCP exit could not be found out | present, connecting nowhere, the process held | "the address its proxy leaves from could not be found out" |
+| Ready, WebRTC Disabled | present, connecting nowhere, the process held | nothing (the person's choice) |
+| Ready, a proxy with sites that bypass it | off (holding the process would cut those sites off) | the editor says so |
 | Running, a later association of the proxy leaves from another address | that allocation refused (403): no relayed address, nothing sent | nothing new: the call fails as with a dead proxy |
-| Ready, the guard does not take the process, the relay does not start | off | "the guard did not take the profile's process, or its relay did not start" |
+| Ready, the guard does not take the process, the relay does not start | off (present only once a hold is taken) | "the guard did not take the profile's process, or its relay did not start" |
 | Ready, all of it holds | through the relay and the proxy | the editor and the inspector say so |
 | The sandboxed build (profiles inside the app's process) | off | "only for a profile in its own process" |
 
@@ -522,8 +544,14 @@ the guard drops each of those flows, because they are counted for the held profi
   (the same address, another one, the exit unknown).
 - `TURNServerTests`, one address: the exit's address on another port is relayed; another address,
   no exit, an IPv6 egress next to an IPv4 exit get 403, no allocation, the association closed;
-  the trace's parser.
-- The shim tests: the page's configuration, urls, tampering, named candidates.
+  the trace's parser. Which clients: a client not admitted gets 403 and no association, before
+  the answer nothing is opened, an admitted one allocates.
+- `SocketTableTests`, the relay's client: a socket counted for the profile's process (a flow of the
+  user-space stack, a delegated socket) is the profile's; one of another process, or the network
+  process's own, is not; only the sockets the datagram can have come from count; on macOS, this
+  process's own socket read from the kernel.
+- The shim tests: the page's configuration, urls, tampering, named candidates; another frame's
+  `getConfiguration` on a connection, and a blob worker's script, without the relay.
 - `NE=check`: the extension compiles, its plists lint, the provider is the filter alone, its
   entitlements give it no network.
 - The layout the kernel lets start ("What the kernel kills"): in the builds made there the app's own

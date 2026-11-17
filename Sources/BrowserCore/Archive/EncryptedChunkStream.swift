@@ -119,7 +119,12 @@ final class EncryptedChunkReader {
     private let key: SymmetricKey
     private let header: Data
     private let chunkSize: Int
+    /// The plaintext decrypted and not yet handed out is `buffer[position...]`. What was handed
+    /// out is dropped when the next chunk is taken in, once per chunk — not at every read, which
+    /// copied all that was left of a chunk (up to 1 MiB) for each field of each record: five
+    /// times per file, so an archive of many small files cost megabytes moved per file.
     private var buffer = Data()
+    private var position = 0
     private var index: UInt64 = 0
     private var sawFinal = false
 
@@ -147,19 +152,20 @@ final class EncryptedChunkReader {
 
     /// Returns exactly `count` plaintext bytes or throws.
     func read(_ count: Int) throws -> Data {
-        while buffer.count < count {
+        while buffer.count - position < count {
             guard !sawFinal else { throw CoreError.corruptData("archive payload ended early") }
             try readChunk()
         }
-        let result = Data(buffer.prefix(count))
-        buffer = Data(buffer.dropFirst(count))
+        let start = buffer.startIndex + position
+        let result = buffer.subdata(in: start..<(start + count))
+        position += count
         return result
     }
 
     /// Verifies the stream ended cleanly: final chunk seen, all plaintext consumed, no trailing bytes.
     func finish() throws {
         while !sawFinal { try readChunk() }
-        guard buffer.isEmpty else { throw CoreError.corruptData("unconsumed archive payload") }
+        guard buffer.count == position else { throw CoreError.corruptData("unconsumed archive payload") }
         let trailing = try handle.read(upToCount: 1) ?? Data()
         guard trailing.isEmpty else { throw CoreError.corruptData("data after final chunk") }
     }
@@ -187,6 +193,11 @@ final class EncryptedChunkReader {
             sawFinal = true
         } else {
             throw CoreError.authenticationFailed
+        }
+        // What was handed out goes now: at most what was left of one chunk is moved.
+        if position > 0 {
+            buffer.removeSubrange(buffer.startIndex..<(buffer.startIndex + position))
+            position = 0
         }
         buffer.append(plaintext)
         index += 1

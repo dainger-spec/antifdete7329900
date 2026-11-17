@@ -119,7 +119,10 @@ struct SessionsView: View {
                     .accessibilityIdentifier("confirmDelete")
                 Button(L("Отмена"), role: .cancel) {}
             } message: { session in
-                Text(L("Куки, хранилище сайтов, вкладки и история «%@» будут удалены. Это нельзя отменить.", session.name))
+                // A session made from the Mac's profile: deleted here, it is not synced here again.
+                Text(session.syncedProfileID == nil
+                     ? L("Куки, хранилище сайтов, вкладки и история «%@» будут удалены. Это нельзя отменить.", session.name)
+                     : L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации."))
             }
         }
     }
@@ -139,8 +142,11 @@ struct SessionsView: View {
             Divider()
             Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session }
         }
-        .swipeActions {
-            Button(L("Удалить"), systemImage: "trash", role: .destructive) { deleting = session }
+        // Deleting takes the session's cookies and logins for good: no full swipe does it, and the
+        // button asks first (`deleting`). Not the destructive role, which takes the row off the list
+        // before the answer.
+        .swipeActions(allowsFullSwipe: false) {
+            Button(L("Удалить"), systemImage: "trash") { deleting = session }.tint(Color(.systemRed))
             Button(L("Изменить"), systemImage: "pencil") { editor = .edit(session.id) }.tint(Color(.systemGray))
         }
     }
@@ -171,7 +177,8 @@ extension SessionsView {
     }
 }
 
-/// Create or change a session's name, description and tags; delete it (k-keyboard).
+/// Create or change a session's name, description and tags, within the Mac's limits (`SessionLimits`:
+/// a session made from a profile of the Mac's sends them there); delete it (k-keyboard).
 struct SessionEditor: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -188,20 +195,34 @@ struct SessionEditor: View {
                 Section {
                     TextField(L("Имя"), text: $name).accessibilityIdentifier("sessionName")
                         .focused($nameFocused)
+                        .onChange(of: name) { _, text in
+                            if text.count > SessionLimits.nameLength { name = String(text.prefix(SessionLimits.nameLength)) }
+                        }
                     TextField(L("Описание"), text: $notes).accessibilityIdentifier("sessionNotes")
+                        .onChange(of: notes) { _, text in
+                            if text.count > SessionLimits.notesLength { notes = String(text.prefix(SessionLimits.notesLength)) }
+                        }
                     TextField(L("Метки через запятую"), text: $tags).accessibilityIdentifier("sessionTags")
                         .textInputAutocapitalization(.never)
                 } header: {
                     Text(L("Сессия"))
                 } footer: {
-                    Text(L("У сессии свои куки, хранилище сайтов, вкладки и история."))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(L("У сессии свои куки, хранилище сайтов, вкладки и история."))
+                        Text(L("Имя — до %@ символов, описание — до %@; меток — до %@, каждая до %@ символов.",
+                               "\(SessionLimits.nameLength)", "\(SessionLimits.notesLength)", "\(SessionLimits.tagCount)",
+                               "\(SessionLimits.tagLength)"))
+                    }
                 }
-                if sessionID != nil {
+                if let sessionID {
                     Section {
                         Button(L("Удалить сессию"), role: .destructive) { confirmDelete = true }
                             .accessibilityIdentifier("deleteSession")
                     } footer: {
-                        Text(L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии."))
+                        // A session made from the Mac's profile: deleted here, it is not synced here again.
+                        Text(model.session(sessionID)?.syncedProfileID == nil
+                             ? L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии.")
+                             : L("Удаляются куки, хранилище, кэш, вкладки и история этой сессии на iPhone. Профиль на Mac остаётся, но сюда больше не приходит; вернуть его можно на экране синхронизации."))
                     }
                 }
             }

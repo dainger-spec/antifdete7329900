@@ -44,6 +44,31 @@ final class LocalNetworkRulesTests: XCTestCase {
         XCTAssertTrue(LocalNetworkRules.patterns.allSatisfy { $0.hasPrefix(ProxiedContentRules.urlStart) })
     }
 
+    /// The fourth audit, NET-1: a page of the internet whose address carries a user name and password
+    /// that read as an address on this Mac or the local network is no page on them; its loads of
+    /// them are blocked. A page really there keeps its own.
+    func testUserInfoThatReadsAsALocalAddressDoesNotMakeAPageALocalOne() {
+        for top in ["http://192.168.1.1:1@attacker.example/", "http://router.lan:1@attacker.example/", "http://10.0.0.1:8080@attacker.example/",
+                    "http://printer.local:1@attacker.example/", "http://nas.home.arpa:1@attacker.example/", "http://svc.internal:1@attacker.example/",
+                    "http://100.64.0.1:1@attacker.example/", "http://169.254.169.254:1@attacker.example/", "http://127.0.0.1:1@attacker.example/",
+                    "http://localhost:x@attacker.example/", "http://172.16.0.1:1@attacker.example:8443/"] {
+            for url in ["http://127.0.0.1:631/", "http://192.168.1.1/", "http://printer.local/", "http://[fe80::1]/"] {
+                XCTAssertTrue(LocalNetworkRules.blocks(url, topURL: top), "\(url) from \(top)")
+            }
+        }
+        for url in ["http://192.168.1.1:1@example.com/", "http://printer.local:1@example.com/"] {
+            XCTAssertFalse(LocalNetworkRules.blocks(url, topURL: page), url)
+        }
+        for top in ["http://192.168.1.1/", "http://x@192.168.1.1/", "http://nas.local/", "http://nas.local:5000/x", "http://10.0.0.5:8080/",
+                    "http://u:p@router.lan/", "http://[fe80::1]/", "http://[::ffff:c0a8:101]:81/", "http://localhost:5173/"] {
+            XCTAssertFalse(LocalNetworkRules.blocks("http://192.168.1.1/api", topURL: top), top)
+        }
+        for pattern in LocalNetworkRules.localNetworkURLPatterns {
+            let host = String(pattern.dropFirst(ProxiedContentRules.urlStart.count))
+            XCTAssertTrue(host.hasSuffix(ProxiedContentRules.hostEnd) || host.hasPrefix(#"\["#), pattern)
+        }
+    }
+
     func testAPageOnThisMacOrTheLocalNetworkKeepsItsOwnLoads() {
         XCTAssertFalse(LocalNetworkRules.blocks("http://192.168.1.1/api", topURL: "http://192.168.1.1/"))
         XCTAssertFalse(LocalNetworkRules.blocks("http://127.0.0.1:5173/src/main.js", topURL: "http://localhost:5173/"))

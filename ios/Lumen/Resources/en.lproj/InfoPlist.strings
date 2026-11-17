@@ -1,2 +1,7 @@
-/* Lumen for iPhone: the app name in English. The texts are in Localizable.xcstrings. */
+/* Lumen for iPhone: the app name and Info.plist's texts in English (the Russian is in project.yml).
+   The app's own texts are in Localizable.xcstrings. */
+
 "CFBundleDisplayName" = "Lumen";
+"NSFaceIDUsageDescription" = "Face ID opens the key of your Lumen for Mac vault kept on this iPhone.";
+"NSCameraUsageDescription" = "The camera takes the photo or video you upload to a website through its file field.";
+"NSMicrophoneUsageDescription" = "The microphone records the sound of a video you take to upload to a website.";

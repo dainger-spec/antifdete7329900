@@ -102,6 +102,7 @@ enum HelpContent {
                 .heading("commands.waiting"),
                 .commands([
                     ("await page.waitFor(selector)", "commands.waitFor"),
+                    ("await page.waitForURL('**/account')", "commands.waitForURL"),
                     ("await sleep(1500)", "commands.sleep"),
                 ]),
                 .heading("commands.acting"),
@@ -109,6 +110,7 @@ enum HelpContent {
                     ("await page.click(selector)", "commands.click"),
                     ("await page.dblclick(selector)", "commands.dblclick"),
                     ("await page.hover(selector)", "commands.hover"),
+                    ("await page.selectOption(selector, 'DE')", "commands.selectOption"),
                     ("await page.type(selector, text)", "commands.type"),
                     ("await page.press('Enter')", "commands.press"),
                     ("await page.scroll(600)", "commands.scroll"),
@@ -128,6 +130,7 @@ enum HelpContent {
                 .commands([
                     ("log('…', value)", "commands.log"),
                     ("params", "commands.params"),
+                    ("return { orders: 3 }", "commands.result"),
                 ]),
             ]
         case .api:
@@ -206,12 +209,13 @@ enum HelpContent {
                 .heading("vm.add"),
                 .steps(["vm.step.open", "vm.step.download", "vm.step.setup", "vm.step.tools", "vm.step.create"]),
                 .heading("vm.what"),
-                .points(["vm.what.system", "vm.what.proxy", "vm.what.noProxy", "vm.what.locale", "vm.what.screen", "vm.what.look", "vm.what.network"]),
+                .points(["vm.what.system", "vm.what.proxy", "vm.what.noProxy", "vm.what.locale", "vm.what.screen", "vm.what.look", "vm.what.network",
+                         "vm.what.wake", "vm.what.browser", "vm.what.livenetwork"]),
                 .heading("vm.costs"),
-                .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start"]),
+                .points(["vm.costs.disk", "vm.costs.memory", "vm.costs.limit", "vm.costs.start", "vm.costs.hidden"]),
                 .heading("vm.know"),
                 .note("vm.know.disks"),
-                .points(["vm.know.same", "vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),
+                .points(["vm.know.same", "vm.know.speed", "vm.know.udp", "vm.know.updates", "vm.know.base", "vm.know.license", "vm.know.local"]),
             ]
         case .check:
             return [
@@ -240,8 +244,8 @@ enum HelpContent {
         case .keys:
             return [
                 .heading("keys.app"),
-                .shortcuts([("⌘K", "keys.palette"), ("⌘N", "keys.newProfile"), ("⇧⌘E", "keys.scenarios"), ("⌘,", "keys.settings"),
-                            ("⌘?", "keys.help")]),
+                // Every key the app's own commands have, from the table the menus take them from.
+                .shortcuts(AppCommand.allCases.map { (keys: $0.keys, about: $0.helpKey) }),
                 .heading("keys.window"),
                 .paragraph("keys.window.note"),
                 .shortcuts([("⌘T", "keys.newTab"), ("⇧⌘T", "keys.reopenTab"), ("⌘L", "keys.address"), ("⌘R", "keys.reload"),

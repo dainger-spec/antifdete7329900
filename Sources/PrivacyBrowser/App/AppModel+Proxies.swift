@@ -33,9 +33,20 @@ extension AppModel {
     /// The profiles that used the list's entry as it was (`previous`) take it as it is now — an
     /// edit in the Proxies section, or a check that found its type (`ProfileRepository.follow`).
     /// Says which profiles could not be changed (they keep their proxy as it was).
+    ///
+    /// Only the profiles whose settings use that proxy are read and written: which they are, their
+    /// details say (`profileDetails(of:)`, read again only for settings that changed). Every
+    /// profile's settings were read for each proxy a check run found the type of, on the main
+    /// thread. A profile whose settings do not read is given too: it fails, and is said, as before.
     func followProxyEntry(_ entry: ProxyListEntry, previous: ProxySettings) {
         guard let repository else { return }
-        let outcome = repository.follow(entry, previous: previous)
+        let identity = ProxyList.identity(of: previous)
+        let listed = repository.list()
+        let known = profileDetails(of: listed)
+        let candidates = listed.map(\.id).filter { id in known[id].map { $0.proxyIdentity == identity } ?? true }
+        let outcome = repository.follow(entry, previous: previous, among: candidates)
+        // The virtual machines that use it follow it too (each keeps a copy of its proxy).
+        if let proxy = entry.usableProxy { virtualMachines?.followProxyEntry(proxy, previous: previous) }
         for (id, reason) in outcome.failed {
             let name = profiles.first { $0.id == id }?.name ?? id.uuidString
             showError(String(format: L("proxies.follow.failed"), name, reason))
@@ -102,7 +113,7 @@ extension AppModel {
                     do {
                         try await manager.stop(id)
                     } catch {
-                        self.showError(errorText(error))
+                        self.showError(self.named(errorText(error), for: id))
                     }
                 }
             }
@@ -115,6 +126,26 @@ extension AppModel {
             guard phase == .unlocked else { return }
             await deleteProfile(id)
         }
+    }
+
+    /// Adds tags to, and removes tags from, each of `ids` — the selection's "Tags…"
+    /// (`ProfileRepository.changeTags`): saved as an edit of each profile, synced like one. Says,
+    /// once, which profiles could not be changed (their settings do not read: they are left as they
+    /// are), and how many had no room for every tag.
+    @discardableResult
+    func changeTags(of ids: [UUID], adding: [String], removing: [String]) -> TagChangeOutcome? {
+        guard let repository else { return nil }
+        let outcome = repository.changeTags(of: ids, adding: adding, removing: removing)
+        let failed = ids.filter { outcome.failed[$0] != nil }
+        if let first = failed.first {
+            let names = failed.map { id in profiles.first { $0.id == id }?.name ?? id.uuidString }
+            showError(String(format: L("profiles.tags.failed"), ProfileListView.listed(names), outcome.failed[first] ?? ""))
+        }
+        if !outcome.full.isEmpty {
+            showError(String(format: L("profiles.tags.full"), outcome.full.count, ProfileTags.maximumCount))
+        }
+        if !outcome.changed.isEmpty { refresh() }
+        return outcome
     }
 }
 

@@ -45,6 +45,9 @@ final class AppModel: ObservableObject {
     let store: LumenStore
     let catalog: SessionCatalog
     @Published private(set) var sessions: [Session] = []
+    /// The Mac's profiles whose sessions were deleted here: the sync does not bring them back
+    /// (`SessionCatalog.notSyncedHere`).
+    @Published private(set) var notSyncedHere: Set<UUID> = []
     @Published private(set) var proxies: [ProxyEntry] = []
     @Published var path: [UUID] = []
     /// A site's light page fills the browser: the window goes light, its status bar dark on white (run 110).
@@ -109,6 +112,7 @@ final class AppModel: ObservableObject {
 
     func refresh() {
         sessions = catalog.sessions
+        if notSyncedHere != catalog.notSyncedHere { notSyncedHere = catalog.notSyncedHere }
         if proxies.isEmpty { proxies = store.loadProxies() }
     }
 
@@ -181,29 +185,50 @@ final class AppModel: ObservableObject {
     // MARK: The sync
 
     /// The Mac's profiles as the sync read them, made sessions here (ios/SYNC_PLAN.md, step 3). A
-    /// profile's proxy becomes an entry of the list — the one already there for the same address and
-    /// login, its password brought up to date in the Keychain — and the session is bound to it.
+    /// profile's proxy becomes an entry of the list — the one already there with the same address,
+    /// login and password; the session's own entry, its password brought up to date, when the Mac
+    /// changed only that; or a new one (`SyncedProxyEntry`) — and the session is bound to it.
+    /// `keepingEditsOf`: the profiles whose edit made here the vault refused (they keep it).
     @discardableResult
-    func applySynced(_ profiles: [SyncedProfile]) -> Int {
-        var added: [UUID] = []
-        let made = catalog.applySynced(profiles) { proxy in
-            if let found = proxies.first(where: { $0.kind == proxy.kind && $0.host == proxy.host && $0.port == proxy.port
-                                                  && $0.username == proxy.username }) {
-                if ProxyPasswords.get(found.id) != proxy.password { ProxyPasswords.set(proxy.password, for: found.id) }
-                return found.id
+    func applySynced(_ profiles: [SyncedProfile], keepingEditsOf kept: Set<UUID> = []) -> Int {
+        var changed: [UUID] = []
+        let made = catalog.applySynced(profiles, keepingEditsOf: kept) { proxy, session in
+            let elsewhere = Set(catalog.sessions.filter { $0.id != session.id }.compactMap(\.proxyID))
+            switch SyncedProxyEntry.choose(for: proxy, boundTo: session.proxyID, entries: proxies, usedElsewhere: elsewhere,
+                                           password: { ProxyPasswords.get($0) }) {
+            case let .use(id):
+                return id
+            case let .newPassword(id):
+                ProxyPasswords.set(proxy.password, for: id)
+                if let index = proxies.firstIndex(where: { $0.id == id }) {
+                    proxies[index].hasPassword = !proxy.password.isEmpty
+                    proxies[index].check = nil
+                }
+                changed.append(id)
+                return id
+            case .add:
+                // Another entry at the same address (another password): this one says whose it is.
+                let shared = proxies.contains { $0.kind == proxy.kind && $0.host == proxy.host && $0.port == proxy.port }
+                var entry = ProxyEntry(name: shared ? session.name : "", kind: proxy.kind, host: proxy.host, port: proxy.port,
+                                       username: proxy.username)
+                entry.hasPassword = !proxy.password.isEmpty
+                ProxyPasswords.set(proxy.password, for: entry.id)
+                proxies.append(entry)
+                changed.append(entry.id)
+                return entry.id
             }
-            var entry = ProxyEntry(kind: proxy.kind, host: proxy.host, port: proxy.port, username: proxy.username)
-            entry.hasPassword = !proxy.password.isEmpty
-            ProxyPasswords.set(proxy.password, for: entry.id)
-            proxies.append(entry)
-            added.append(entry.id)
-            return entry.id
         }
-        if !added.isEmpty { store.saveProxies(proxies) }
+        if !changed.isEmpty { store.saveProxies(proxies) }
         refresh()
         refreshRuntimes()
-        added.forEach(check)
+        changed.forEach(check)
         return made.count
+    }
+
+    /// The Mac's profiles deleted here come back as sessions at the next sync.
+    func syncAgainHere() {
+        catalog.syncAgainHere()
+        refresh()
     }
 
     // MARK: Proxies
@@ -220,13 +245,18 @@ final class AppModel: ObservableObject {
         check(entry.id)
     }
 
+    /// Checks the entry; one checking already is checked again when that check ends, if the entry was
+    /// changed meanwhile (its result is the old line's, never stored on the new one).
     func check(_ id: UUID) {
         guard let entry = proxies.first(where: { $0.id == id }), !checking.contains(id) else { return }
         checking.insert(id)
+        let password = ProxyPasswords.get(id)
         Task {
-            let result = await ProxyChecker.check(entry, password: ProxyPasswords.get(id))
+            let result = await ProxyChecker.check(entry, password: password)
             checking.remove(id)
             guard let index = proxies.firstIndex(where: { $0.id == id }) else { return }
+            // Edited while it ran — another address, login or password: this result is not the entry's.
+            guard proxies[index].sameConnection(as: entry), ProxyPasswords.get(id) == password else { return check(id) }
             if Faults.isActive(.recheckDropsProxy), proxies[index].check?.alive == true, !result.alive {
                 // The planted fault: a proxy found dead is taken off its sessions, which then go direct — the
                 // binding cleared too, or the lock (SessionLock) would keep them shut and the fault would
@@ -271,6 +301,7 @@ final class AppModel: ObservableObject {
         catalog.delete(id)
         refresh()
         let storeID = session.storeID
+        SyncedDataStores.release(storeID)
         Task { try? await WKWebsiteDataStore.remove(forIdentifier: storeID) }
     }
 

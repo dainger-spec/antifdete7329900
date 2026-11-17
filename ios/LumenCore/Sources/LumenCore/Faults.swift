@@ -19,6 +19,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case backIgnored             // the back button does nothing
     case forwardIgnored          // the forward button does nothing
     case reloadIgnored           // the reload button does nothing
+    case appLinksAllowed         // a page's link to another host is let through as WebKit decides: an app that claims it takes it from the session
     // Proxies
     case proxyNotApplied         // a session's proxy never reaches its relay: the session goes direct
     case proxyChangeNotLive      // one proxy changed for another takes effect only after a relaunch

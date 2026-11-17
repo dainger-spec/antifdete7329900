@@ -18,6 +18,8 @@ final class InstallerTests: XCTestCase {
     var launched: [URL] = []
     var launchFails = false
     var processLists: [[BundleProcess]] = []
+    /// The bundles the installer looked for processes in, in order.
+    var askedAbout: [URL] = []
     var clock: Date!
 
     override func setUpWithError() throws {
@@ -89,7 +91,10 @@ final class InstallerTests: XCTestCase {
 
     private func installer(patience: TimeInterval = 600) -> Installer {
         Installer(app: installed, staging: staging, environment: Installer.Environment(
-            processes: { [unowned self] _ in self.processLists.isEmpty ? [] : self.processLists.removeFirst() },
+            processes: { [unowned self] bundle in
+                self.askedAbout.append(bundle)
+                return self.processLists.isEmpty ? [] : self.processLists.removeFirst()
+            },
             launch: { [unowned self] url in
                 self.launched.append(url)
                 if self.launchFails { throw NSError(domain: "LaunchServices", code: -10810) }
@@ -164,6 +169,40 @@ final class InstallerTests: XCTestCase {
         let outcome = await installer().run()
         XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
         XCTAssertEqual(build(of: installed), "1")
+    }
+
+    /// Opened again after the wait, while the release was being checked (seconds of hashing,
+    /// extracting and checking signatures): the request ends as it does during the wait, nothing is
+    /// swapped, and the archive is kept for the next quit. The reopened app ran on from a bundle
+    /// swapped away and deleted (audit 3, #27).
+    func testAnAppStartedAgainWhileTheReleaseIsCheckedEndsTheRequest() async throws {
+        try stage()
+        processLists = [[], [BundleProcess(pid: 4444, startedAt: start.addingTimeInterval(5))]]
+        let outcome = await installer().run()
+        XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
+        XCTAssertEqual(build(of: installed), "1")
+        XCTAssertTrue(launched.isEmpty)
+        XCTAssertEqual(try leftovers(), [], "the extracted release went with the work folder")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("PrivacyBrowser-2.zip").path),
+                      "kept for the next quit")
+        XCTAssertEqual(askedAbout, [installed.standardizedFileURL, installed.standardizedFileURL])
+    }
+
+    /// Opened again in the moment between that last look and the swap: it runs from the old app at
+    /// its new place, which is looked at too, and goes back where it was.
+    func testAnAppStartedAgainAsItIsSwappedGetsItsAppBack() async throws {
+        try stage()
+        processLists = [[], [], [BundleProcess(pid: 4545, startedAt: start.addingTimeInterval(5))]]
+        let outcome = await installer().run()
+        XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
+        XCTAssertEqual(build(of: installed), "1", "the previous app is back")
+        XCTAssertNoThrow(try CodeSignature.check(installed, identifier: identifier, teamID: nil))
+        XCTAssertTrue(launched.isEmpty)
+        XCTAssertEqual(try leftovers(), [])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("PrivacyBrowser-2.zip").path))
+        XCTAssertEqual(askedAbout.count, 3)
+        XCTAssertNotEqual(askedAbout.last, installed.standardizedFileURL, "the last look is at the old app's new place")
+        XCTAssertEqual(askedAbout.last?.lastPathComponent, installed.lastPathComponent)
     }
 
     // MARK: Refusals: nothing replaced

@@ -49,6 +49,99 @@ final class VMProfileTests: XCTestCase {
         XCTAssertEqual(try VMProfile.validatedName("  Shop DE \nsecond line"), "Shop DE")
     }
 
+    func testAMachineMadeLikeAnotherIsAnotherMacWithTheSameSettings() throws {
+        var generator = SeededGenerator(state: 11)
+        let proxy = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "p")
+        var first = VMProfile(name: "Shop DE", proxy: proxy, timeZoneIdentifier: "Europe/Berlin", language: "de-DE", countryCode: "DE",
+                              displayID: "macbook-pro-14", memoryGB: 6, macAddress: "02:11:22:33:44:55", startURL: "https://example.com/",
+                              notes: "the shop", accent: VMAccent.multicolor.rawValue, computerName: "Anna's MacBook Pro",
+                              blockedHosts: ["ads.example.net"], keyboard: VMKeyboardLayout.automatic, instantWake: true)
+        first.lastLaunchedAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let second = first.duplicate(named: "Shop DE 2", using: &generator)
+        // What is a machine's own is made anew: its id — and with it its folder, its disk and the
+        // identifier its macOS sees — and its network card's address; and it was never started.
+        XCTAssertNotEqual(second.id, first.id)
+        XCTAssertNotEqual(second.macAddress, first.macAddress)
+        XCTAssertTrue(VMProfile.isMACAddress(second.macAddress), second.macAddress)
+        XCTAssertNil(second.lastLaunchedAt)
+        XCTAssertEqual(second.name, "Shop DE 2")
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        XCTAssertNotEqual(library.machineDirectory(for: second.id), library.machineDirectory(for: first.id))
+        // An accent colour is drawn again, as for any new machine — one of macOS's.
+        XCTAssertNotNil(second.accent.flatMap(VMAccent.init(rawValue:)))
+        XCTAssertNil(VMProfile(name: "A", accent: nil).duplicate(named: "A 2", using: &generator).accent, "left to the system stays so")
+        // What the person set stays, for them to change what differs.
+        var expected = first
+        expected.id = second.id
+        expected.name = second.name
+        expected.createdAt = second.createdAt
+        expected.lastLaunchedAt = nil
+        expected.macAddress = second.macAddress
+        expected.accent = second.accent
+        XCTAssertEqual(second, expected)
+        XCTAssertNoThrow(try second.validate())
+        // Two made from one differ from each other too.
+        let third = first.duplicate(named: "Shop DE 3", using: &generator)
+        XCTAssertNotEqual(third.id, second.id)
+        XCTAssertNotEqual(third.macAddress, second.macAddress)
+        // And both are kept beside the first.
+        var list = VMProfiles()
+        try list.save(first)
+        try list.save(second)
+        try list.save(third)
+        XCTAssertEqual(list.profiles.map(\.name), ["Shop DE", "Shop DE 2", "Shop DE 3"])
+    }
+
+    /// A password corrected in the Proxies section reaches the machines that use the proxy, as it
+    /// reaches the Safari profiles: a machine keeps a copy of its proxy, and its start failed on
+    /// the old password however often the person corrected it there.
+    func testAMachineFollowsItsProxyEditedInTheProxiesSection() throws {
+        let old = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "expired")
+        let other = ProxySettings(kind: .socks5, host: "fr.example", port: 1080, username: "u", password: "expired")
+        var list = VMProfiles()
+        let first = VMProfile(name: "Shop DE", proxy: old)
+        let second = VMProfile(name: "Shop DE 2", proxy: old)
+        let elsewhere = VMProfile(name: "Shop FR", proxy: other)
+        let direct = VMProfile(name: "Direct")
+        for profile in [first, second, elsewhere, direct] { try list.save(profile) }
+        var corrected = old
+        corrected.password = "new"
+        XCTAssertEqual(Set(list.follow(corrected, previous: old)), [first.id, second.id])
+        XCTAssertEqual(list.profile(first.id)?.proxy?.password, "new")
+        XCTAssertEqual(list.profile(second.id)?.proxy?.password, "new")
+        XCTAssertEqual(list.profile(elsewhere.id)?.proxy, other)
+        XCTAssertNil(list.profile(direct.id)?.proxy)
+        // Nothing more to follow the second time.
+        XCTAssertEqual(list.follow(corrected, previous: old), [])
+        // A new port the provider gave: followed too.
+        var moved = corrected
+        moved.port = 2080
+        XCTAssertEqual(Set(list.follow(moved, previous: corrected)), [first.id, second.id])
+        XCTAssertEqual(list.profile(first.id)?.proxy?.port, 2080)
+        // A proxy a machine cannot use (TLS to the proxy): the machine keeps its own.
+        var tls = moved
+        tls.tlsToProxy = true
+        XCTAssertEqual(list.follow(tls, previous: moved), [])
+        XCTAssertEqual(list.profile(first.id)?.proxy, moved)
+    }
+
+    func testAMachineMadeLikeAnotherGetsTheNextNameNobodyHas() {
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE"]), "Shop DE 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE", "Shop DE 2", "Shop DE 3"]), "Shop DE 4")
+        // A name that ends in a number goes on from it.
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE 2", taken: ["Shop DE", "Shop DE 2"]), "Shop DE 3")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Machine 9", taken: ["Machine 9", "Machine 10"]), "Machine 11")
+        // A number that is the whole name, or no counter, is part of the name.
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "2024", taken: []), "2024 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop 0", taken: []), "Shop 0 2")
+        XCTAssertEqual(VMProfile.nameForDuplicate(of: "  Shop  ", taken: []), "Shop 2")
+        // Never longer than a name may be.
+        let long = String(repeating: "m", count: 64)
+        let made = VMProfile.nameForDuplicate(of: long, taken: [long])
+        XCTAssertEqual(made, String(repeating: "m", count: 62) + " 2")
+        XCTAssertEqual(try? VMProfile.validatedName(made), made)
+    }
+
     func testTheTimeZoneAndLanguageFollowWhereTheProxyComesOut() {
         let proxy = ProxySettings(kind: .socks5, host: "fr.example", port: 1080)
         let check = ProxyCheckResult(checkedAt: Date(), exitIP: "203.0.113.7", countryCode: "fr", timeZoneIdentifier: "Europe/Paris")
@@ -180,6 +273,26 @@ final class VMRequirementsTests: XCTestCase {
             XCTAssertTrue(VMRequirements.memoryChoices.contains(VMRequirements.recommendedMemoryGB(hostMemory: host * gigabyte)))
         }
     }
+
+    /// A Mac with 8 GB: a new machine fits (it gets 4, and the Mac keeps 4) — and two of them at
+    /// once take all of it, which is said (a warning, never a refusal); on a Mac with 16 GB two
+    /// machines as recommended leave it room.
+    func testTwoMachinesOnAMacWith8GBAreSaidToBeTooMuch() {
+        let gib = VMRequirements.gibibyte
+        let small = 8 * gib
+        let one = VMRequirements.recommendedMemoryGB(hostMemory: small)
+        XCTAssertEqual(VMRequirements.problems(appleSilicon: true, helperAvailable: true, freeDisk: 500 * gib, downloadBytes: 0,
+                                               hostMemory: small, machineMemoryGB: one), [], "a new machine does not fit an 8 GB Mac")
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [one]))
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [one, one]))
+        XCTAssertEqual(VMRequirements.memoryLeft(hostMemory: small, runningGB: [one, one]), 0)
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: small, runningGB: [3, 3]))
+        let medium = 16 * gib
+        let two = VMRequirements.recommendedMemoryGB(hostMemory: medium)
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: [two, two]))
+        XCTAssertTrue(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: [8, 8]))
+        XCTAssertFalse(VMRequirements.isMemoryTight(hostMemory: medium, runningGB: []))
+    }
 }
 
 final class VMGuestSettingsTests: XCTestCase {
@@ -249,6 +362,105 @@ final class VMGuestSettingsTests: XCTestCase {
         XCTAssertTrue(failed.wallpaperFailed)
         XCTAssertEqual(failed.wallpaperNote, "execution error: (-2700)")
         XCTAssertFalse(VMGuestStatus(text: "LUMEN_WALLPAPER_STATE=set\n").wallpaperFailed)
+    }
+
+    func testTheKeyboardGoesWithTheLanguageWhereItIsKnownForCertain() throws {
+        func auto(_ language: String?) -> [VMKeyboardLayout] {
+            VMKeyboardLayout.layouts(setting: VMKeyboardLayout.automatic, language: language)
+        }
+        XCTAssertEqual(auto("en-US"), [.us])
+        XCTAssertEqual(auto("en-CA"), [.us])
+        XCTAssertEqual(auto("en-GB"), [.british])
+        XCTAssertEqual(auto("de-DE"), [.german])
+        XCTAssertEqual(auto("de-AT"), [.german])
+        XCTAssertEqual(auto("fr-FR"), [.french])
+        XCTAssertEqual(auto("es-ES"), [.spanish])
+        XCTAssertEqual(auto("ru-RU"), [.russian, .abc])
+        // A country whose own layout is not known here for certain: the plain Latin one.
+        XCTAssertEqual(auto("de-CH"), [.abc])
+        XCTAssertEqual(auto("fr-CA"), [.abc])
+        XCTAssertEqual(auto("es-MX"), [.abc])
+        XCTAssertEqual(auto("pt-BR"), [.abc])
+        XCTAssertEqual(auto("it-IT"), [.abc])
+        // Another script, or no language: the machine's own are left.
+        XCTAssertEqual(auto("ja-JP"), [])
+        XCTAssertEqual(auto("zh-Hant-TW"), [])
+        XCTAssertEqual(auto(nil), [])
+        // The person's own choice, whatever the language; none at all leaves the base's.
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "german", language: "en-US"), [.german])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "russian", language: "en-US"), [.russian, .abc])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: nil, language: "en-US"), [])
+        XCTAssertEqual(VMKeyboardLayout.layouts(setting: "klingon", language: "en-US"), [])
+
+        XCTAssertNoThrow(try VMProfile(name: "A", keyboard: "auto").validate())
+        XCTAssertNoThrow(try VMProfile(name: "A", keyboard: "british").validate())
+        XCTAssertThrowsError(try VMProfile(name: "A", keyboard: "klingon").validate())
+        // A list from before this setting: the base's layouts, as a machine had them.
+        let old = try JSONEncoder().encode(VMProfile(name: "A"))
+        XCTAssertNil(try JSONDecoder().decode(VMProfile.self, from: old).keyboard)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", keyboard: "auto")))
+        XCTAssertEqual(kept.keyboard, "auto")
+        // The language a proxy brings is the one the layout goes with.
+        let followed = VMGuestSettings(profile: VMProfile(name: "A", language: "en-US", keyboard: "auto"))
+        XCTAssertEqual(followed.keyboard, [.us])
+        XCTAssertNotEqual(followed.revision, VMGuestSettings(profile: VMProfile(name: "A", language: "en-US")).revision)
+    }
+
+    func testWhatTheSystemHasIsComparedOnlyOnceTheseSettingsAreApplied() {
+        let settings = VMGuestSettings(timeZone: "America/New_York", language: "en-US", hostName: "Mac", startURL: nil)
+        func status(tools: Int = 10, revision: String? = nil, zone: String = "America/New_York", language: String = "en-US",
+                    locale: String = "en_US") -> VMGuestStatus {
+            VMGuestStatus(text: """
+                LUMEN_TOOLS_VERSION=\(tools)
+                LUMEN_APPLIED_REVISION=\(revision ?? settings.revision)
+                LUMEN_TIMEZONE_NOW=\(zone)
+                LUMEN_LANGUAGE_NOW=\(language)
+                LUMEN_LOCALE_NOW=\(locale)
+                """)
+        }
+        XCTAssertEqual(status().differences(from: settings), [])
+        XCTAssertEqual(status(language: "EN-us", locale: "en_US@currency=USD").differences(from: settings), [])
+        XCTAssertEqual(status(zone: "Europe/Moscow").differences(from: settings),
+                       [VMGuestStatus.Difference(what: .timeZone, asked: "America/New_York", has: "Europe/Moscow")])
+        XCTAssertEqual(status(language: "ru-RU", locale: "ru_RU").differences(from: settings).map(\.what), [.language, .locale])
+        // Settings the script has not applied yet, or a script that does not look: nothing is said.
+        XCTAssertEqual(status(revision: "other", zone: "Europe/Moscow").differences(from: settings), [])
+        XCTAssertEqual(status(tools: 9, zone: "Europe/Moscow").differences(from: settings), [])
+        // What a profile does not set is not compared.
+        let plain = VMGuestSettings(timeZone: nil, language: nil, hostName: "Mac", startURL: nil)
+        XCTAssertEqual(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=10\nLUMEN_APPLIED_REVISION=\(plain.revision)\nLUMEN_TIMEZONE_NOW=Europe/Moscow\n")
+            .differences(from: plain), [])
+        XCTAssertTrue(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=next\n").keyboardFromNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_KEYBOARD_STATE=set\n").keyboardFromNextStart)
+    }
+
+    /// A layout or browser mode's menu bar written at a start waits for the next one — which a
+    /// machine with instant wake, woken rather than started, never has until it is shut down.
+    func testWhatWaitsForTheNextStartIsSaidAndIsOfTheMacOSThatWroteIt() {
+        let keyboard = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=next\n")
+        let menuBar = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=set\nLUMEN_MENU_BAR_STATE=next\n")
+        XCTAssertTrue(keyboard.waitsForTheNextStart)
+        XCTAssertFalse(keyboard.menuBarFromNextStart)
+        XCTAssertTrue(menuBar.menuBarFromNextStart)
+        XCTAssertTrue(menuBar.waitsForTheNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=12\nLUMEN_KEYBOARD_STATE=set\n").waitsForTheNextStart)
+        XCTAssertFalse(VMGuestStatus(text: "LUMEN_TOOLS_VERSION=11\n").waitsForTheNextStart)
+
+        // Woken (no start of a new macOS): what the file says is the running macOS's own, however old.
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        XCTAssertEqual(keyboard.asOf(start: nil, written: start.addingTimeInterval(-86_400)), keyboard)
+        XCTAssertEqual(menuBar.asOf(start: nil, written: nil), menuBar)
+        // Written since the machine's macOS started anew: its own.
+        XCTAssertTrue(keyboard.asOf(start: start, written: start.addingTimeInterval(60)).waitsForTheNextStart)
+        XCTAssertTrue(menuBar.asOf(start: start, written: start).waitsForTheNextStart)
+        // Written before it, or when is not known: that start was the next one, and what waited for
+        // it is in use — the rest of what the file says stays.
+        let before = keyboard.asOf(start: start, written: start.addingTimeInterval(-1))
+        XCTAssertFalse(before.waitsForTheNextStart)
+        XCTAssertNil(before.keyboardState)
+        XCTAssertEqual(before.toolsVersion, 12)
+        XCTAssertFalse(menuBar.asOf(start: start, written: nil).waitsForTheNextStart)
+        XCTAssertNil(menuBar.asOf(start: start, written: nil).menuBarState)
     }
 }
 
@@ -353,6 +565,10 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertEqual(try VMHelperRequest.parse(line), request)
         XCTAssertEqual(VMHelperRequest.run(profile: VMProfile(name: "Direct"), library: library, hostCores: 8, texts: [:]).network, .direct)
         // The base's first-run setup: no network card at all — and never a profile's machine.
+        // A file the person has, asked of the helper before it is copied.
+        let inspect = VMHelperRequest(mode: .inspect, restoreImagePath: "/Users/a/Downloads/UniversalMac.ipsw")
+        XCTAssertEqual(try VMHelperRequest.parse(try inspect.line()), inspect)
+        XCTAssertTrue(try inspect.line().contains(#""mode":"inspect""#))
         let offline = VMHelperRequest(mode: .run, machineDirectory: "/tmp/lib/base", network: .absent)
         XCTAssertEqual(try VMHelperRequest.parse(try offline.line()).network, .absent)
         XCTAssertTrue(try offline.line().contains(#""network":"absent""#))
@@ -367,11 +583,65 @@ final class VMHelperProtocolTests: XCTestCase {
         XCTAssertEqual(VMHelperEvent.parse(troubled.line())?.trouble.flatMap(VMNetworkTrouble.init(rawValue:)), .proxyUnreachable)
         XCTAssertNil(VMNetworkTrouble(rawValue: "a kind of a later helper"))
         // The connector's kinds, word for word (it is not linked here): a configuration file is one.
-        XCTAssertEqual(VMNetworkTrouble.allCases.map(\.rawValue),
+        let ownProxyKinds: [VMNetworkTrouble] = [.ownProxyUnreachable, .ownProxyLogin, .ownProxyNotUnderstood]
+        XCTAssertEqual(VMNetworkTrouble.allCases.filter { !ownProxyKinds.contains($0) }.map(\.rawValue),
                        ["nameNotFound", "notPublic", "unreachable", "proxyUnreachable", "proxyRefused", "proxyConfigurationFile"])
+        // The machine's own proxy's kinds are the app's words for the helper's counters, not the connector's.
+        XCTAssertEqual(ownProxyKinds.map(\.rawValue), ["ownProxyUnreachable", "ownProxyLogin", "ownProxyNotUnderstood"])
         XCTAssertGreaterThan(VMNetworkTrouble.failuresBeforeSaying, 1, "one dead address of a page is not a machine without internet")
         XCTAssertNil(VMHelperEvent.parse("2026-11-13 12:00:00.000 LumenVM[1:2] a line of the system's own"))
         XCTAssertNil(VMHelperEvent.parse(#"{"kind":"something-new"}"#), "an event of a later helper is not this version's")
+    }
+
+    /// A machine's UDP (HTTP/3, WebRTC) goes out only where the check before its start found the
+    /// proxy carries it — from the address its pages leave from — and never around the proxy.
+    func testAMachinesUDPGoesOutOnlyWhereTheCheckFoundAWayAndNeverAroundTheProxy() throws {
+        let socks = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "p")
+        let http = ProxySettings(kind: .httpConnect, host: "de.example", port: 8080)
+        let https = ProxySettings(kind: .httpConnect, host: "de.example", port: 8443, tlsToProxy: true)
+        func check(_ udp: ProxyUDPSupport?, alive: Bool = true) -> ProxyCheckResult {
+            var result = alive ? ProxyCheckResult.alive(location: nil, latency: 0.1) : ProxyCheckResult.dead(.noAnswer)
+            result.udp = udp
+            return result
+        }
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.supported)), .throughProxy)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.unsupported)), .notCarried)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.elsewhere)), .elsewhere)
+        // What cannot be told keeps UDP off.
+        for unknown: ProxyUDPSupport? in [.exitUnknown, .unknown, nil] {
+            XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(unknown)), .unknown)
+        }
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: check(.supported, alive: false)), .unknown)
+        XCTAssertEqual(VMUDPRoute.forProxy(socks, check: nil), .unknown)
+        // An HTTP proxy carries TCP only, whatever a check says.
+        XCTAssertEqual(VMUDPRoute.forProxy(http, check: check(.supported)), .httpProxy)
+        XCTAssertEqual(VMUDPRoute.forProxy(https, check: check(.supported)), .httpProxy)
+        XCTAssertEqual(VMUDPRoute.expected(for: nil, check: nil), .direct)
+        XCTAssertEqual(VMUDPRoute.expected(for: socks, check: check(.supported)), .throughProxy)
+        XCTAssertEqual(VMUDPRoute.allCases.filter(\.carriesUDP), [.throughProxy, .direct])
+
+        // The request carries it — only the way the machine's network goes.
+        let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+        let proxied = VMProfile(name: "A", proxy: socks)
+        let direct = VMProfile(name: "B")
+        func relays(_ profile: VMProfile, _ udp: VMUDPRoute?) -> Bool? {
+            VMHelperRequest.run(profile: profile, library: library, hostCores: 8, texts: [:], udp: udp).relaysUDP
+        }
+        XCTAssertNil(relays(proxied, nil), "off unless decided")
+        XCTAssertEqual(relays(proxied, .throughProxy), true)
+        for off: VMUDPRoute in [.httpProxy, .notCarried, .elsewhere, .unknown] { XCTAssertNil(relays(proxied, off), off.rawValue) }
+        XCTAssertNil(relays(proxied, .direct), "never this Mac's own UDP for a machine with a proxy")
+        XCTAssertEqual(relays(direct, .direct), true)
+        XCTAssertNil(relays(direct, .throughProxy))
+        let request = VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:], udp: .throughProxy)
+        XCTAssertEqual(try VMHelperRequest.parse(try request.line()), request)
+        XCTAssertTrue(try request.line().contains(#""relaysUDP":true"#))
+        // Not a part of what a saved state goes with: the network is made anew at each start.
+        XCTAssertEqual(request.stateStamp, VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:]).stateStamp)
+        // A request without it (an app before this) is a machine without UDP.
+        let before = VMHelperRequest.run(profile: proxied, library: library, hostCores: 8, texts: [:])
+        XCTAssertFalse(try before.line().contains("relaysUDP"))
+        XCTAssertNil(try VMHelperRequest.parse(try before.line()).relaysUDP)
     }
 }
 
@@ -483,6 +753,7 @@ final class VMMachineSettingsTests: XCTestCase {
         XCTAssertEqual(profile.moreStartURLs, [])
         XCTAssertEqual(profile.blockedHosts, [])
         XCTAssertFalse(profile.startsFullScreen)
+        XCTAssertFalse(profile.sleepsScreenWhenHidden)
         XCTAssertNoThrow(try profile.validate())
         // And what is set is kept through a save.
         var changed = profile
@@ -505,6 +776,7 @@ final class VMMachineSettingsTests: XCTestCase {
         changed.moreStartURLs = ["https://b.example/"]
         changed.blockedHosts = ["ads.example.com"]
         changed.startsFullScreen = true
+        changed.sleepsScreenWhenHidden = true
         XCTAssertNoThrow(try changed.validate())
         changed.notes = "shop"
         let again = try JSONCoding.decoder.decode(VMProfile.self, from: JSONCoding.encoder.encode(changed))
@@ -665,8 +937,10 @@ final class VMGuestToolsTests: XCTestCase {
             }
             XCTAssertTrue(text.contains("TOOLS_VERSION=\(VMGuestTools.version)\n"), "\(name) is not the tools' version the app expects")
             if name == "lumen-guest.sh" {
-                // What came of Lumen's desktop picture, and what the system said when nothing did.
-                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE"] {
+                // What came of Lumen's desktop picture, and what the system said when nothing did;
+                // and what waits for the machine's next start.
+                for key in ["LUMEN_WALLPAPER_STATE", "LUMEN_WALLPAPER_NOTE", "LUMEN_KEYBOARD_STATE", "LUMEN_MENU_BAR_STATE",
+                            "LUMEN_STAGE", "LUMEN_READY_REVISION", "LUMEN_SCREEN_SLEEP", "LUMEN_SCREEN_SLEEP_NOTE"] {
                     XCTAssertTrue(text.contains("'\(key)="), "\(name) does not write \(key)")
                 }
             }
@@ -698,6 +972,9 @@ final class VMGuestToolsTests: XCTestCase {
         let runner = try String(contentsOf: Self.folder.deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Sources/LumenVM/MachineRunner.swift"), encoding: .utf8)
         XCTAssertTrue(runner.contains("\"lumen-shutdown\""))
+        // So is the word to put the display to sleep (`VMScreenSleep`), which the helper leaves by its place.
+        XCTAssertTrue(boot.contains("\"$share/\(VMGuestSettings.screenSleepFileName)\""))
+        XCTAssertTrue(runner.contains("files.screenSleep"))
     }
 
     func testTheScriptsParse() throws {
@@ -734,5 +1011,165 @@ final class VMGuestToolsTests: XCTestCase {
         let files = VMLibrary.MachineFiles(directory: URL(fileURLWithPath: "/m", isDirectory: true))
         XCTAssertEqual(files.tools.path, "/m/tools")
         XCTAssertNotEqual(files.tools, files.share)
+    }
+}
+
+/// Instant wake, browser mode and the network panel, as the app and the helper tell each other of them.
+final class VMWakeAndNetworkProtocolTests: XCTestCase {
+    private let library = VMLibrary(root: URL(fileURLWithPath: "/tmp/lib"))
+
+    private func request(_ profile: VMProfile) -> VMHelperRequest {
+        VMHelperRequest.run(profile: profile, library: library, hostCores: 8, texts: [:])
+    }
+
+    func testAProfilesInstantWakeAndBrowserModeReachTheHelperAndAreOffUnlessChosen() throws {
+        let plain = request(VMProfile(name: "A"))
+        XCTAssertNil(plain.keepsState)
+        XCTAssertNil(plain.browserMode)
+        XCTAssertNotNil(plain.stateStamp)
+        let chosen = request(VMProfile(name: "A", instantWake: true, browserMode: true))
+        XCTAssertEqual(chosen.keepsState, true)
+        XCTAssertEqual(chosen.browserMode, true)
+        XCTAssertEqual(try VMHelperRequest.parse(try chosen.line()), chosen)
+        // A list from before these settings: a machine as it was then.
+        let old = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A")))
+        XCTAssertFalse(old.instantWake)
+        XCTAssertFalse(old.browserMode)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", instantWake: true, browserMode: true)))
+        XCTAssertTrue(kept.instantWake)
+        XCTAssertTrue(kept.browserMode)
+        // A machine shown as a browser has Safari open, and its macOS is told to keep the bars away.
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false, browserMode: true))
+        XCTAssertTrue(settings.opensSafari)
+        XCTAssertTrue(settings.browserMode)
+        XCTAssertFalse(VMGuestSettings(profile: VMProfile(name: "A", opensSafari: false)).opensSafari)
+        XCTAssertNotEqual(settings.revision, VMGuestSettings(profile: VMProfile(name: "A")).revision)
+    }
+
+    /// Whether a machine's display sleeps while its window is out of sight is the profile's own
+    /// choice, off unless made; it reaches the helper, and is no part of what a saved state goes
+    /// with — the guest is told while it runs, not at its start.
+    func testAMachinesScreenSleepIsItsOwnChoiceAndNoPartOfASavedState() throws {
+        XCTAssertFalse(VMProfile(name: "A").sleepsScreenWhenHidden)
+        XCTAssertNil(request(VMProfile(name: "A")).sleepsScreenWhenHidden)
+        let chosen = request(VMProfile(name: "A", sleepsScreenWhenHidden: true))
+        XCTAssertEqual(chosen.sleepsScreenWhenHidden, true)
+        XCTAssertEqual(try VMHelperRequest.parse(try chosen.line()), chosen)
+        let kept = try JSONDecoder().decode(VMProfile.self, from: JSONEncoder().encode(VMProfile(name: "A", sleepsScreenWhenHidden: true)))
+        XCTAssertTrue(kept.sleepsScreenWhenHidden)
+        // A machine made like another keeps it, as the person's setting.
+        XCTAssertTrue(VMProfile(name: "A", sleepsScreenWhenHidden: true).duplicate(named: "A 2").sleepsScreenWhenHidden)
+        let id = UUID()
+        XCTAssertEqual(request(VMProfile(id: id, name: "A", macAddress: "02:00:00:00:00:01", instantWake: true)).stateStamp,
+                       request(VMProfile(id: id, name: "A", macAddress: "02:00:00:00:00:01", instantWake: true,
+                                         sleepsScreenWhenHidden: true)).stateStamp)
+        // Nor is it a setting the guest starts with.
+        XCTAssertEqual(VMGuestSettings(profile: VMProfile(name: "A")).revision,
+                       VMGuestSettings(profile: VMProfile(name: "A", sleepsScreenWhenHidden: true)).revision)
+    }
+
+    func testASavedStateGoesWithTheMachinesHardwareAndItsSettingsAndNothingElse() {
+        let id = UUID()
+        func stamp(_ change: (inout VMProfile) -> Void = { _ in }) -> String? {
+            var profile = VMProfile(id: id, name: "A", language: "en-US", localeFollowsProxy: false, macAddress: "02:00:00:00:00:01",
+                                    instantWake: true)
+            change(&profile)
+            return request(profile).stateStamp
+        }
+        let base = stamp()
+        XCTAssertEqual(base, stamp())
+        // What the framework is told of the machine, and what its macOS starts with: a change is
+        // another machine to a saved state.
+        XCTAssertNotEqual(base, stamp { $0.memoryGB = 6 })
+        XCTAssertNotEqual(base, stamp { $0.cores = 4 })
+        XCTAssertNotEqual(base, stamp { $0.displayID = "imac-24" })
+        XCTAssertNotEqual(base, stamp { $0.macAddress = "02:00:00:00:00:02" })
+        XCTAssertNotEqual(base, stamp { $0.language = "de-DE" })
+        XCTAssertNotEqual(base, stamp { $0.timeZoneIdentifier = "Europe/Berlin" })
+        XCTAssertNotEqual(base, stamp { $0.browserMode = true })
+        // What is this Mac's side of it — the name, the notes, the window, what is blocked, the
+        // proxy's own address — changes nothing in the machine.
+        XCTAssertEqual(base, stamp { $0.name = "B" })
+        XCTAssertEqual(base, stamp { $0.notes = "x" })
+        XCTAssertEqual(base, stamp { $0.startsFullScreen = true })
+        XCTAssertEqual(base, stamp { $0.blockedHosts = ["ads.example.com"] })
+        XCTAssertEqual(base, stamp { $0.soundEnabled = false })
+    }
+
+    func testTheHelpersCommandsAreOneLineEachAndNothingElseIsOne() {
+        let commands: [VMHelperCommand] = [.stop, .shutdown, .kill, .hosts(true), .hosts(false), .block("ads.example.com"), .fullScreen]
+        XCTAssertEqual(commands.map(\.line), ["stop", "shutdown", "kill", "hosts on", "hosts off", "block ads.example.com", "fullscreen"])
+        for command in commands { XCTAssertEqual(VMHelperCommand(line: command.line), command) }
+        XCTAssertEqual(VMHelperCommand(line: "  stop  "), .stop)
+        for line in ["", "sleep", "stop now", "hosts", "hosts maybe", "block", "block Ads.Example.com", "block *.example.com",
+                     "block localhost", "block 10.0.0.1", "block a.example.com b.example.com", "block ads.example.com;reboot",
+                     "fullscreen 2", "STOP"] {
+            XCTAssertNil(VMHelperCommand(line: line), line)
+        }
+    }
+
+    func testWhatTheHelperSaysOfAWakeAndOfTheHostsIsRead() throws {
+        let woke = VMHelperEvent(kind: .started, woke: true)
+        XCTAssertEqual(VMHelperEvent.parse(woke.line()), woke)
+        let anew = VMHelperEvent(kind: .started, notWoken: VMWakeRefusal.changed.rawValue)
+        XCTAssertEqual(VMHelperEvent.parse(anew.line())?.notWoken.flatMap(VMWakeRefusal.init(rawValue:)), .changed)
+        let asleep = VMHelperEvent(kind: .stopped, asleep: true)
+        XCTAssertEqual(VMHelperEvent.parse(asleep.line())?.asleep, true)
+        // An event from before these words reads as it did.
+        XCTAssertNil(VMHelperEvent.parse(#"{"kind":"started"}"#)?.woke)
+        XCTAssertNil(VMHelperEvent.parse(#"{"kind":"stopped"}"#)?.asleep)
+        let hosts = VMHelperEvent(kind: .hosts, hosts: [
+            VMHelperEvent.Host(name: "www.example.com", connections: 3, open: 1, bytesUp: 1_200, bytesDown: 96_000, blocked: 0, idle: 0),
+            VMHelperEvent.Host(name: "ads.example.net", connections: 0, open: 0, bytesUp: 0, bytesDown: 0, blocked: 4, idle: 12),
+        ])
+        let read = try XCTUnwrap(VMHelperEvent.parse(hosts.line()))
+        XCTAssertEqual(read, hosts)
+        XCTAssertEqual(read.hosts?.map(\.id), ["www.example.com", "ads.example.net"])
+        XCTAssertEqual(Set(VMWakeRefusal.allCases.map(\.rawValue)), ["changed", "stale", "failed", "unsupported"])
+    }
+
+    func testASavedStateIsGoodOnlyForItsStampAndTheDiskAsItWasLeft() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-vmstate-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let files = VMLibrary.MachineFiles(directory: root)
+        XCTAssertEqual(files.state.lastPathComponent, "state.vzvmsave")
+        XCTAssertEqual(files.stateInfo.lastPathComponent, "state.json")
+        XCTAssertFalse(files.hasSavedState)
+        try Data(repeating: 7, count: 4_096).write(to: files.disk)
+        let mark = try XCTUnwrap(VMSavedState.mark(ofDisk: files.disk))
+        XCTAssertEqual(mark.length, 4_096)
+        XCTAssertNil(VMSavedState.mark(ofDisk: root.appendingPathComponent("no-disk")))
+
+        let state = VMSavedState(stamp: "abc", diskLength: mark.length, diskModified: mark.modified,
+                                 names: [VMSavedState.Name(name: "www.example.com", address: 0xC612_0001)])
+        try state.write(to: files.stateInfo)
+        // The note alone is no saved state: the state itself must be there too.
+        XCTAssertFalse(files.hasSavedState)
+        try Data("state".utf8).write(to: files.state)
+        XCTAssertTrue(files.hasSavedState)
+        let read = try XCTUnwrap(VMSavedState.read(from: files.stateInfo))
+        XCTAssertEqual(read.stamp, "abc")
+        XCTAssertEqual(read.names, state.names)
+        XCTAssertEqual(read.diskLength, mark.length)
+        XCTAssertEqual(read.diskModified, mark.modified)
+
+        XCTAssertNil(read.refusal(stamp: "abc", disk: files.disk))
+        // Other hardware or other settings: the change must take.
+        XCTAssertEqual(read.refusal(stamp: "abd", disk: files.disk), .changed)
+        XCTAssertEqual(read.refusal(stamp: nil, disk: files.disk), .changed)
+        // A disk written since — longer, or the same length at another time — is not this state's.
+        try Data(repeating: 7, count: 8_192).write(to: files.disk)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+        try Data(repeating: 7, count: 4_096).write(to: files.disk)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: mark.modified + 5)], ofItemAtPath: files.disk.path)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+        try FileManager.default.removeItem(at: files.disk)
+        XCTAssertEqual(read.refusal(stamp: "abc", disk: files.disk), .stale)
+
+        // What is no note is none.
+        try Data("{not json".utf8).write(to: files.stateInfo)
+        XCTAssertNil(VMSavedState.read(from: files.stateInfo))
+        XCTAssertNil(VMSavedState.read(from: root.appendingPathComponent("nothing.json")))
     }
 }

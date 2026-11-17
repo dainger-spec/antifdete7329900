@@ -171,6 +171,10 @@ extension AppModel {
         }
         let serverTime = AccountWire.time(object["serverTime"] as? String) ?? Date()
         clockSkew = Date().timeIntervalSince(serverTime)
+        // A new link of this iPhone starts its sync afresh: a vault key kept from before — another
+        // account's, or one the Keychain kept through a reinstall — is forgotten, and the master
+        // password asked again. Kept, another account's vault would answer every run `forbidden`.
+        SyncKeychain.erase()
         AccountStore.save(AccountRecord(email: email, deviceID: deviceID, code: device["code"] as? String ?? "", deviceToken: deviceToken,
                                         entitlement: document,
                                         clock: EffectiveClock(floorTime: serverTime, floorUptime: ProcessInfo.processInfo.systemUptime),
@@ -234,9 +238,11 @@ extension AppModel {
         }
         if let refusal = AccountWire.refusal(answer.data),
            (answer.status == 401 && refusal.code == "device_revoked") || (answer.status == 409 && refusal.code == "machine_mismatch") {
-            // Final (§9.4): this iPhone is no longer in the license. The token and the document go;
-            // the profiles stay. (The planted fault: the answer is passed over.)
+            // Final (§9.4): this iPhone is no longer in the license. The token and the document go,
+            // and the vault's key with them, as at a sign-out; the profiles stay. (The planted fault:
+            // the answer is passed over.)
             if Faults.isActive(.revokedStaysSignedIn) { return true }
+            SyncKeychain.erase()
             AccountStore.save(nil)
             accountNotice = refusal.code == "device_revoked" ? AccountText.revoked : AccountText.machineMismatch
             decide()

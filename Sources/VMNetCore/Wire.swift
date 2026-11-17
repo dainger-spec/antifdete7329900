@@ -321,6 +321,14 @@ enum FrameBuilder {
 
     static func udp(destinationMAC: VMNetMAC, sourceMAC: VMNetMAC, source: VMNetIPv4, sourcePort: UInt16,
                     destination: VMNetIPv4, destinationPort: UInt16, payload: [UInt8], identification: UInt16) -> [UInt8] {
+        payload.withUnsafeBytes { bytes in
+            udp(destinationMAC: destinationMAC, sourceMAC: sourceMAC, source: source, sourcePort: sourcePort, destination: destination,
+                destinationPort: destinationPort, payload: bytes, identification: identification)
+        }
+    }
+
+    static func udp(destinationMAC: VMNetMAC, sourceMAC: VMNetMAC, source: VMNetIPv4, sourcePort: UInt16,
+                    destination: VMNetIPv4, destinationPort: UInt16, payload: UnsafeRawBufferPointer, identification: UInt16) -> [UInt8] {
         let length = UDPDatagram.headerLength + payload.count
         var frame = [UInt8](repeating: 0, count: transportOffset + length)
         frame.withUnsafeMutableBytes { buffer in
@@ -330,8 +338,8 @@ enum FrameBuilder {
             buffer.put16(udp, sourcePort)
             buffer.put16(udp + 2, destinationPort)
             buffer.put16(udp + 4, UInt16(length))
-            payload.withUnsafeBytes { bytes in
-                UnsafeMutableRawBufferPointer(rebasing: buffer[(udp + 8)...]).copyMemory(from: bytes)
+            if !payload.isEmpty {
+                UnsafeMutableRawBufferPointer(rebasing: buffer[(udp + 8)...]).copyMemory(from: payload)
             }
             let sum = InternetChecksum.add(UnsafeRawBufferPointer(rebasing: buffer[udp...]),
                                            to: InternetChecksum.pseudoHeader(source: source, destination: destination, proto: IPProtocol.udp, length: length))

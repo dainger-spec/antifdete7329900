@@ -2,30 +2,53 @@ import AppKit
 import BrowserCore
 import SwiftUI
 
-/// The lock screen's backdrop: the window's black and, with the light on (Settings → Appearance),
-/// the two eclipses. One for the setup, unlock and "open" states, so the eclipses close in while
-/// the password is checked and part when the vault opens without starting over (RootView).
+/// The lock screen's backdrop: the window's black. The light is the screen's own (`LockScreen`
+/// lays the horizon out under its heading); `phase` says what the vault is doing, for the callers
+/// that pass it (RootView) — the horizon itself is still.
 struct LockBackdrop<Content: View>: View {
     var phase: EclipseLight.Phase = .idle
     @ViewBuilder let content: () -> Content
-    @ObservedObject private var appearance = AppearancePreferences.shared
 
     var body: some View {
         ZStack {
             // To the window's edges, under the title bar too: the window's own background is not
             // to show there (CI run 557, the snapshots' edge check).
             Theme.backdrop.ignoresSafeArea()
-            if appearance.entryLight {
-                EclipseLight(place: .lock, phase: phase).ignoresSafeArea()
-            }
             content()
         }
     }
 }
 
-/// The lock screen (the design's "Lock and first launch"): the Lumen mark, a large title and the
-/// form in a 400 pt column, centred; a footer line at the foot. It rises in once when the window
-/// opens.
+/// The eclipse's horizon as the lock screens have it (the launch screen's, `LumenHorizon`): a
+/// picture `width` wide whose rim's top is at its middle, so that whoever places it puts that
+/// middle where the rim is to be. The disc is never narrower than 820 pt in radius: in a narrow
+/// window (the sign-in sheet, 560 pt) the rim stays nearly level across the form's column.
+/// Decoration only: hidden from VoiceOver, never in the way of a click.
+struct LockHorizon: View {
+    let width: CGFloat
+    /// The picture's height; the rim's top is at half of it.
+    static let height: CGFloat = 1400
+
+    var body: some View {
+        Canvas(opaque: false, rendersAsynchronously: false) { context, size in
+            context.withCGContext { cg in
+                LumenHorizon.draw(in: cg, width: size.width, height: size.height, haze: true,
+                                  placed: LumenHorizon.Geometry(width: size.width, top: size.height / 2,
+                                                                radius: max(size.width * 0.78, 820)),
+                                  lift: false)
+            }
+        }
+        .frame(width: max(width, 1), height: Self.height)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The lock screen (the design's "Lock and first launch"), on the launch screen's horizon: the
+/// Lumen disc, a large title and a sentence stand in the sky; the horizon's light runs 26 pt under
+/// the sentence; the form is below it, on the disc's black, in a 400 pt column. The horizon is
+/// laid out with the heading, so it scrolls with the form and its light never crosses a word,
+/// whatever the window's size. A footer line at the foot. It rises in once when the window opens.
 struct LockScreen<Content: View>: View {
     let title: String
     let subtitle: String
@@ -33,8 +56,14 @@ struct LockScreen<Content: View>: View {
     var footer: String?
     @ViewBuilder let content: () -> Content
     @State private var appeared = false
+    @ObservedObject private var appearance = AppearancePreferences.shared
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
+
+    /// How far under the subtitle the rim's top stands, and how far under the subtitle the form
+    /// starts at the least: the rim drops 25 pt by the column's edges.
+    static var rimGap: CGFloat { 26 }
+    static var formGap: CGFloat { 34 }
 
     var body: some View {
         // Centred in the window; scrolls when the window is shorter than the screen's content. The
@@ -42,7 +71,7 @@ struct LockScreen<Content: View>: View {
         // macOS 26's edge effect there (ProfilesScreen.inspectorTop).
         GeometryReader { geometry in
             ScrollView {
-                screen.frame(minHeight: geometry.size.height)
+                screen(width: geometry.size.width).frame(minHeight: geometry.size.height)
             }
             .scrollBounceBehavior(.basedOnSize)
             .scrollIndicators(.automatic)
@@ -60,31 +89,26 @@ struct LockScreen<Content: View>: View {
         }
     }
 
-    private var screen: some View {
+    private func screen(width: CGFloat) -> some View {
         VStack(spacing: 0) {
             Spacer(minLength: 40)
             VStack(spacing: 0) {
-                LumenMark(size: 64)
-                Text(title)
-                    .lumenDisplayTitle()
-                    .foregroundStyle(Theme.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 340)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 28)
-                Text(subtitle)
-                    .font(.system(size: 15))
-                    .lineSpacing(3)
-                    .foregroundStyle(Theme.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 10)
+                heading(width: width)
+                    .background(alignment: .bottom) {
+                        if appearance.entryLight {
+                            // The picture's middle — the rim's top — `rimGap` under the heading.
+                            LockHorizon(width: width)
+                                .offset(y: LockHorizon.height / 2 + Self.rimGap)
+                                .opacity(appeared ? 1 : 0)
+                        }
+                    }
                 content()
+                    .padding(.top, Self.formGap)
+                    .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
             }
             .frame(maxWidth: 400)
             .padding(.horizontal, 24)
             .opacity(appeared ? 1 : 0)
-            .offset(y: appeared || Motion.isReduced(reduceMotion) ? 0 : 10)
             Spacer(minLength: 40)
             if let footer {
                 Text(footer)
@@ -97,6 +121,29 @@ struct LockScreen<Content: View>: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func heading(width: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            LumenGlyph(size: 40)
+                .shadow(color: Theme.rim.opacity(0.28), radius: 16)
+            Text(title)
+                .lumenDisplayTitle()
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                // Wider than the form's column where the window has the room: "Хранилище
+                // заблокировано" stands on one line.
+                .frame(width: max(200, min(520, width - 48)))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 24)
+            Text(subtitle)
+                .font(.system(size: 15))
+                .lineSpacing(3)
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
+        }
     }
 }
 
@@ -253,6 +300,38 @@ private struct LockPressStyle: ButtonStyle {
     }
 }
 
+/// The lock screen's second action, Unlock with Touch ID: the first one's shape, quieter — 44 pt,
+/// a contour and no fill, the system's Touch ID glyph before its words.
+struct LockTouchIDButton: View {
+    let title: String
+    var enabled = true
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 9) {
+                Image(systemName: "touchid")
+                    .font(.system(size: 17, weight: .regular))
+                    .accessibilityHidden(true)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .foregroundStyle(hovered ? Theme.textPrimary : Theme.textSecondary)
+            .frame(maxWidth: .infinity)
+            .frame(height: 44)
+            .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(hovered ? Theme.edge : Theme.strongBorder, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.5)
+        .onHover { hovered = enabled && $0 }
+        .animation(Motion.hover(hovered), value: hovered)
+    }
+}
+
 /// A quiet link under the action ("I don't remember the password"): `t2`, white and underlined
 /// under the pointer.
 struct LockLink: View {
@@ -321,12 +400,50 @@ struct SetupView: View {
     /// 1 November) — a pause, and a choice made knowingly. Unticked again when the password changes:
     /// what was written down is then another password.
     @State private var writtenDown = false
+    /// "I already have a vault": the vault is brought from where a Mac synced it, not made anew
+    /// (`RestoreFlow`). Offered here only — where this Mac has no vault, or its own was moved aside.
+    @State private var restoring: Bool
+    @StateObject private var restore: RestoreModel
+
+    /// `restoring`: the snapshots' only — the flow as `sample` has it; the app starts at the form.
+    init(restoring sample: RestoreModel? = nil) {
+        _restoring = State(initialValue: sample != nil)
+        _restore = StateObject(wrappedValue: sample ?? RestoreModel())
+    }
 
     private var longEnough: Bool { MasterPasswordStrength.isLongEnough(password) }
     private var strongEnough: Bool { MasterPasswordStrength.isStrongEnough(password) }
     private var matches: Bool { !confirmation.isEmpty && password == confirmation }
 
     var body: some View {
+        Group {
+            if restoring {
+                RestoreFlow(restore: restore, onBack: { restoring = false })
+                    .transition(.opacity)
+            } else {
+                form
+                    .transition(.opacity)
+            }
+        }
+        .animation(Theme.appearAnimation, value: restoring)
+        .onChange(of: password) { _, _ in
+            writtenDown = false
+            model.masterPasswordRefusal = nil
+        }
+        .overlay(alignment: .topTrailing) {
+            // The interface's language, when this is the run's first screen (the owner: on the
+            // first screen, before the vault exists). Not after "forgot password": a restart would
+            // lose the line that says where the previous vault was moved. Not while a vault is
+            // being brought: a restart would stop it.
+            if model.setupIsFirstScreen && model.movedAsideVaultPath == nil && (!restoring || restore.step == .source) {
+                FirstLaunchLanguagePicker()
+                    .padding(.top, ProfilesScreen.inspectorTop)
+                    .padding(.trailing, 20)
+            }
+        }
+    }
+
+    private var form: some View {
         LockScreen(title: L("setup.title"), subtitle: L("setup.subtitle"), footer: L("setup.footer")) {
             VStack(alignment: .leading, spacing: 0) {
                 MasterPasswordFacts()
@@ -363,25 +480,20 @@ struct SetupView: View {
                 }
                 .toggleStyle(.lumenCheckbox)
                 .padding(.top, 22)
-                LockActionButton(title: L("setup.action.create"), working: model.isWorking,
-                                 workingTitle: L("setup.working"), enabled: longEnough && strongEnough && matches && writtenDown,
-                                 action: create)
-                    .keyboardShortcut(.defaultAction)
-                    .padding(.top, 22)
-            }
-        }
-        .onChange(of: password) { _, _ in
-            writtenDown = false
-            model.masterPasswordRefusal = nil
-        }
-        .overlay(alignment: .topTrailing) {
-            // The interface's language, when this is the run's first screen (the owner: on the
-            // first screen, before the vault exists). Not after "forgot password": a restart would
-            // lose the line that says where the previous vault was moved.
-            if model.setupIsFirstScreen && model.movedAsideVaultPath == nil {
-                FirstLaunchLanguagePicker()
-                    .padding(.top, ProfilesScreen.inspectorTop)
-                    .padding(.trailing, 20)
+                VStack(spacing: 14) {
+                    LockActionButton(title: L("setup.action.create"), working: model.isWorking,
+                                     workingTitle: L("setup.working"), enabled: longEnough && strongEnough && matches && writtenDown,
+                                     action: create)
+                        .keyboardShortcut(.defaultAction)
+                    // The other way in: a vault a Mac synced is brought here, with its own master
+                    // password, instead of a new one being made.
+                    LockLink(title: L("restore.link")) {
+                        model.masterPasswordRefusal = nil
+                        restoring = true
+                    }
+                    .disabled(model.isWorking)
+                }
+                .padding(.top, 22)
             }
         }
     }
@@ -532,10 +644,21 @@ struct UnlockView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 10)
                 }
+                if let touchIDLine {
+                    // Touch ID, where it is turned on: why the password is asked this time, or why
+                    // it did not unlock.
+                    LockNote(symbol: "touchid", text: touchIDLine)
+                        .padding(.top, 12)
+                }
                 VStack(spacing: 14) {
                     LockActionButton(title: L("unlock.action.unlock"), working: model.isWorking,
                                      workingTitle: L("unlock.working"), enabled: !password.isEmpty, action: unlock)
                         .keyboardShortcut(.defaultAction)
+                    if model.touchID.unlocksNow && !model.touchIDSpent {
+                        LockTouchIDButton(title: L("touchid.unlock"), enabled: !model.isWorking) {
+                            Task { await model.unlockWithTouchID() }
+                        }
+                    }
                     LockLink(title: L("unlock.reset.action")) { confirmingReset = true }
                         .disabled(model.isWorking)
                 }
@@ -553,7 +676,8 @@ struct UnlockView: View {
                         .textSelection(.enabled)
                         .padding(.top, 18)
                 } else {
-                    LockNote(symbol: "key", text: L("unlock.keys"))
+                    // With Touch ID unlocking on, the vault's key is no longer in memory alone: said.
+                    LockNote(symbol: "key", text: L(model.touchID.isOn ? "unlock.keys.touchID" : "unlock.keys"))
                         .padding(.top, 26)
                 }
             }
@@ -562,11 +686,37 @@ struct UnlockView: View {
         .onChange(of: model.isWorking) { _, working in
             if !working && model.unlockFailed { attempts += 1 }
         }
+        .task {
+            // At the app's start Touch ID is asked by itself, once, when the window has opened; after
+            // a Lock it is the button — a question that followed the click would be in the way.
+            guard !model.touchIDAskedAtStart else { return }
+            model.touchIDAskedAtStart = true
+            guard model.touchID.unlocksNow else { return }
+            // The lock screen is under the launch screen from the start (RootView): Touch ID is
+            // asked once that has gone, as the lock screen shows.
+            while model.welcome != nil, !model.welcomeFinished, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, NSApp.isActive, model.phase == .locked else { return }
+            await model.unlockWithTouchID()
+        }
         .confirmationDialog(L("unlock.reset.title"), isPresented: $confirmingReset, titleVisibility: .visible) {
             Button(L("unlock.reset.confirm"), role: .destructive) { model.startOver() }
             Button(L("common.cancel"), role: .cancel) {}
         } message: {
             Text(L("unlock.reset.message"))
+        }
+    }
+
+    /// What is said of Touch ID under the password's field; nil where it is not turned on.
+    private var touchIDLine: String? {
+        if let note = model.touchIDNote { return note }
+        guard model.touchID.offered else { return nil }
+        switch model.touchID.decision {
+        case .off: return nil
+        case .password(let reason): return TouchIDText.passwordAsked(reason)
+        case .touchID: return TouchIDText.sensorNote(model.touchID.sensor)
         }
     }
 
@@ -635,10 +785,7 @@ struct ChangePasswordView: View {
                         PasswordRequirement(text: L("setup.req.match"), met: matches, shown: !confirmation.isEmpty)
                     }
                     .padding(.top, 12)
-                    Text(L("changepw.note"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    ChangePasswordNote()
                         .padding(.top, 18)
                 }
                 .padding(.horizontal, 24)
@@ -648,7 +795,7 @@ struct ChangePasswordView: View {
             .scrollBounceBehavior(.basedOnSize)
             SheetFooter {
                 Button(L("common.cancel")) { dismiss() }
-                    .buttonStyle(.lumenSecondary)
+                    .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
                 Button(L("changepw.action.change"), action: change)
                     .buttonStyle(.lumenPrimary)
@@ -667,9 +814,45 @@ struct ChangePasswordView: View {
         guard canChange else { return }
         changing = true
         Task {
-            await model.changePassword(current: current, new: new)
+            let changed = await model.changePassword(current: current, new: new)
             changing = false
-            if model.errorMessage == nil, model.masterPasswordRefusal == nil { dismiss() }
+            // Changed: the sheet closes, whatever else is said — that the sync location could not
+            // be told now, or a message raised elsewhere meanwhile. Left open with the old password
+            // in it, it invited a second Change that the vault refuses as a wrong password.
+            if changed { dismiss() }
         }
+    }
+}
+
+/// What changing the master password does and does not do (`changepw.note`), word for word, as
+/// three short paragraphs instead of one wall of fourteen lines: what is encrypted again, where the
+/// new password goes, and what it does not reach — that one with the warning's sign, the only one
+/// that says a risk. A text of fewer sentences is shown whole.
+private struct ChangePasswordNote: View {
+    var body: some View {
+        let sentences = L("changepw.note").components(separatedBy: ". ")
+        VStack(alignment: .leading, spacing: 8) {
+            if sentences.count >= 3 {
+                paragraph(sentences[0] + ".")
+                paragraph(sentences[1] + ".")
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Theme.warning)
+                        .accessibilityHidden(true)
+                    paragraph(sentences[2...].joined(separator: ". "))
+                }
+            } else {
+                paragraph(L("changepw.note"))
+            }
+        }
+    }
+
+    private func paragraph(_ text: String) -> some View {
+        Text(text)
+            .font(.lumenSecondary)
+            .lineSpacing(2)
+            .foregroundStyle(Theme.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

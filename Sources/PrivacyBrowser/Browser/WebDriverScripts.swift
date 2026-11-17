@@ -136,6 +136,25 @@ if (hit !== el && !el.contains(hit)) {
 return JSON.stringify({ x, y });
 """#
 
+    /// `id` (or '' for none): where an action's move is measured from — the middle of the
+    /// element's first box, brought into view, as a point of the viewport — and the viewport's
+    /// size, which a move must stay within.
+    static let pointerOrigin = #"""
+const view = { width: innerWidth, height: innerHeight };
+if (!id) { return JSON.stringify({ x: 0, y: 0, width: view.width, height: view.height }); }
+const el = get(id);
+let box = el.getClientRects()[0] || el.getBoundingClientRect();
+const inView = (r) => r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight && r.right <= innerWidth;
+if (!inView(box)) {
+  el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+  box = el.getClientRects()[0] || el.getBoundingClientRect();
+}
+if (!shown(el) || box.width <= 0 || box.height <= 0) { fail('element not interactable', 'the element is not shown'); }
+const x = Math.min(Math.max(box.left + box.width / 2, 0), innerWidth - 1);
+const y = Math.min(Math.max(box.top + box.height / 2, 0), innerHeight - 1);
+return JSON.stringify({ x, y, width: view.width, height: view.height });
+"""#
+
     /// `id`: the element focused, for keys. False when it cannot take them.
     static let focus = #"""
 const el = get(id);

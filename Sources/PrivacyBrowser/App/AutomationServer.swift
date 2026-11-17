@@ -17,8 +17,11 @@ final class AutomationServer {
     }
 
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "Automation")
-    /// Connections at once; more are closed at once.
-    static let maximumConnections = 8
+    /// Connections whose request is still arriving, at once (`waiting`). A request that has
+    /// arrived is not counted while it is answered, however long that takes — a launch, a page's
+    /// load, a find's implicit wait — so any number of profiles can be driven side by side. One past
+    /// this is answered "busy" (`turnAway`), never acted on and never closed unanswered.
+    static let maximumWaitingConnections = 32
     /// A connection that has not sent its whole request by then is closed.
     static let requestTimeout: TimeInterval = 15
 
@@ -31,6 +34,10 @@ final class AutomationServer {
     private let handler: AutomationHandler
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    /// Of `connections`, those whose request has not all arrived (`maximumWaitingConnections`).
+    private var waiting: Set<ObjectIdentifier> = []
+    /// Of `connections`, those being answered "busy" (`turnAway`): as many again at most.
+    private var turnedAway: Set<ObjectIdentifier> = []
 
     static var isAvailable: Bool { !AppEnvironment.isSandboxed }
 
@@ -97,6 +104,8 @@ final class AutomationServer {
         listener = nil
         for connection in connections.values { connection.cancel() }
         connections = [:]
+        waiting = []
+        turnedAway = []
         state = .stopped
     }
 
@@ -124,20 +133,14 @@ final class AutomationServer {
     }
 
     private func accept(_ connection: NWConnection) {
-        guard connections.count < Self.maximumConnections else {
-            connection.cancel()
+        guard waiting.count < Self.maximumWaitingConnections else {
+            turnAway(connection)
             return
         }
         let id = ObjectIdentifier(connection)
         connections[id] = connection
-        connection.stateUpdateHandler = { [weak self] update in
-            switch update {
-            case .failed, .cancelled:
-                MainActor.assumeIsolated { _ = self?.connections.removeValue(forKey: id) }
-            default:
-                break
-            }
-        }
+        waiting.insert(id)
+        forgetOnClose(connection)
         connection.start(queue: .main)
         receive(on: connection, buffer: Data())
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
@@ -150,6 +153,51 @@ final class AutomationServer {
 
     /// Connections whose request is being acted on (a launch can take longer than the timeout).
     private var answering: Set<ObjectIdentifier> = []
+
+    private func forgetOnClose(_ connection: NWConnection) {
+        let id = ObjectIdentifier(connection)
+        connection.stateUpdateHandler = { [weak self] update in
+            switch update {
+            case .failed, .cancelled:
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.connections.removeValue(forKey: id)
+                    self.waiting.remove(id)
+                    self.turnedAway.remove(id)
+                }
+            default:
+                break
+            }
+        }
+    }
+
+    /// A connection past `maximumWaitingConnections`: its first bytes are read only to answer in
+    /// the protocol they name that nothing was done (`AutomationHTTP.busy`: 503, or the WebDriver
+    /// protocol's error), and it is closed. Past as many of these again, closed at once.
+    private func turnAway(_ connection: NWConnection) {
+        guard turnedAway.count < Self.maximumWaitingConnections else {
+            connection.cancel()
+            return
+        }
+        let id = ObjectIdentifier(connection)
+        connections[id] = connection
+        turnedAway.insert(id)
+        forgetOnClose(connection)
+        connection.start(queue: .main)
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, _ in
+            MainActor.assumeIsolated {
+                guard let self, self.connections[id] != nil, let data, !data.isEmpty else {
+                    connection.cancel()
+                    return
+                }
+                Self.log.notice("Automation API answered a connection busy: too many requests arriving at once")
+                self.send(AutomationHTTP.busy(firstBytes: data), on: connection)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.requestTimeout) { [weak self] in
+            MainActor.assumeIsolated { self?.connections[id]?.cancel() }
+        }
+    }
 
     private func receive(on connection: NWConnection, buffer: Data) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
@@ -165,8 +213,12 @@ final class AutomationServer {
                         self.receive(on: connection, buffer: buffer)
                     }
                 case .invalid(let response):
+                    self.waiting.remove(ObjectIdentifier(connection))
                     self.send(response, on: connection)
                 case .request(let request):
+                    // Arrived: however long its answer takes, it no longer counts against the
+                    // connections still sending theirs.
+                    self.waiting.remove(ObjectIdentifier(connection))
                     self.answer(request, on: connection)
                 }
             }
@@ -262,6 +314,15 @@ final class AutomationHandler {
     var allowsAutomation: () -> Bool = { false }
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
+    /// The parameters of a saved scenario's run on a profile: the profile's own values for
+    /// scenarios that the scenario's text names, under what the request gave
+    /// (`ScenarioValues.parametersJSON`). A text sent with the request (`source`) gets the
+    /// request's own and no more: what the person keeps for a profile — a password — is read by
+    /// the scenarios they wrote, not by whatever holds the token.
+    var profileParameters: (UUID, Scenario, String) -> String = { _, _, given in given }
+    /// Whether a WebDriver session drives the profile now (`WebDriverService.hasSession`): a run
+    /// is refused beside it, as beside another run.
+    var hasWebDriverSession: (UUID) -> Bool = { _ in false }
     /// Makes a profile as the app's New Profile does — the plan's limit and an unreadable index
     /// refuse it (`AppModel.createProfile`). Nil: no profile can be made here.
     var createProfile: ((String, ProfileConfiguration) throws -> UUID?)?
@@ -357,15 +418,20 @@ final class AutomationHandler {
                     return .error(409, "not_running", "Start the profile first (POST …/start).")
                 }
                 let name: String, source: String
+                var parametersJSON = spec.parametersJSON
                 if let text = spec.source {
                     (name, source) = ("API", text)
                 } else if let wanted = spec.scenario, let saved = savedScenario(wanted) {
                     (name, source) = (saved.name, saved.source)
+                    parametersJSON = profileParameters(summary.id, saved, spec.parametersJSON)
                 } else {
                     return .error(404, "no_scenario", "No saved scenario is named \(spec.scenario ?? "") (exactly, one).")
                 }
+                guard !hasWebDriverSession(summary.id) else {
+                    return .error(409, "busy", "A WebDriver session drives this profile; end it (quit) before a run.")
+                }
                 let runID = UUID()
-                guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: spec.parametersJSON, runID: runID) else {
+                guard manager.runScenario(summary.id, name: name, source: source, parametersJSON: parametersJSON, runID: runID) else {
                     return .error(409, "busy", "A run of this profile is still going (POST …/scenario/stop).")
                 }
                 return .json(202, ScenarioAnswer(runID: runID.uuidString))
@@ -429,6 +495,9 @@ final class AutomationHandler {
         var outcome: String?
         /// Why it failed or stopped.
         var reason: String?
+        /// What the script returned (`return …`), as it is — any JSON value. Absent while the
+        /// run is going, when it did not finish, and when the script returned nothing.
+        var result: JSONValue?
         var lines: [Line]
 
         init(_ run: ProfileManager.ScenarioRunState) {
@@ -442,7 +511,43 @@ final class AutomationHandler {
             case .failed(let message)?: outcome = "failed"; reason = message
             case .stopped(let why)?: outcome = "stopped"; reason = why.rawValue
             }
-            lines = run.lines.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+            result = run.result.flatMap { JSONValue(text: $0) }
+            // The result is given once, as a value: not again as a line of text.
+            lines = run.lines.filter { $0.kind != .result }.map { Line(at: $0.at, kind: $0.kind.rawValue, text: $0.text) }
+        }
+    }
+
+    /// Any JSON value, given back as it came (a run's result).
+    private struct JSONValue: Encodable {
+        let value: Any
+
+        init?(text: String) {
+            guard let value = try? JSONSerialization.jsonObject(with: Data(text.utf8), options: [.fragmentsAllowed]) else { return nil }
+            self.value = value
+        }
+
+        private init(_ value: Any) { self.value = value }
+
+        func encode(to encoder: Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch value {
+            case let text as String:
+                try container.encode(text)
+            case let number as NSNumber:
+                if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                    try container.encode(number.boolValue)
+                } else if !CFNumberIsFloatType(number as CFNumber), let whole = Int64(exactly: number) {
+                    try container.encode(whole)
+                } else {
+                    try container.encode(number.doubleValue)
+                }
+            case let list as [Any]:
+                try container.encode(list.map { JSONValue($0) })
+            case let object as [String: Any]:
+                try container.encode(object.mapValues { JSONValue($0) })
+            default:
+                try container.encodeNil()
+            }
         }
     }
 

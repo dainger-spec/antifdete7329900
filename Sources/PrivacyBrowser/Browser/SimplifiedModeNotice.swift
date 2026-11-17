@@ -24,7 +24,6 @@ enum SimplifiedModeNotice {
     /// Why, as the popover and the chip's tooltip say it.
     nonisolated static func reasonText(_ reason: SafariChromeHost.OwnWindowReason) -> String {
         switch reason {
-        case .deviceProfile: return L("simplified.reason.device")
         case .sandboxed: return L("simplified.reason.sandboxed")
         case .turnedOff: return L("simplified.reason.turnedOff")
         case .notInProfileProcess: return L("simplified.reason.noProfileProcess")

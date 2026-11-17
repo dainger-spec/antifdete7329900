@@ -19,6 +19,15 @@ enum CameraPreview {
     private static var cachedVideoFrame: (key: Int, image: CGImage?)?
     // A looping player for the live video preview, keyed by the video's bytes.
     private static var livePlayer: (key: Int, player: AVPlayer, output: AVPlayerItemVideoOutput, last: CGImage?)?
+    /// The chosen image, decoded once for each size the previews ask of it (`image(_:longestSide:)`)
+    /// and kept while it is the chosen one: the preview decoded the whole image — 12 megapixels and
+    /// more — on the main thread at every redraw, 15 a second.
+    private static var decodedImages: (data: Data, source: CGImageSource?, bySide: [Int: CGImage])?
+    /// Previews on screen now (`CameraPreviewPresence`): with the last of them gone, what they kept
+    /// goes too (`discardAll`).
+    fileprivate static var previewsShown = 0
+    /// How many times an image was decoded (the self-test reads it).
+    private(set) static var imageDecodes = 0
 
     static func frame(for camera: CameraSubstitution, width: Int, height: Int, sequence: UInt64) -> CGImage? {
         guard width > 0, height > 0,
@@ -44,7 +53,8 @@ enum CameraPreview {
     static func sourceImage(for camera: CameraSubstitution) -> NSImage? {
         let cgImage: CGImage?
         switch camera.source {
-        case .image: cgImage = camera.imageData.flatMap(decode)
+        // As big as the preview window shows it, on a Retina screen.
+        case .image: cgImage = camera.imageData.flatMap { image($0, longestSide: 1600) }
         case .video: cgImage = videoFrame(for: camera)
         case .color, .bars: cgImage = nil
         }
@@ -62,8 +72,9 @@ enum CameraPreview {
         case .bars:
             drawBars(context, width: width, height: height, background: bg, sequence: sequence)
         case .image:
-            if let data = camera.imageData, let image = decode(data) {
-                drawImage(context, image: image, camera: camera, width: width, height: height)
+            if let data = camera.imageData,
+               let decoded = image(data, longestSide: neededSide(of: data, camera: camera, width: width, height: height)) {
+                drawImage(context, image: decoded, camera: camera, width: width, height: height)
             }
         case .video:
             if let image = videoFrame(for: camera) {
@@ -112,9 +123,52 @@ enum CameraPreview {
         context.restoreGState()
     }
 
-    private static func decode(_ data: Data) -> CGImage? {
-        guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+    /// The image `data` decoded with about `needed` pixels on its longest side: the next power of
+    /// two from 256 — a crop dragged or a frame resized seldom decodes it again — never more than
+    /// it has. Kept for as long as `data` is the chosen image. As `CGImageSourceCreateImageAtIndex`
+    /// gave it before: the first image, its pixels as stored (no orientation applied).
+    private static func image(_ data: Data, longestSide needed: Double) -> CGImage? {
+        if decodedImages?.data != data {
+            decodedImages = (data, CGImageSourceCreateWithData(data as CFData, nil), [:])
+        }
+        guard let source = decodedImages?.source else { return nil }
+        let full = pixelSize(of: source).map { max($0.width, $0.height) } ?? 0
+        var side = 256
+        while Double(side) < needed, side < 8192, full == 0 || side < full { side *= 2 }
+        if full > 0 { side = min(side, full) }
+        if let kept = decodedImages?.bySide[side] { return kept }
+        let options: [CFString: Any] = [
+            kCGImageSourceCreateThumbnailFromImageAlways: true,
+            kCGImageSourceThumbnailMaxPixelSize: side,
+            kCGImageSourceShouldCacheImmediately: true,
+        ]
+        guard let decoded = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+        imageDecodes += 1
+        decodedImages?.bySide[side] = decoded
+        return decoded
+    }
+
+    /// The image's pixels as stored, read from its header (nothing decoded).
+    private static func pixelSize(of source: CGImageSource) -> (width: Int, height: Int)? {
+        guard let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = (properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue,
+              let height = (properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue,
+              width > 0, height > 0 else { return nil }
+        return (width, height)
+    }
+
+    /// The pixels the image needs on its longest side for a frame of `width` × `height`: the part
+    /// it shows (the crop, or all of it) with at least as many pixels as the frame gives it,
+    /// whichever way it is fitted.
+    private static func neededSide(of data: Data, camera: CameraSubstitution, width: Int, height: Int) -> Double {
+        if decodedImages?.data != data {
+            decodedImages = (data, CGImageSourceCreateWithData(data as CFData, nil), [:])
+        }
+        guard let source = decodedImages?.source, let size = pixelSize(of: source) else { return Double(max(width, height)) }
+        func part(_ value: Double) -> Double { camera.crop.enabled && value.isFinite ? min(1, max(0.01, value)) : 1 }
+        let scale = max(Double(width) / (part(camera.crop.width) * Double(size.width)),
+                        Double(height) / (part(camera.crop.height) * Double(size.height)))
+        return scale * Double(max(size.width, size.height))
     }
 
     /// The live frame of the chosen video, played and looped, for the preview; falls back to the
@@ -125,8 +179,7 @@ enum CameraPreview {
         if livePlayer?.key != key {
             livePlayer?.player.pause()
             livePlayer = nil
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pb-cam-live.mov")
-            if (try? data.write(to: url)) != nil {
+            if let url = videoCopy(data, named: "live.mov") {
                 let item = AVPlayerItem(url: url)
                 let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
                 item.add(output)
@@ -157,8 +210,7 @@ enum CameraPreview {
         let key = data.count
         if let cachedVideoFrame, cachedVideoFrame.key == key { return cachedVideoFrame.image }
         var image: CGImage?
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("pb-cam-preview-\(key).mov")
-        if (try? data.write(to: url)) != nil {
+        if let url = videoCopy(data, named: "first-\(key).mov") {
             let asset = AVURLAsset(url: url)
             let generator = AVAssetImageGenerator(asset: asset)
             generator.appliesPreferredTrackTransform = true
@@ -168,6 +220,69 @@ enum CameraPreview {
         }
         cachedVideoFrame = (key, image)
         return image
+    }
+
+    // MARK: The video's copy on disk
+
+    /// AVFoundation plays a file, so the preview's video is written out: into this run's folder
+    /// (owner-only, 0700, made at first use), named by the process, so that at the next launch a
+    /// folder whose process is gone is known for a leftover (`removeLeftovers`). The copy is the
+    /// profile's video in plaintext — kept only encrypted otherwise — and goes when no preview is
+    /// left, at Lock and at quit (`discardAll`). Until 0.1.15 it was `pb-cam-live.mov` among every
+    /// app's temporary files, never removed.
+    private static let videoFolderPrefix = "Lumen-camera-preview-"
+    static var videoFolder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent(videoFolderPrefix + String(getpid()), isDirectory: true)
+    }
+
+    /// `data` written to `name` in this run's folder, readable by this user alone; nil when it
+    /// could not be.
+    private static func videoCopy(_ data: Data, named name: String) -> URL? {
+        let url = videoFolder.appendingPathComponent(name)
+        guard (try? SecureFile.ensureDirectory(videoFolder)) != nil,
+              FileManager.default.createFile(atPath: url.path, contents: data, attributes: [.posixPermissions: 0o600])
+        else { return nil }
+        return url
+    }
+
+    /// The video's copy on disk, its player, its frames and the decoded image let go: when the last
+    /// preview goes, at Lock and at quit.
+    @MainActor
+    static func discardAll() {
+        livePlayer?.player.pause()
+        livePlayer?.player.replaceCurrentItem(with: nil)
+        livePlayer = nil
+        cachedVideoFrame = nil
+        decodedImages = nil
+        try? FileManager.default.removeItem(at: videoFolder)
+    }
+
+    /// A preview went (`CameraPreviewPresence`): with none left — the editor closed, and the
+    /// preview window — `discardAll`.
+    @MainActor
+    fileprivate static func previewGone() {
+        previewsShown = max(0, previewsShown - 1)
+        if previewsShown == 0 { discardAll() }
+    }
+
+    /// At launch: what an earlier run left of a video — `pb-cam-live.mov` and the first-frame copies
+    /// beside it (until 0.1.15), and the folders of runs that did not end cleanly (their process is
+    /// gone); never another running Lumen's.
+    static func removeLeftovers() {
+        let manager = FileManager.default
+        let temporary = manager.temporaryDirectory
+        for name in (try? manager.contentsOfDirectory(atPath: temporary.path)) ?? [] {
+            let leftover: Bool
+            if name == "pb-cam-live.mov" || (name.hasPrefix("pb-cam-preview-") && name.hasSuffix(".mov")) {
+                leftover = true
+            } else if name.hasPrefix(videoFolderPrefix), let pid = pid_t(name.dropFirst(videoFolderPrefix.count)), pid > 0 {
+                // This process has made none yet; another process of that number is gone, or is not ours.
+                leftover = pid == getpid() || (kill(pid, 0) != 0 && errno == ESRCH)
+            } else {
+                leftover = false
+            }
+            if leftover { try? manager.removeItem(at: temporary.appendingPathComponent(name)) }
+        }
     }
 
     private static func applyFilters(_ filters: CameraSubstitution.Filters, to source: CIImage) -> CIImage {
@@ -214,14 +329,27 @@ final class CameraMirror: ObservableObject {
     @Published var camera: CameraSubstitution = .off
 }
 
-/// A live preview of what a page would get, redrawn a few times a second so motion (the test
-/// pattern) and every edit (source, crop, fit, mirror, the adjustments) show at once.
+/// One preview on screen, counted for as long as it is (`CameraPreview.previewsShown`): with the
+/// last gone, the video's copy on disk and what else the previews kept go too.
+final class CameraPreviewPresence: ObservableObject {
+    init() { CameraPreview.previewsShown += 1 }
+
+    deinit {
+        Task { @MainActor in CameraPreview.previewGone() }
+    }
+}
+
+/// A live preview of what a page would get: every edit (source, crop, fit, mirror, the adjustments)
+/// shows at once, and what moves — the test pattern, a video — is redrawn 15 times a second. A
+/// colour or an image is still, and is drawn again only when the settings change (it was redrawn 15
+/// times a second as well, the whole image decoded each time).
 struct CameraPreviewView: View {
     let camera: CameraSubstitution
     var height: CGFloat = 150
 
-    @State private var sequence: UInt64 = 0
-    private let timer = Timer.publish(every: 1.0 / 15.0, on: .main, in: .common).autoconnect()
+    @StateObject private var presence = CameraPreviewPresence()
+
+    private var moves: Bool { camera.source == .bars || camera.source == .video }
 
     /// The preview renders at a small, fixed size; the real feed uses the configured resolution.
     private var previewSize: (width: Int, height: Int) {
@@ -231,18 +359,31 @@ struct CameraPreviewView: View {
     }
 
     var body: some View {
-        let size = previewSize
+        // Made with the view, and let go with it.
+        let _ = presence
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.black)
-            if let image = CameraPreview.nsImage(for: camera, width: size.width, height: size.height, sequence: sequence) {
-                Image(nsImage: image)
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
+            if moves {
+                TimelineView(.periodic(from: .now, by: 1.0 / 15.0)) { context in
+                    drawn(sequence: UInt64(max(0, context.date.timeIntervalSinceReferenceDate * 15)))
+                }
+            } else {
+                drawn(sequence: 0)
             }
         }
         .frame(height: height)
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .onReceive(timer) { _ in sequence &+= 1 }
+    }
+
+    /// The frame `sequence` (the test pattern's bar moves with it).
+    @ViewBuilder
+    private func drawn(sequence: UInt64) -> some View {
+        let size = previewSize
+        if let image = CameraPreview.nsImage(for: camera, width: size.width, height: size.height, sequence: sequence) {
+            Image(nsImage: image)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+        }
     }
 }

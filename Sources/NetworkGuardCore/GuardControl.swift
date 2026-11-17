@@ -18,6 +18,11 @@ import Foundation
     /// Every flow the filter was given since it started, counted (`GuardDiagnostics`, JSON) — for
     /// `Lumen --guard-diagnose`. A guard of a build before this one does not answer it.
     func diagnostics(reply: @escaping (Data) -> Void)
+    /// The kernel's UDP sockets on local port `port` (`[KernelSocket]`, JSON; empty data when the
+    /// table cannot be read), read as root: macOS 27 lists to the app, which is not, only its own.
+    /// The WebRTC relay asks it whose socket a client sends from (`RelayClients`). A guard of a build
+    /// before this one does not answer it.
+    func udpSockets(onPort port: UInt16, reply: @escaping (Data) -> Void)
 }
 
 /// Names both sides agree on.

@@ -39,12 +39,16 @@ command -v xcodegen >/dev/null || brew install xcodegen >/dev/null 2>&1 || { say
 python3 "$HERE/scripts/build-shim.py" --check | tee -a "$LOG" || { say "page-shim.js is stale"; STATUS=1; }
 # The canvas noise is one a canvas can hold (and its control, the old noise, is not).
 node "$HERE/shim/test-fingerprint.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "canvas noise check failed"; STATUS=1; }
+# What a page can learn of the bundled shim by calling what the engine lets it call: no registry for
+# a page, one family for a page and its frames with the runtime's channel (PageSettings.makeChannel).
+node "$HERE/shim/test-page-shim.mjs" | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "page shim check failed"; STATUS=1; }
 # The real-iPhone script's own pieces (run-device.sh): each test reproduces the owner's case with the
 # old rule (its red) beside the new one — the device it picks, and a recording that saw nothing. And the
 # owner's rules for the App Store build (release_rules.py: none of the positioning words, no App-Bound
-# Domains), each red a planted breach.
+# Domains), each red a planted breach. And the content rules of a session with a proxy, read as WebKit
+# reads them (test_proxied_rules.py: the old ending of their hosts is its red).
 if in_suite core; then
-    for t in test_device_pick.py test_capture_look.py test_release_rules.py; do
+    for t in test_device_pick.py test_capture_look.py test_release_rules.py test_proxied_rules.py; do
         python3 "$HERE/scripts/$t" 2>&1 | tee -a "$LOG"; [[ ${PIPESTATUS[0]} -eq 0 ]] || { say "$t failed"; STATUS=1; }
     done
     # The two languages: every text inside L(…) has its English, none stands outside (and each breach planted).

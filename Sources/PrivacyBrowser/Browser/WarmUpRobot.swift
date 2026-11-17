@@ -26,7 +26,8 @@ import WebKit
 ///
 /// It stops by itself when its tab is closed, when the profile stops (`ProfileManager.stop`
 /// cancels it first, before the store is released: the robot holds its tab and session only
-/// weakly) and when a page waits for an answer to a dialog.
+/// weakly), when a page waits for an answer to a dialog, and when its tab is not the one its
+/// window shows for `Limits.tabWait` (its window refuses the windows pages open, so it should not be).
 @MainActor
 final class WarmUpRobot: ObservableObject {
     enum State: Equatable {
@@ -42,6 +43,10 @@ final class WarmUpRobot: ObservableObject {
         case tabClosed
         /// A page of the robot's tab shows a dialog (alert, sign-in…) that waits for the user.
         case pageNeedsAttention
+        /// Its tab was not the one its window shows for longer than `Limits.tabWait`.
+        case tabNotShown
+        /// Several pages in a row did not load (`WarmUpHealth`): the proxy is gone.
+        case proxyNotAnswering
     }
 
     enum Input: String, Equatable {
@@ -59,10 +64,16 @@ final class WarmUpRobot: ObservableObject {
         var startTimeout: TimeInterval = 10
         /// A script of the robot that has not answered after this is given up.
         var scriptTimeout: TimeInterval = 5
+        /// Its tab not the one shown for longer than this ends the run: in its own window, out of the
+        /// person's reach, nothing would ever show it again.
+        var tabWait: TimeInterval = 30
         /// The plan's times are kept to `WarmUpPlan.dwellLimits`, and the pause between pages
         /// is `WarmUpTiming.pause`, unless set here (self-test).
         var dwellOverride: ClosedRange<TimeInterval>?
         var pauseOverride: ClosedRange<TimeInterval>?
+        /// The search engine's own page, for a site reached through a search: the self-test's, whose
+        /// proxy serves one (the engines' own are https, which it does not answer).
+        var searchHomeOverride: URL?
     }
 
     let profileID: UUID
@@ -102,15 +113,48 @@ final class WarmUpRobot: ObservableObject {
             case .profileStopped: reason = "profileStopped"
             case .tabClosed: reason = "tabClosed"
             case .pageNeedsAttention: reason = "pageNeedsAttention"
+            case .tabNotShown: reason = "tabNotShown"
+            case .proxyNotAnswering: reason = "proxyNotAnswering"
             }
         } else if isRunning, waitingForTab {
             reason = "waitingForTab"
         }
-        return WarmUpStatus(phase: phase, visited: visited, total: pageCount, failed: failed,
-                            cookies: cookiesCollected, secondsRemaining: secondsRemaining,
-                            currentHost: isRunning ? visits.last?.url.host : nil,
-                            sites: isRunning ? nil : cookieSites, stopReason: reason)
+        var status = WarmUpStatus(phase: phase, visited: visited, total: pageCount, failed: failed,
+                                  cookies: cookiesCollected, secondsRemaining: secondsRemaining,
+                                  currentHost: isRunning ? (tab?.url?.host ?? visits.last?.url.host) : nil,
+                                  sites: isRunning ? nil : cookieSites, stopReason: reason)
+        status.startedAt = runBegan
+        status.step = isRunning ? step : nil
+        status.siteNumber = siteNumber
+        status.siteCount = siteCount
+        status.pagesRead = pagesRead
+        status.searchesTyped = searchesTyped
+        status.consents = consentsAnswered
+        // While it runs, the last few sites — what the screen shows of its way; once over, all of
+        // them with the cookies each left (the report).
+        if isRunning {
+            status.siteVisits = Array(siteLog.suffix(6))
+        } else {
+            var added: [String: Int] = [:]
+            for site in cookieSites ?? [] where site.added > 0 { added[site.site] = site.added }
+            status.siteVisits = WarmUpSiteVisit.rows(siteLog, added: added)
+        }
+        return status
     }
+
+    /// What the run has done so far, beyond its pages' outcomes (`WarmUpStatus`).
+    private var runBegan: Date?
+    private var step: String?
+    private var siteNumber: Int?
+    private var siteCount: Int?
+    private var pagesRead = 0
+    private var searchesTyped = 0
+    private var consentsAnswered = 0
+    private(set) var siteLog: [WarmUpSiteVisit] = []
+    /// The search engine showed a check, or did not load: sites are opened by address from then on.
+    private var searchUnusable = false
+
+
 
     /// Roughly how much of the run is left: from what its pages have actually taken so far, and
     /// before the first one is over, from the plan. Nil once the run is over.
@@ -186,6 +230,15 @@ final class WarmUpRobot: ObservableObject {
         cookiesBefore = nil
         cookiesCollected = 0
         cookieSites = nil
+        runBegan = Date()
+        step = nil
+        siteNumber = nil
+        siteCount = pages.filter { $0.kind == .address }.count
+        pagesRead = 0
+        searchesTyped = 0
+        consentsAnswered = 0
+        siteLog = []
+        searchUnusable = false
         startedAt = Date()
         plannedSecondsPerPage = plan.secondsPerPage
         tab.refusesDownloads = true
@@ -312,24 +365,45 @@ final class WarmUpRobot: ObservableObject {
         await takeStartingPoint()
         guard isCurrent(run) else { return }
         var generator = SystemRandomNumberGenerator()
+        var health = WarmUpHealth()
+        var siteIndex = 0
         for (index, page) in pages.enumerated() {
             guard await waitUntilShown(run) else { return }
             visits.append(WarmUpVisit(id: index, url: page.url, kind: page.kind))
+            if page.kind == .address {
+                siteIndex += 1
+                siteNumber = siteIndex
+            }
+            let began = Date()
+            var arrival: WarmUpSiteVisit.Arrival = page.kind == .search ? .query : .address
+            step = page.kind == .search ? "search" : "open"
             onProgress?()
             guard let tab = liveTab(run) else { return }
             var typed: WarmUpVisit.Outcome?
             // A search, most times typed on the engine's own page as a person does; else (and when
             // that cannot be done as a person would) its results opened by their address, as
             // Safari's address bar does with words typed into it.
-            if page.kind == .search, let query = page.query,
+            if page.kind == .search, let query = page.query, !searchUnusable,
                Double.random(in: 0..<1, using: &generator) < WarmUpTiming.typedSearchShare {
                 switch await typeSearch(query, for: page, in: tab, run: run, using: &generator) {
                 case .typed(let outcome):
                     typed = outcome
+                    searchesTyped += 1
                     update(index, run: run) {
                         $0.typedSearch = true
                         if let at = tab.url { $0.url = at }
                     }
+                case .notTyped: break
+                case .ended: return
+                }
+            } else if page.kind == .address, !searchUnusable, let share = plan.searchArrivalShare, share > 0,
+                      Double.random(in: 0..<1, using: &generator) < share {
+                // A site reached as people reach most sites: its name typed in the search engine, its
+                // result followed. Whenever that cannot be done, its address is opened as before.
+                switch await arriveThroughSearch(page, in: tab, run: run, using: &generator) {
+                case .typed(let outcome):
+                    typed = outcome
+                    arrival = .search
                 case .notTyped: break
                 case .ended: return
                 }
@@ -342,26 +416,81 @@ final class WarmUpRobot: ObservableObject {
                 if outcome == .loaded { $0.loadedAt = Date() }
                 $0.title = tab.webView.title ?? ""
             }
+            var result = WarmUpSiteVisit.Outcome.visited
+            var detail: String?
+            pagesOnSite = 0
+            switch outcome {
+            case .failed(let message):
+                result = .failed
+                detail = message
+            case .timedOut:
+                result = .timedOut
+            case .loaded, .dialog:
+                break
+            }
+            // Three pages in a row that do not load: the proxy is gone, and the rest of the plan would
+            // only be its timeouts.
+            if case .failed = outcome {
+                if health.record(loaded: false) {
+                    logSite(page.url, arrival: arrival, outcome: result, began: began, detail: detail)
+                    stop(.proxyNotAnswering)
+                    return
+                }
+            } else if outcome == .loaded {
+                _ = health.record(loaded: true)
+            }
             // A page that did not load is left at once (its error page is no visit).
             if !isFailure(outcome) {
-                let dwell = dwellTime(plan, using: &generator)
-                update(index, run: run) { $0.dwell = dwell }
-                // The stay answers a cookie banner on the way, as a person reading the page does.
-                guard await stay(dwell, scroll: plan.scroll, answersConsent: true, visit: index, run: run,
-                                 using: &generator) else { return }
-                // Links one after the other (`plan.hops`, 1–3 by depth): from a search's results to a
-                // site, then on within that site, as a person reads on.
-                var current = page
-                for hop in 0..<plan.hops {
-                    guard let followed = await follow(on: current, visit: index, hop: hop, plan: plan, run: run,
-                                                      using: &generator) else { return }
-                    guard followed, let at = liveTab(run)?.url else { break }
-                    current = WarmUpPlan.Page(url: at, kind: .address)
+                switch await look(in: tab, run: run) {
+                case nil:
+                    return
+                case .blocked(let kind)?:
+                    // An "are you a robot" check, a refusal: nothing is answered. Left as a person
+                    // who sees it leaves, and said in the report.
+                    result = .blocked
+                    detail = kind
+                    if page.kind == .search { searchUnusable = true }
+                    guard await wait(Double.random(in: 2...4, using: &generator), run: run) else { return }
+                case .sensitive?:
+                    // Where one signs in or pays: nothing is pressed, and the robot does not stay.
+                    result = .sensitive
+                    guard await wait(Double.random(in: 1...2, using: &generator), run: run) else { return }
+                case .read?:
+                    pagesOnSite = 1
+                    pagesRead += 1
+                    let measure = plan.readsByPage == true ? await measurePage(in: tab) : nil
+                    guard liveTab(run) != nil else { return }
+                    let dwell = dwellTime(plan, measure: measure, using: &generator)
+                    update(index, run: run) { $0.dwell = dwell }
+                    step = "read"
+                    onProgress?()
+                    // The stay answers a cookie banner on the way, as a person reading the page does.
+                    guard await stay(dwell, scroll: plan.scroll, measure: measure, consent: plan.consentChoice, visit: index, run: run,
+                                     using: &generator) else { return }
+                    // Links one after the other (`plan.hops`, 1–3 by depth): from a search's results to a
+                    // site, then on within that site, as a person reads on — now and then back, and
+                    // another one from there.
+                    var current = page
+                    for hop in 0..<plan.hops {
+                        guard let followed = await follow(on: current, visit: index, hop: hop, plan: plan, run: run,
+                                                          using: &generator) else { return }
+                        guard followed, let at = liveTab(run)?.url else { break }
+                        current = WarmUpPlan.Page(url: at, kind: .address)
+                        if plan.readsByPage == true, hop < plan.hops - 1, Double.random(in: 0..<1, using: &generator) < 0.35 {
+                            guard let back = await goBack(run: run, using: &generator) else { return }
+                            if back, let at = liveTab(run)?.url { current = WarmUpPlan.Page(url: at, kind: .address) }
+                        }
+                    }
                 }
             }
+            logSite(liveTab(run)?.url ?? page.url, arrival: arrival, outcome: result, began: began, detail: detail,
+                    plannedSite: page.kind == .address && result != .visited ? page.url : nil)
             countCookiesSoFar()
             if index < pages.count - 1 {
-                let pause = limits.pauseOverride.map { Double.random(in: $0, using: &generator) } ?? WarmUpTiming.pause(using: &generator)
+                step = "pause"
+                onProgress?()
+                let pause = limits.pauseOverride.map { Double.random(in: $0, using: &generator) }
+                    ?? (plan.readsByPage == true ? WarmUpReading.pause(using: &generator) : WarmUpTiming.pause(using: &generator))
                 guard await wait(pause, run: run) else { return }
             }
         }
@@ -382,9 +511,81 @@ final class WarmUpRobot: ObservableObject {
         return false
     }
 
-    private func dwellTime(_ plan: WarmUpPlan, using generator: inout some RandomNumberGenerator) -> TimeInterval {
-        if let range = limits.dwellOverride { return Double.random(in: range, using: &generator) }
+    /// Seconds on a page: by the page when it was measured (`WarmUpReading.dwell`, within the plan's
+    /// two times), else a random time between the two.
+    private func dwellTime(_ plan: WarmUpPlan, measure: WarmUpPageMeasure? = nil,
+                           using generator: inout some RandomNumberGenerator) -> TimeInterval {
+        if let range = limits.dwellOverride {
+            if let measure { return WarmUpReading.dwell(measure, range: range, using: &generator) }
+            return Double.random(in: range, using: &generator)
+        }
+        if let measure { return WarmUpReading.dwell(measure, range: plan.minimumDwell...max(plan.minimumDwell, plan.maximumDwell), using: &generator) }
         return WarmUpTiming.dwell(plan, using: &generator)
+    }
+
+    /// Pages read on the site being gone through: its first and those its links led to.
+    private var pagesOnSite = 0
+
+    /// Adds the site's row to the run's log (`WarmUpSiteVisit`): where the tab ended up — or, for a
+    /// site that was never reached, the plan's own address.
+    private func logSite(_ url: URL, arrival: WarmUpSiteVisit.Arrival, outcome: WarmUpSiteVisit.Outcome, began: Date,
+                         detail: String?, plannedSite: URL? = nil) {
+        let site = WarmUpLinkPolicy.site(of: plannedSite ?? url)
+        guard !site.isEmpty else { return }
+        siteLog.append(WarmUpSiteVisit(site: site, arrival: arrival, outcome: outcome, pages: pagesOnSite,
+                                       seconds: Date().timeIntervalSince(began), detail: detail))
+        onProgress?()
+    }
+
+    // MARK: Looking at a page before anything is done on it
+
+    private enum Look {
+        /// A page to read.
+        case read
+        /// A check or a refusal (`WarmUpBlockPage.kind`).
+        case blocked(String)
+        /// Where one signs in or pays (`WarmUpSensitivePage`).
+        case sensitive
+    }
+
+    /// What the page the tab has come to is; nil when the run ended meanwhile. A page that does not
+    /// answer the reader is read as any page.
+    private func look(in tab: BrowserTab, run: Int) async -> Look? {
+        let marks = WarmUpBlockPage.marks.map { ["name": $0.name, "selector": $0.selector] }
+        let value = await script(WarmUpPageScripts.signals, ["marks": marks], in: tab) as? String
+        guard liveTab(run) != nil else { return nil }
+        guard let data = value?.data(using: .utf8), let signals = try? JSONDecoder().decode(WarmUpPageSignals.self, from: data) else { return .read }
+        if let kind = WarmUpBlockPage.kind(signals) {
+            log.notice("A page asked whether the visitor is a robot, or refused them (\(kind, privacy: .private)): left")
+            return .blocked(kind)
+        }
+        if WarmUpSensitivePage.isSensitive(signals) {
+            log.notice("A page to sign in or pay on: left")
+            return .sensitive
+        }
+        return .read
+    }
+
+    /// The page's text and height (`WarmUpPageScripts.measure`); nil when the reader did not answer.
+    private func measurePage(in tab: BrowserTab) async -> WarmUpPageMeasure? {
+        guard let value = await script(WarmUpPageScripts.measure, [:], in: tab) as? [Double], value.count == 3 else { return nil }
+        return WarmUpPageMeasure(textLength: value[0], pageHeight: value[1], viewportHeight: value[2])
+    }
+
+    /// Goes back a page, as a reader who opened an article returns to the front page: true when the
+    /// page before came, false when there was none to come, nil when the run ended meanwhile.
+    private func goBack(run: Int, using generator: inout some RandomNumberGenerator) async -> Bool? {
+        guard let tab = liveTab(run) else { return nil }
+        guard tab.isSelected, tab.webView.canGoBack else { return false }
+        step = "back"
+        onProgress?()
+        let failures = tab.failedNavigations
+        let before = tab.url
+        tab.webView.goBack()
+        guard let outcome = await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run, startTimeout: 5) else { return nil }
+        guard !isFailure(outcome) else { return false }
+        guard await wait(Double.random(in: 1.5...4, using: &generator), run: run) else { return nil }
+        return true
     }
 
     private func isCurrent(_ run: Int) -> Bool {
@@ -422,13 +623,28 @@ final class WarmUpRobot: ObservableObject {
         return true
     }
 
-    /// Waits while the robot's tab is not the one its window shows.
+    /// Waits while the robot's tab is not the one its window shows, at most `limits.tabWait`: the
+    /// window is the robot's own and out of sight, so a tab that is still not shown then never will
+    /// be, and the run ends rather than holding its place in the queue (and its profile's data open)
+    /// for ever.
     private func waitUntilShown(_ run: Int) async -> Bool {
+        let deadline = Date().addingTimeInterval(limits.tabWait)
         while let tab = liveTab(run), !tab.isSelected {
-            if !waitingForTab { waitingForTab = true }
+            if !waitingForTab {
+                waitingForTab = true
+                onProgress?()
+            }
+            if Date() >= deadline {
+                waitingForTab = false
+                stop(.tabNotShown)
+                return false
+            }
             guard await wait(0.25, run: run) else { break }
         }
-        if waitingForTab { waitingForTab = false }
+        if waitingForTab {
+            waitingForTab = false
+            onProgress?()
+        }
         return liveTab(run) != nil
     }
 
@@ -507,10 +723,19 @@ final class WarmUpRobot: ObservableObject {
     /// `answersConsent`: a cookie banner is looked for a moment in — it often comes a moment after
     /// the page — and accepted (`pressConsent`), within the stay, not before it: the time on the
     /// page is the plan's.
-    private func stay(_ dwell: TimeInterval, scroll: Bool, answersConsent: Bool = false, visit: Int, run: Int,
-                      using generator: inout some RandomNumberGenerator) async -> Bool {
+    private func stay(_ dwell: TimeInterval, scroll: Bool, measure: WarmUpPageMeasure? = nil, consent: WarmUpConsentChoice? = nil,
+                      visit: Int, run: Int, using generator: inout some RandomNumberGenerator) async -> Bool {
         let begun = Date()
-        let gestures = scroll ? WarmUpTiming.gestures(over: dwell, using: &generator) : []
+        let answersConsent = consent != nil && consent != .leave
+        // By the page where it was measured: bursts and reading pauses down to a depth of its own.
+        var gestures: [WarmUpTiming.Gesture] = []
+        if scroll {
+            if let measure {
+                gestures = WarmUpReading.gestures(measure, over: dwell, using: &generator)
+            } else {
+                gestures = WarmUpTiming.gestures(over: dwell, using: &generator)
+            }
+        }
         // The pointer drifts while the page is read, as a hand resting on a mouse does — never
         // during a gesture (the wheel scrolls where the pointer is).
         let drifts = WarmUpTiming.pointerMoves(over: dwell, avoiding: gestures, using: &generator)
@@ -529,7 +754,11 @@ final class WarmUpRobot: ObservableObject {
             case .drift:
                 await drift(in: tab, using: &generator)
             case .consent:
-                if await pressConsent(in: tab, run: run) { update(visit, run: run) { $0.consentsAccepted += 1 } }
+                let action = WarmUpConsent.action(consent ?? .accept, using: &generator)
+                if action != .leave, await pressConsent(in: tab, run: run, rejecting: action == .reject, using: &generator) {
+                    consentsAnswered += 1
+                    update(visit, run: run) { $0.consentsAccepted += 1 }
+                }
             }
         }
         return await wait(dwell - Date().timeIntervalSince(begun), run: run)
@@ -600,46 +829,55 @@ final class WarmUpRobot: ObservableObject {
 
     // MARK: Cookie banners
 
-    /// The "accept" buttons of the consent tools most sites use, by their own ids — OneTrust,
-    /// Didomi, Quantcast, Cookiebot, Usercentrics (in its shadow root), TrustArc, Google's Funding
-    /// Choices and Google's own consent page — and nothing else.
-    private static let consentButtons = [
-        "#onetrust-accept-btn-handler", "#didomi-notice-agree-button", ".qc-cmp2-summary-buttons button[mode=\"primary\"]",
-        "#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll", "#CybotCookiebotDialogBodyButtonAccept",
-        "button[data-testid=\"uc-accept-all-button\"]", "#truste-consent-button", ".fc-cta-consent", "button#L2AGLb",
-    ]
-
     /// Presses a consent tool's "accept" once the banner is up (it often comes a moment after the
     /// page); true when one was pressed. For a page before anything else is done on it (the search
     /// engine's own page, ahead of its box); while a page is read, the stay does it (`stay`).
     private func acceptConsent(in tab: BrowserTab, run: Int) async -> Bool {
         guard await wait(Double.random(in: 1.2...2.2), run: run), liveTab(run) != nil else { return false }
-        return await pressConsent(in: tab, run: run)
+        var generator = SystemRandomNumberGenerator()
+        return await pressConsent(in: tab, run: run, rejecting: false, using: &generator)
     }
 
-    /// Presses a consent tool's "accept" if its banner is up now; true when one was pressed (and
-    /// the moment it takes to go has passed).
-    private func pressConsent(in tab: BrowserTab, run: Int) async -> Bool {
-        let pressed = await script("""
-            const roots = [document];
-            const uc = document.querySelector('#usercentrics-root');
-            if (uc && uc.shadowRoot) roots.push(uc.shadowRoot);
-            for (const root of roots) {
-              for (const selector of selectors) {
-                const button = root.querySelector(selector);
-                if (!button) continue;
-                const r = button.getBoundingClientRect();
-                if (r.width < 1 || r.height < 1) continue;
-                button.click();
-                return true;
-              }
-            }
-            return false;
-            """, ["selectors": Self.consentButtons], in: tab) as? Bool
-        guard pressed == true, liveTab(run) != nil else { return false }
-        log.notice("A cookie banner was accepted")
+    private struct ConsentButton: Decodable {
+        var tool: String
+        var x: Double
+        var y: Double
+        var width: Double
+        var height: Double
+    }
+
+    /// Presses a cookie banner's button if one is up now — a known tool's own (`WarmUpConsent.tools`),
+    /// or, for "accept", a banner's by the strict rule (`WarmUpPageScripts.consent`); `rejecting`:
+    /// the tool's "only necessary" where it has one, else nothing. With the pointer, as a person
+    /// presses it, when its trusted moves are seen to reach the button; else with the button's own
+    /// `click()`. True when one was pressed (and the moment it takes to go has passed).
+    private func pressConsent(in tab: BrowserTab, run: Int, rejecting: Bool,
+                              using generator: inout some RandomNumberGenerator) async -> Bool {
+        let tools = WarmUpConsent.tools.map { ["name": $0.name, "accept": $0.accept, "reject": $0.reject] as [String: Any] }
+        let arguments: [String: Any] = ["tools": tools, "want": rejecting ? "reject" : "accept",
+                                        "words": Array(WarmUpConsent.acceptWords), "containers": WarmUpConsent.containerWords]
+        let value = await script(WarmUpPageScripts.consent, arguments, in: tab) as? String
+        guard liveTab(run) != nil, let data = value?.data(using: .utf8),
+              let button = try? JSONDecoder().decode(ConsentButton.self, from: data) else { return false }
+        step = "consent"
+        onProgress?()
+        let find = "const a = globalThis.warmUpConsent; if (!a || !a.isConnected) return false;"
+        let point = CGPoint(x: button.x + button.width * Double.random(in: 0.3...0.7, using: &generator),
+                            y: button.y + button.height * Double.random(in: 0.35...0.65, using: &generator))
+        switch await pointerClick(at: point, find: find, arguments: [:], in: tab, run: run, using: &generator) {
+        case true?:
+            break
+        case nil:
+            return false
+        case false?:
+            let pressed = await script(find + " a.click(); return true;", [:], in: tab) as? Bool
+            guard pressed == true else { return false }
+        }
+        guard liveTab(run) != nil else { return false }
+        log.notice("A cookie banner was answered (\(button.tool, privacy: .private))")
+        step = "read"
         // The banner goes, and the page may reload part of itself.
-        return await wait(Double.random(in: 0.8...1.6), run: run)
+        return await wait(Double.random(in: 0.8...1.6, using: &generator), run: run)
     }
 
     // MARK: Following a link
@@ -648,6 +886,9 @@ final class WarmUpRobot: ObservableObject {
         struct Link: Decodable {
             var index: Int
             var link: WarmUpLink
+            /// In the page's main part; in its navigation, header, footer or a side column.
+            var content: Bool?
+            var chrome: Bool?
         }
 
         var links: [Link]
@@ -668,8 +909,13 @@ final class WarmUpRobot: ObservableObject {
         // Each link judged by itself: the same address may also be on a link that opens a new
         // window or downloads.
         let viewport = (width: found.width, height: found.height)
-        let allowed = found.links.filter { WarmUpLinkPolicy.allows($0.link, on: pageURL, kind: page.kind, viewport: viewport) }
-        guard let choice = allowed.randomElement(using: &generator) else { return false }
+        // Never to signing in or an account; a headline in the page's main part far sooner than its
+        // menu, its footer hardly ever (`WarmUpLinkPolicy.weight`).
+        let allowed = found.links.filter { WarmUpLinkPolicy.allowsReading($0.link, on: pageURL, kind: page.kind, viewport: viewport) }
+        let weights = allowed.map { WarmUpLinkPolicy.weight($0.link, placement: .init(inContent: $0.content ?? false, inChrome: $0.chrome ?? false)) }
+        guard let choice = WarmUpLinkPolicy.pick(allowed, weights: weights, using: &generator) else { return false }
+        step = "link"
+        onProgress?()
         let failures = tab.failedNavigations
         let before = tab.url
         // A point inside the link, not always its middle.
@@ -686,38 +932,86 @@ final class WarmUpRobot: ObservableObject {
         }
         if hop == 0 { update(visit, run: run) { $0.followedOutcome = outcome } }
         if isFailure(outcome) { return false }
-        let dwell = dwellTime(plan, using: &generator) / 2
+        guard let landed = liveTab(run) else { return nil }
+        // The page a link led to is looked at like any other: a check or a sign-in page ends the
+        // reading of this site.
+        guard let look = await look(in: landed, run: run) else { return nil }
+        guard case .read = look else { return false }
+        pagesOnSite += 1
+        pagesRead += 1
+        let measure = plan.readsByPage == true ? await measurePage(in: landed) : nil
+        guard liveTab(run) != nil else { return nil }
+        let dwell = dwellTime(plan, measure: measure, using: &generator) / 2
         update(visit, run: run) { $0.dwell += dwell }
-        return await stay(dwell, scroll: plan.scroll, visit: visit, run: run, using: &generator) ? true : nil
+        step = "read"
+        onProgress?()
+        return await stay(dwell, scroll: plan.scroll, measure: measure, visit: visit, run: run, using: &generator) ? true : nil
+    }
+
+    /// Reaches the plan's site through the profile's search engine: its name typed on the engine's
+    /// page as a search is (`typeSearch`), a look at the results, and its own result followed
+    /// (`WarmUpLinkPolicy.result`, in view or a scroll further down). `.typed` with the site's page's
+    /// outcome; `.notTyped` whenever that could not be done as a person does it — the site is then
+    /// opened by its address; `.ended` when the run ended meanwhile.
+    private func arriveThroughSearch(_ page: WarmUpPlan.Page, in tab: BrowserTab, run: Int,
+                                     using generator: inout some RandomNumberGenerator) async -> TypedSearch {
+        guard let session else { return .ended }
+        let site = WarmUpLinkPolicy.site(of: page.url)
+        let words = WarmUpLinkPolicy.searchWords(forSite: page.url.absoluteString)
+        let engine = session.configuration.searchEngine ?? .standard
+        guard !site.isEmpty, let results = WebAddress.searchURL(for: words, engine: engine) else { return .notTyped }
+        step = "search"
+        onProgress?()
+        let search = WarmUpPlan.Page(url: results, kind: .search, query: words)
+        switch await typeSearch(words, for: search, in: tab, run: run, using: &generator) {
+        case .ended: return .ended
+        case .notTyped:
+            // The engine's page did not come, or would not be typed into: not tried again for every site.
+            if liveTab(run)?.url.map({ WarmUpLinkPolicy.site(of: $0) }) != WarmUpLinkPolicy.site(of: results) { searchUnusable = true }
+            return .notTyped
+        case .typed(let outcome):
+            guard outcome == .loaded, liveTab(run) != nil else { return liveTab(run) == nil ? .ended : .notTyped }
+        }
+        guard let look = await look(in: tab, run: run) else { return .ended }
+        if case .blocked(let kind) = look {
+            // The engine asks whether this is a robot: it is not asked again in this run.
+            searchUnusable = true
+            logSite(results, arrival: .query, outcome: .blocked, began: Date(), detail: kind)
+            return .notTyped
+        }
+        step = "result"
+        onProgress?()
+        guard await wait(Double.random(in: 1.2...3, using: &generator), run: run) else { return .ended }
+        for attempt in 0..<2 {
+            guard let tab = liveTab(run), let pageURL = tab.url else { return .ended }
+            guard tab.isSelected, let found = await links(in: tab) else { return liveTab(run) == nil ? .ended : .notTyped }
+            let viewport = (width: found.width, height: found.height)
+            let allowed = found.links.filter { WarmUpLinkPolicy.allows($0.link, on: pageURL, kind: .search, viewport: viewport) }
+            if let choice = WarmUpLinkPolicy.result(for: site, among: allowed, href: { $0.link.href }, on: pageURL) {
+                let failures = tab.failedNavigations
+                let before = tab.url
+                let point = CGPoint(x: choice.link.x + min(choice.link.width * Double.random(in: 0.2...0.6, using: &generator), 220),
+                                    y: choice.link.y + choice.link.height * Double.random(in: 0.35...0.65, using: &generator))
+                guard await click(choice, at: point, in: tab, run: run, using: &generator) else { return liveTab(run) == nil ? .ended : .notTyped }
+                guard let outcome = await waitForPage(in: tab, failuresBefore: failures, urlBefore: before, run: run, startTimeout: 6) else { return .ended }
+                guard let at = liveTab(run)?.url else { return .ended }
+                guard !isFailure(outcome), WarmUpLinkPolicy.site(of: at) == site else { return .notTyped }
+                log.notice("A site was reached through the search engine")
+                return .typed(outcome)
+            }
+            // Not among the results in view: a scroll further down, once.
+            guard attempt == 0 else { break }
+            let down = WarmUpTiming.Gesture(at: 0, deltas: [90, 80, 70, 60, 50, 40, 30, 20, 10], interval: 0.02)
+            _ = await scroll(down, in: tab, run: run)
+            guard await wait(Double.random(in: 0.6...1.4, using: &generator), run: run) else { return .ended }
+        }
+        return .notTyped
     }
 
     /// The links in view, read in the robot's world (only those the pointer could reach: the
     /// link itself is what is under its middle).
     private func links(in tab: BrowserTab) async -> PageLinks? {
-        let value = await script("""
-            const out = [];
-            const width = window.innerWidth, height = window.innerHeight;
-            const anchors = document.querySelectorAll('a[href]');
-            for (let index = 0; index < anchors.length && out.length < 300; index++) {
-              const a = anchors[index];
-              if (typeof a.href !== 'string') continue;
-              const r = a.getBoundingClientRect();
-              if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.top >= height || r.right <= 0 || r.left >= width) continue;
-              const style = getComputedStyle(a);
-              if (style.visibility !== 'visible' || style.pointerEvents === 'none') continue;
-              // Hidden by an ancestor too (opacity is not inherited; a link no one can see is a trap).
-              if (a.checkVisibility ? !a.checkVisibility({opacityProperty: true, visibilityProperty: true})
-                                    : (() => { for (let e = a; e; e = e.parentElement) if (Number(getComputedStyle(e).opacity) < 0.1) return true; return false; })()) continue;
-              const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-              if (!top || (top !== a && !a.contains(top))) continue;
-              const text = (a.innerText || a.getAttribute('aria-label') || a.title || '').replace(/\\s+/g, ' ').trim().slice(0, 120);
-              // The window it opens in: its own target, else the page's <base target>.
-              const target = a.hasAttribute('target') ? a.target : ((document.querySelector('base[target]') || {}).target || '');
-              out.push({index, link: {href: a.href, text, target, download: a.hasAttribute('download'),
-                                      x: r.left, y: r.top, width: r.width, height: r.height}});
-            }
-            return JSON.stringify({links: out, width, height});
-            """, [:], in: tab) as? String
+        let value = await script(WarmUpPageScripts.links, [:], in: tab) as? String
         guard let data = value?.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(PageLinks.self, from: data)
     }
@@ -821,7 +1115,7 @@ final class WarmUpRobot: ObservableObject {
         let keys = text.compactMap { PageInput.key(typing: $0) }
         guard keys.count == text.count, let enter = PageInput.named["Enter"] else { return .notTyped }
         guard let input, input.webView === tab.webView, tab.webView.window != nil else { return .notTyped }
-        guard let home = await load(engine.homeURL, in: tab, run: run) else { return .ended }
+        guard let home = await load(limits.searchHomeOverride ?? engine.homeURL, in: tab, run: run) else { return .ended }
         guard home == .loaded else { return .notTyped }
         // Google's consent page, say, stands between the page and its box.
         _ = await acceptConsent(in: tab, run: run)

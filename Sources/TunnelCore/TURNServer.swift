@@ -37,9 +37,18 @@ public protocol PeerRelayFactory: AnyObject {
 /// other Binding gets nothing: the relay addresses are reachable by every process on the Mac,
 /// and an unauthenticated answer would tell them a profile's proxy address.
 ///
+/// The credentials are not all that lets a client in: they are handed to the profile's pages, and
+/// what a page holds a script of it can send elsewhere. So an owner can also say which clients may
+/// allocate (`Admit`): the relay of a profile takes only sockets the kernel counts for that
+/// profile's process (`WebRTCRelays`). A client not admitted gets 403 and no association.
+///
 /// Not thread-safe: the owner calls it, and the relays call back, on one serial queue.
 public final class TURNServer {
     public typealias SendToClient = (_ payload: [UInt8], _ client: SocketAddress, _ server: SocketAddress) -> Void
+    /// Whether `client` may allocate on `server`: asked once per 5-tuple, at its first authenticated
+    /// Allocate, which waits for the answer (no association is opened before it). The answer must
+    /// come on the queue the server runs on, now or later; false is 403 Forbidden.
+    public typealias Admit = (_ client: SocketAddress, _ server: SocketAddress, _ answer: @escaping (Bool) -> Void) -> Void
 
     public static let defaultLifetime: UInt32 = 600
     public static let maximumLifetime: UInt32 = 3600
@@ -55,6 +64,7 @@ public final class TURNServer {
     private let relays: PeerRelayFactory
     private let now: () -> Double
     private let send: SendToClient
+    private let admit: Admit?
     private let log: (String) -> Void
     private let key: [UInt8]
     private let nonceSecret = SymmetricKey(size: .bits256)
@@ -94,12 +104,14 @@ public final class TURNServer {
         }
     }
 
+    /// `admit`: which clients may allocate (`Admit`); nil, any client with the credentials.
     public init(route: TunnelRoute, relays: PeerRelayFactory, now: @escaping () -> Double = { Date().timeIntervalSince1970 },
-                send: @escaping SendToClient, log: @escaping (String) -> Void = { _ in }) {
+                send: @escaping SendToClient, log: @escaping (String) -> Void = { _ in }, admit: Admit? = nil) {
         self.route = route
         self.relays = relays
         self.now = now
         self.send = send
+        self.admit = admit
         self.log = log
         key = STUNMessage.longTermKey(username: route.username, realm: route.realm, password: route.password)
     }
@@ -283,6 +295,27 @@ public final class TURNServer {
                                     fingerprint: message.attribute(STUNMessage.Attribute.fingerprint) != nil)
         allocations[tuple] = allocation
         log("allocate \(tuple.client) family=\(family)")
+        guard let admit else {
+            openRelay(for: allocation, message: message)
+            return
+        }
+        // Held as it is, unanswered, while the owner looks at the client: a retransmission of this
+        // Allocate is the same transaction, answered when this one is.
+        admit(tuple.client, tuple.server) { [weak self, weak allocation] admitted in
+            guard let self, let allocation, self.allocations[tuple] === allocation, allocation.relay == nil else { return }
+            if admitted {
+                self.openRelay(for: allocation, message: message)
+            } else {
+                self.log("allocation \(tuple.client) refused: not a client of this route")
+                self.fail(allocation, message: message, code: 403, reason: "Forbidden")
+            }
+        }
+    }
+
+    /// The association of an admitted allocation, through the profile's proxy.
+    private func openRelay(for allocation: Allocation, message: STUNMessage) {
+        let tuple = allocation.tuple
+        let family = allocation.family
         let relay = relays.openRelay(for: route, family: family, onReady: { [weak self, weak allocation] result in
             guard let self, let allocation, self.allocations[tuple] === allocation else { return }
             self.relayReady(allocation, message: message, result: result)

@@ -72,6 +72,9 @@ final class LicenseModel: ObservableObject {
     /// tick redraws nothing; written with it to `account.json`.
     private var floor: EffectiveClock?
     private var refreshing = false
+    /// A renewal of this run reached the server and left this Mac signed in: sync through the account
+    /// waits for one (`renewForSync`, CONTRACT §16.1).
+    private var renewedThisRun = false
     /// A renewal asked while another was out, for what only a new one can say (the number of
     /// profiles, a person's click): made right after it.
     private var renewAgain: RenewalReason?
@@ -216,12 +219,13 @@ final class LicenseModel: ObservableObject {
         return nil
     }
 
-    /// A new profile may be made here: a working mode and room under the limit (§8.4).
-    func refusalToCreate() -> LicenseRefusal? {
+    /// A new profile may be made here: a working mode and room under the limit (§8.4). `adding`:
+    /// profiles made since the list was last read, counted with it (copies made in one go).
+    func refusalToCreate(adding: Int = 0) -> LicenseRefusal? {
         recompute()
         guard let state else { return nil }
         guard state.mode.allowsWork else { return LicenseRefusal(text: Self.exportOnlyRefusal(state)) }
-        let here = profilesHere().count
+        let here = profilesHere().count + adding
         guard let p = state.entitlement else { return LicenseRefusal(text: L("license.refusal.notChecked")) }
         guard here < state.allowedProfilesHere else { return LicenseRefusal(text: LicenseText.limitProfiles(p)) }
         return nil
@@ -229,10 +233,20 @@ final class LicenseModel: ObservableObject {
 
     /// Whether a profile opens only for export (the row's mark, §8.4).
     func isExportOnly(_ id: UUID) -> Bool {
-        guard let state else { return false }
-        guard state.mode.allowsWork else { return true }
+        exportOnlyTest()(id)
+    }
+
+    /// `isExportOnly`, for many profiles asked about at once: the answer for each id, from the
+    /// state and the profiles as they are now. The profiles that open fully are found once
+    /// (`LicenseDecision.fullyOpen` sorts them all) — the Profiles window asks about every row
+    /// each time it is drawn, and found them again for each. What this returns is for that one
+    /// drawing: it is not kept, so a change of the rights or of the profiles is never missed.
+    func exportOnlyTest() -> (UUID) -> Bool {
+        guard let state else { return { _ in false } }
+        guard state.mode.allowsWork else { return { _ in true } }
         let profiles = profilesHere().map { (id: $0.id, createdAt: $0.createdAt) }
-        return !LicenseDecision.fullyOpen(profiles, allowed: state.allowedProfilesHere).contains(id)
+        let open = LicenseDecision.fullyOpen(profiles, allowed: state.allowedProfilesHere)
+        return { !open.contains($0) }
     }
 
     private static func exportOnlyRefusal(_ state: LicenseState) -> String {
@@ -247,7 +261,7 @@ final class LicenseModel: ObservableObject {
     /// Why a renewal is asked — said in the log, so that a renewal not asked, one that failed and one
     /// that went through are told apart (the owner, 3 November: the app's log said nothing at all).
     enum RenewalReason: String {
-        case launch, unlocked, profiles, timer, network, wake, active, retry, manual
+        case launch, unlocked, profiles, timer, network, wake, active, retry, manual, sync
     }
 
     /// Starts the minute's decision, the renewals and their retries. Once, from the app's own process.
@@ -423,6 +437,7 @@ final class LicenseModel: ObservableObject {
         case .accepted(let paid):
             failures = 0
             nextRetry = nil
+            renewedThisRun = true
             sentProfileCount = count
             // What was asked with — refused or not: the same tokens are not a reason to ask again.
             sentProfileTokens = knownProfileCount != nil ? knownProfileTokens : record.profileTokens
@@ -452,10 +467,14 @@ final class LicenseModel: ObservableObject {
             nextRetry = nil
             save()
             forgetKey()
+            // The key kept in the vault goes with the sign-in: now while the vault is open, else at
+            // its next unlock (`vaultOpened`).
+            if let openVault { removeKeptKey(from: openVault) }
             log.notice("License renewal: signed out by the server (\(why.rawValue, privacy: .public))")
         case .appOutdated:
             failures = 0
             nextRetry = nil
+            renewedThisRun = true
             save()
             log.notice("License renewal: the server sent a document this version cannot judge; an update is asked for")
             onAppOutdated?()
@@ -468,6 +487,39 @@ final class LicenseModel: ObservableObject {
             renewAgain = nil
             await refresh(because: again)
         }
+    }
+
+    /// Sync through the account may go (CONTRACT §16.1): a renewal of this run reached the server, and
+    /// this Mac is still signed in. Before the first sync after the launch the app renews: a token the
+    /// server no longer knows (`device_revoked`, `machine_mismatch` — the app's files copied to another
+    /// Mac) is gone by then (§9.4), and nothing syncs in its name.
+    var renewedForSync: Bool { renewedThisRun && record.isSignedIn }
+
+    /// Renews now when no renewal of this run has reached the server — or `again`, after the sync
+    /// server refused the token (`401`: the renewal says why) — and waits for it, or for the one
+    /// already out. Returns `renewedForSync`.
+    func renewForSync(again: Bool = false) async -> Bool {
+        if again || !renewedThisRun {
+            await refresh(because: .sync)
+            while refreshing { try? await Task.sleep(nanoseconds: 100_000_000) }
+        }
+        return renewedForSync
+    }
+
+    /// The vaults this Mac's account keeps on the Lumen server (CONTRACT §16.1), asked with the
+    /// device's token: what a Mac without a vault asks before it brings one back (`RestoreModel`).
+    /// After a renewal of this run, as a sync (`renewForSync`): a token the server no longer knows is
+    /// gone by then. Nothing is changed by asking.
+    func syncVaults() async -> AccountVaults.State {
+        guard !isPreview, let client else { return .unreachable }
+        guard await renewForSync(), let token = record.deviceToken, !token.isEmpty else {
+            return record.isSignedIn ? .unreachable : .signedOut
+        }
+        let state = AccountVaults.state(of: await client.syncVaults(deviceToken: token))
+        // The server does not know the token: the renewal says why, and signs this Mac out when it
+        // was unlinked (§9.4) — as after a sync the server refused with `401`.
+        if state == .signedOut { _ = await renewForSync(again: true) }
+        return state
     }
 
     // MARK: Signing in
@@ -615,11 +667,17 @@ final class LicenseModel: ObservableObject {
 
     /// The vault was created or unlocked: a key signed in with is kept in it now; a key kept there
     /// before is read for the account screen. "Don't remember the key" (§10.1): no copy is kept, and
-    /// one kept before goes now.
+    /// one kept before goes now. Not signed in with a key (any more): a key kept there goes now too —
+    /// this Mac signed out while the vault was locked (Settings opens without it), or the server
+    /// signed it out; the key stayed in the vault for good (audit 3, #29). Not while `account.json`
+    /// could not be read: nothing is known then of how this Mac is signed in.
     func vaultOpened(_ vault: UnlockedVault) {
         openVault = vault
         restoreSession(from: vault)
-        guard record.isSignedIn, record.signedInWith == .key else { return }
+        guard record.isSignedIn, record.signedInWith == .key else {
+            if fileProblem == nil { removeKeptKey(from: vault) }
+            return
+        }
         do {
             if !record.keepsKey {
                 try AccountKeyVault.remove(from: vault)
@@ -672,6 +730,15 @@ final class LicenseModel: ObservableObject {
     }
 
     private func forgetKey() { key = nil }
+
+    /// The key kept in `vault` goes: this Mac is no longer signed in with it.
+    private func removeKeptKey(from vault: UnlockedVault) {
+        do {
+            try AccountKeyVault.remove(from: vault)
+        } catch {
+            log.error("The account's key could not be removed from the vault: \(error.logKind, privacy: .public)")
+        }
+    }
 
     /// `404 key_not_found` for the key the vault kept: it was replaced — by support, or on another
     /// Mac — so it goes from the vault, and the key is asked for anew (§10.1, §11.1). A key typed for
@@ -739,8 +806,9 @@ final class LicenseModel: ObservableObject {
     // MARK: Signing out, devices
 
     /// `DELETE /v1/device` (§6.3): this Mac leaves the license whatever the server says — the key
-    /// goes from the vault, the profiles stay — except under the unlink cooldown: then nothing
-    /// changes, and the account screen says until when (`signout.cooldown`).
+    /// goes from the vault (now, or at its next unlock while it is locked: `vaultOpened`), the
+    /// profiles stay — except under the unlink cooldown: then nothing changes, and the account
+    /// screen says until when (`signout.cooldown`).
     func signOut(vault: UnlockedVault?) async -> LicenseClient.SignOut? {
         guard let client else { return nil }
         isWorking = true
@@ -752,7 +820,7 @@ final class LicenseModel: ObservableObject {
         }
         record = updated
         save()
-        if let vault { try? AccountKeyVault.remove(from: vault) }
+        if let vault = vault ?? openVault { removeKeptKey(from: vault) }
         key = nil
         pendingSession = nil
         // What this account's server was told and refused is not the next one's.

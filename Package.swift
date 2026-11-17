@@ -13,8 +13,8 @@
 //   NetworkGuardCore Platform-independent rules of the network guard (what a profile's process
 //                   may reach while its WebRTC goes through its proxy), tested on Linux and macOS.
 //   VMNetCore       Platform-independent network of a virtual machine profile (docs/VM_NETWORK.md): a
-//                   userspace stack on the guest's Ethernet frames — ARP, DHCP, DNS, a TCP terminator —
-//                   whose only way out is the profile's proxy. Tested on Linux and macOS; on Linux also
+//                   userspace stack on the guest's Ethernet frames — ARP, DHCP, DNS, a TCP terminator,
+//                   UDP through the proxy's relay — whose only way out is the profile's proxy. Tested on Linux and macOS; on Linux also
 //                   against the kernel's own TCP (vmnet-interop, scripts/vmnet_interop.sh).
 //   TunnelTransport macOS only: the relay's network side (SOCKS5 over Network.framework), the
 //                   TURN server's UDP socket on loopback, the proxy's UDP check.
@@ -32,6 +32,8 @@
 //   LumenVM         macOS only: the virtual machines' helper (docs/VM.md) — the one executable that
 //                   loads Apple's Virtualization.framework and is signed with its right. Put into
 //                   the app only by `VM=1 scripts/build-app.sh`; CI builds it with VM=check.
+//   MachineCover    macOS only: the cover over a virtual machine's screen while its start makes it
+//                   the profile's (SwiftUI) — shown by LumenVM, drawn by the app's UI snapshots.
 //
 import PackageDescription
 
@@ -147,9 +149,17 @@ targets.append(contentsOf: [
         name: "ObjCExceptions",
         path: "Sources/ObjCExceptions"
     ),
+    // The cover over a virtual machine's start (docs/VM.md): the helper shows it, the app's UI
+    // snapshots draw it. SwiftUI, and no Virtualization.framework: the app still links none.
+    .target(
+        name: "MachineCover",
+        dependencies: ["BrowserCore"],
+        path: "Sources/MachineCover"
+    ),
     .executableTarget(
         name: "PrivacyBrowser",
-        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering"],
+        dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering",
+                       "MachineCover"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(
@@ -171,7 +181,7 @@ targets.append(contentsOf: [
     // network through its profile's proxy (VMNetCore). The app itself links neither.
     .executableTarget(
         name: "LumenVM",
-        dependencies: ["BrowserCore", "VMNetCore"],
+        dependencies: ["BrowserCore", "VMNetCore", "MachineCover"],
         path: "Sources/LumenVM"
     ),
 ])

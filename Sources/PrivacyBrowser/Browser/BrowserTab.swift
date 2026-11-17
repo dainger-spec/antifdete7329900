@@ -30,12 +30,11 @@ struct BrowserTabContext {
     /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
     /// it (`ServerTrust`).
     let hasProxy: Bool
-    /// An iPhone view: the phone's pixel density, which WebKit then renders and answers (`PhoneEngine`).
-    let phoneScale: Double?
-    /// An iPhone view: the platform its pages say, set on each main frame's navigation (`PhoneEngine`).
-    let phonePlatform: String?
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
+    /// The profile's pages get a drawn camera, or none ("No camera"), from its script
+    /// (`PrivacyScripts.cameraScript`): the engine is refused every camera request, unasked.
+    var refusesCamera = false
 }
 
 /// One tab: a `WKWebView` and its navigation, UI and download delegates.
@@ -94,7 +93,7 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     /// When the page's process ended lately (`processEnded`). WebKit, left to itself, reloads such a
     /// page once and then leaves it; a delegate that answers the call takes that over — this one
     /// reloaded every time, and a page whose process ends at every load was reloaded for ever, a new
-    /// process each time: on the owner's Mac an iPhone view kept the app, the window server, launchd
+    /// process each time: on the owner's Mac a profile's window kept the app, the window server, launchd
     /// and logd busy until the session was restarted (1 November). Reloaded automatically at most
     /// `automaticReloads` times within `terminationWindow`; after that the tab loads nothing — not
     /// even an error page, which needs a process too — and its window says so (`pageStopped`).
@@ -123,7 +122,6 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
-        PhoneEngine.apply(to: webView, scale: context.phoneScale)
         // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
         // click on it opens the link in the default browser (`HandOffs`).
         webView.allowsLinkPreview = false
@@ -302,8 +300,6 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  preferences: WKWebpagePreferences,
                  decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
-        // An iPhone view's platform, on a main frame's navigation only (`PhoneEngine.setPlatform`).
-        PhoneEngine.setPlatform(context.phonePlatform, on: preferences, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true)
         let decisionHandler: (WKNavigationActionPolicy) -> Void = { decisionHandler($0, preferences) }
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
         let flags = navigationAction.modifierFlags
@@ -589,9 +585,16 @@ extension BrowserTab: WKUIDelegate {
     }
 
     /// Camera / microphone: ask every time (WebKit forwards the request only after the page called getUserMedia).
+    /// While the profile's camera is the script's (drawn, or "No camera"), the script never asks the
+    /// engine for the camera: a camera request that reaches it came past the script, and is refused
+    /// without a question — never the Mac's real camera (docs/CAMERA.md).
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                  initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+        if context.refusesCamera, type != .microphone {
+            decisionHandler(.deny)
+            return
+        }
         let what: String
         switch type {
         case .camera: what = L("media.camera")
@@ -624,16 +627,20 @@ extension BrowserTab: WKDownloadDelegate {
             if let destination { Self.pendingDownloads[key] = destination }
             completionHandler(destination)
         }
-        guard preferences.askWhereToSave, let window = webView.window, window.isVisible else {
+        guard preferences.askWhereToSave else {
             decide(Self.uniqueDownloadURL(suggestedFilename: suggestedFilename, in: preferences.downloadFolderURL))
             return
         }
+        // Asked for every download, as the setting says: one that starts in a tab not shown, or in a
+        // window minimised, brings that tab and its window up for the panel, as a page's dialog does
+        // (`presentSheet`). No window to ask in (the tab is closing) and the panel cancelled alike:
+        // no destination, so WebKit cancels the download and nothing is written.
         let panel = NSSavePanel()
         panel.nameFieldStringValue = Self.safeDownloadName(suggestedFilename)
         panel.directoryURL = preferences.downloadFolderURL
         panel.canCreateDirectories = true
-        // No destination: WebKit cancels the download, and nothing is written.
-        panel.beginSheetModal(for: window) { answer in decide(answer == .OK ? panel.url : nil) }
+        presentSheet(panel, begin: { panel.beginSheetModal(for: $0, completionHandler: $1) },
+                     respond: { answer in decide(answer == .OK ? panel.url : nil) })
     }
 
     /// A download's challenges: its certificate as a page's (`ServerTrust`), the proxy's own with
