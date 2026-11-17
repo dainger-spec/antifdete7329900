@@ -77,6 +77,12 @@ final class XrayRelays {
     /// (`onDied`). The check of links (`XrayCheck`) sets 0, to see what a relay that stays dead does.
     var restartLimit = 2
 
+    /// `owner`'s own relay's route — not another profile's on the same link (`ProxyRoutes` keeps the
+    /// newest of a link's relays for whoever asks by the link).
+    func route(owner: UUID) -> ProxyRoutes.Route? {
+        relays.values.first { $0.owner == owner && $0.process?.isRunning == true }?.inbound.route
+    }
+
     /// The process of `owner`'s relay (`XrayCheck`: the capture's and the fail-closed check's).
     func processIdentifier(owner: UUID) -> pid_t? {
         relays.values.first { $0.owner == owner && $0.process?.isRunning == true }?.process?.processIdentifier

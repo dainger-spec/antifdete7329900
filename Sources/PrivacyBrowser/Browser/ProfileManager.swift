@@ -644,7 +644,7 @@ final class ProfileManager: ObservableObject {
             menusInAppLanguage: stored.menusInAppLanguage,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive,
-            routes: Self.routes(for: stored.proxy))
+            routes: Self.routes(for: stored.proxy, owner: id))
         // The process object is held by `children` and, until its exit has been handled, by its own
         // termination handler — never by what it calls: each of these held it, and it and its
         // pipes were never freed (`ProfileProcess.didExit`).
@@ -794,7 +794,7 @@ final class ProfileManager: ObservableObject {
         // What the process is held to and the relay sends through: a share link's relay, as the
         // SOCKS5 proxy it is to this Mac (`ProxyRoutes`); any other proxy as it is. A link without a
         // running relay has nothing to hold to: WebRTC is off.
-        guard let reach = ProxyRoutes.shared.connectable(storedProxy) else {
+        guard let reach = Self.reach(of: storedProxy, owner: id) else {
             child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: .notRegistered)))
             return
         }
@@ -925,9 +925,16 @@ final class ProfileManager: ObservableObject {
     static var relayDeathGrace: TimeInterval = 0
 
     /// The routes a profile's own process is given with its grant: its link's relay, if it has one.
-    static func routes(for proxy: ProxySettings?) -> [String: ProxyRoutes.Route] {
-        guard let proxy, proxy.kind == .xray, let link = proxy.link, let route = ProxyRoutes.shared.route(for: proxy) else { return [:] }
+    static func routes(for proxy: ProxySettings?, owner: UUID) -> [String: ProxyRoutes.Route] {
+        guard let proxy, proxy.kind == .xray, let link = proxy.link, let route = XrayRelays.shared.route(owner: owner) else { return [:] }
         return [link: route]
+    }
+
+    /// What `id`'s process is held to and its WebRTC sent through: its own link relay, as the SOCKS5
+    /// proxy it is to this Mac, or any other proxy as it is; nil for a link whose relay is not running.
+    static func reach(of proxy: ProxySettings, owner: UUID) -> ProxySettings? {
+        guard proxy.kind == .xray else { return proxy }
+        return XrayRelays.shared.route(owner: owner).map { ProxyRoutes.socks5($0, excludedDomains: proxy.excludedDomains) }
     }
 
     /// The relay and the guard's hold of a profile whose process ended or was stopped.
