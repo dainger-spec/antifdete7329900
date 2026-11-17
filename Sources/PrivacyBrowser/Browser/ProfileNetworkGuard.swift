@@ -43,8 +43,8 @@ enum ProfileNetworkGuard {
     private(set) static var proxies: [ProxyConfiguration]?
     static var isEngaged: Bool { proxies != nil }
     private static var profileID: UUID?
-    /// A share link's profile: its relay's port, the one TCP destination the kernel leaves it
-    /// ("tcp-relay-only"); what the report's TCP probes knock beside.
+    /// A profile on a relay (a share link, an OpenVPN connection): its relay's port, the one TCP
+    /// destination the kernel leaves it ("tcp-relay-only"); what the report's TCP probes knock beside.
     private static var heldRelayPort: Int?
     /// The profile protects its local requests without a proxy: the local-network rule list is one
     /// of the lists no "content blockers off" switch turns off (`theProfilesContentStays`).
@@ -150,13 +150,14 @@ enum ProfileNetworkGuard {
     static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false,
                        protectsLocalNetwork: Bool = false) throws {
         guard proxies == nil else { return }
-        // A share link's proxy is reached through its relay alone, at the route the manager handed
-        // over with the grant (`ProxyRoutes`): without one this process does not run at all.
+        // A proxy a relay of the app's carries — a share link's, an OpenVPN connection — is reached
+        // through its relay alone, at the route the manager handed over with the grant
+        // (`ProxyRoutes`, `LocalRelays`): without one this process does not run at all.
         let reach = proxy.flatMap { ProxyRoutes.shared.connectable($0) }
-        if proxy?.kind == .xray, reach == nil {
-            throw CoreError.invalidConfiguration("no relay was given for the profile's link")
+        if proxy?.localRelay != nil, reach == nil {
+            throw CoreError.invalidConfiguration("no relay was given for the profile's proxy")
         }
-        let relayPort = proxy?.kind == .xray ? reach?.port : nil
+        let relayPort = proxy?.localRelay != nil ? reach?.port : nil
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
         heldRelayPort = relayPort
@@ -164,7 +165,7 @@ enum ProfileNetworkGuard {
         self.protectsLocalNetwork = protectsLocalNetwork && proxies.isEmpty
         let policy = ProfileChallengePolicy(
             hasProxy: !proxies.isEmpty,
-            proxyCredential: reach?.username.map { URLCredential(user: $0, password: reach?.password ?? "", persistence: .forSession) })
+            proxyCredential: ProxyConfigurationFactory.credential(for: proxy))
         challengePolicy = policy
         if !proxies.isEmpty {
             // Lock 3. The default privacy context is what every Network.framework connection and
@@ -179,7 +180,8 @@ enum ProfileNetworkGuard {
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
         }
-        // Nor does a profile on a link run with TCP open to anything but its relay's port.
+        // Nor does a profile on a relay (a link, an OpenVPN connection) run with TCP open to anything
+        // but its relay's port.
         if relayPort != nil, !closures.sorted.contains("tcp-relay-only") {
             throw CoreError.invalidConfiguration("TCP could not be closed but to the relay of the profile's process")
         }
@@ -889,9 +891,9 @@ enum ProfileNetworkGuard {
         var vaultRules: [String] = []
         let vaultNamed = closeTheVault(profileID: profileID, into: &vaultRules)
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
-        // A profile on a share link: TCP to its relay's port on this Mac and nowhere else, whatever in
-        // this process would connect by itself (docs/TUNNEL.md, "Links"). WebKit's network process
-        // is held by the data store's proxy, which is that relay.
+        // A profile on a relay (a share link, an OpenVPN connection): TCP to its relay's port on this
+        // Mac and nowhere else, whatever in this process would connect by itself (docs/TUNNEL.md,
+        // "Relays"). WebKit's network process is held by the data store's proxy, which is that relay.
         if let relayPort, (1...65535).contains(relayPort) {
             rules.append("(deny network-outbound (remote tcp \"*:*\"))")
             rules.append("(allow network-outbound (remote tcp \"localhost:\(relayPort)\"))")
@@ -982,7 +984,7 @@ enum ProfileNetworkGuard {
         return out
     }
 
-    /// What the kernel closed to this process (`closeTheProcess`): "udp", "tcp-relay-only" (a link's
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "tcp-relay-only" (a relay's
     /// profile: TCP to its relay alone), "safari-places", "safari-xpc-services", "keychain",
     /// "other-profiles".
     nonisolated private static let closures = LockedSet()
@@ -1287,7 +1289,7 @@ enum ProfileNetworkGuard {
             report.udp["quic"] = await datagram(to: "192.0.2.17", using: NWParameters(quic: NWProtocolQUIC.Options(alpn: ["h3"])))
         }
         if let port = heldRelayPort {
-            // A share link's profile: TCP to its relay taken, and refused by the kernel (EPERM) to
+            // A profile on a relay: TCP to its relay taken, and refused by the kernel (EPERM) to
             // another port of this Mac's loopback and to an address outside — a packet to that one
             // in a capture is one that left (scripts/xray_leak_check.py).
             report.tcpRelayOnly = closures.sorted.contains("tcp-relay-only")
@@ -1471,10 +1473,10 @@ struct ProfileNetworkReport: Codable, Equatable {
     var safariPathsRedirected: [String] = []
     /// With a proxy: what became of a UDP datagram and of a QUIC connection, by name.
     var udp: [String: String] = [:]
-    /// A share link's profile: the kernel leaves this process TCP to its relay alone
-    /// (`ProfileNetworkGuard.closeTheProcess`, "tcp-relay-only").
+    /// A profile on a relay (a share link, an OpenVPN connection): the kernel leaves this process TCP
+    /// to its relay alone (`ProfileNetworkGuard.closeTheProcess`, "tcp-relay-only").
     var tcpRelayOnly = false
-    /// A share link's profile: what became of TCP to its relay ("relay"), to another port of this
+    /// A profile on a relay: what became of TCP to its relay ("relay"), to another port of this
     /// Mac's loopback ("loopback") and to an address outside ("outside")
     /// (`ProfileNetworkGuard.tcpConnect`).
     var tcp: [String: String] = [:]

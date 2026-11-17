@@ -1,20 +1,28 @@
+#if canImport(CryptoKit)
+import CryptoKit
+#else
+import Crypto
+#endif
 import Foundation
 
-/// Where a share link's proxy (`ProxySettings.Kind.xray`) is reached while the app runs a relay for
-/// it: SOCKS5 on 127.0.0.1, at the relay's port, with its login (`XrayConfig.Inbound`). Everything
-/// that connects through a profile's proxy asks here first (`connectable`), so a link's proxy is
-/// only ever reached through its relay — and, with no relay running for it, through nothing: the
-/// answer is nil and the caller fails closed (`ProxyConfigurationFactory` gives such a profile a
-/// proxy that does not exist, as it gives every store it does not trust).
+/// Where a proxy that a relay of the app's carries (`ProxySettings.localRelay`: a share link's,
+/// `Kind.xray`, or an OpenVPN connection, `ProxySettings.openVPN`) is reached while the relay runs:
+/// SOCKS5 on 127.0.0.1, at the relay's port, with a login made for that run. Everything that
+/// connects through a profile's proxy asks here first (`connectable`), so such a proxy is only ever
+/// reached through its relay — and, with no relay running for it, through nothing: the answer is nil
+/// and the caller fails closed (`ProxyConfigurationFactory` gives such a profile a proxy that does
+/// not exist, as it gives every store it does not trust). Never the link's server or the VPN server
+/// itself: only the relay talks to those.
 ///
-/// In the manager, a relay is added when it is up and removed when it stops (`XrayRelays`). In a
-/// profile's own process, the manager hands the routes over right after the grant
-/// (`encodeRecord`, `readRecord`): that process starts no relay and knows no other.
+/// In the manager, a route is added when its relay is up and removed when it stops (`LocalRelays`,
+/// which starts either kind). In a profile's own process, the manager hands the profile's route over
+/// right after the grant (`encodeRecord`, `readRecord`): that process starts no relay and knows no
+/// other.
 public final class ProxyRoutes: @unchecked Sendable {
     public static let shared = ProxyRoutes()
 
     private let lock = NSLock()
-    /// By the link's text: the relays running for it, newest last.
+    /// By what the proxy is known by (`key(of:)`): the relays running for it, newest last.
     private var routes: [String: [(id: UUID, route: Route)]] = [:]
 
     /// A relay's local side.
@@ -32,10 +40,28 @@ public final class ProxyRoutes: @unchecked Sendable {
 
     public init() {}
 
-    public func add(_ route: Route, for link: String, id: UUID) {
+    /// What a relay's route is known by, here and in the record a profile's process is given: a
+    /// link's text (`ProxySettings.link`); for an OpenVPN connection, a digest of its configuration
+    /// and login — another configuration, or another login to the same server, is another relay's.
+    /// Nil for a proxy no relay carries.
+    public static func key(of proxy: ProxySettings) -> String? {
+        switch proxy.localRelay {
+        case .xray?:
+            return proxy.link
+        case .openVPN?:
+            guard let openVPN = proxy.openVPN else { return nil }
+            let identity = [openVPN.configuration, proxy.username ?? "", proxy.password ?? ""].joined(separator: "\u{0}")
+            return "openvpn:" + SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
+        case nil:
+            return nil
+        }
+    }
+
+    /// `route` as the relay of whatever is known by `key` (`key(of:)`), under the relay's own `id`.
+    public func add(_ route: Route, for key: String, id: UUID) {
         lock.withLock {
-            routes[link, default: []].removeAll { $0.id == id }
-            routes[link, default: []].append((id, route))
+            routes[key, default: []].removeAll { $0.id == id }
+            routes[key, default: []].append((id, route))
         }
     }
 
@@ -48,17 +74,18 @@ public final class ProxyRoutes: @unchecked Sendable {
         }
     }
 
-    /// The relay running for `proxy`'s link (the newest); nil for another kind, or for a link with none.
+    /// The relay running for `proxy` (the newest); nil for a proxy no relay carries, or for one none
+    /// runs for.
     public func route(for proxy: ProxySettings) -> Route? {
-        guard proxy.kind == .xray, let link = proxy.link else { return nil }
-        return lock.withLock { routes[link]?.last?.route }
+        guard let key = Self.key(of: proxy) else { return nil }
+        return lock.withLock { routes[key]?.last?.route }
     }
 
-    /// What to connect to for `proxy`: itself for an HTTP or SOCKS5 proxy; for a link, SOCKS5 to its
-    /// relay, with the profile's bypass list kept; nil for a link no relay runs for — never the
-    /// link's server, which nothing but the relay may be sent to.
+    /// What to connect to for `proxy`: itself for an HTTP or SOCKS5 proxy; for one a relay carries,
+    /// SOCKS5 to its relay, with the profile's bypass list kept; nil when no relay runs for it — never
+    /// the link's server or the VPN server, which nothing but the relay may be sent to.
     public func connectable(_ proxy: ProxySettings) -> ProxySettings? {
-        guard proxy.kind == .xray else { return proxy }
+        guard proxy.localRelay != nil else { return proxy }
         guard let route = route(for: proxy) else { return nil }
         return Self.socks5(route, excludedDomains: proxy.excludedDomains)
     }
@@ -68,7 +95,7 @@ public final class ProxyRoutes: @unchecked Sendable {
                       password: route.password, excludedDomains: excludedDomains)
     }
 
-    /// Every route, by link (for the record a profile's process is given).
+    /// Every route, by key (`key(of:)`).
     public func all() -> [String: Route] {
         lock.withLock { routes.compactMapValues { $0.last?.route } }
     }
@@ -78,6 +105,8 @@ public final class ProxyRoutes: @unchecked Sendable {
     static let magic = Data("PBR1".utf8)
     static let maximumLength = 1 << 20
 
+    /// One route of the record: `link` is the key it is known by (`key(of:)`) — named so since the
+    /// links' relays, the first that had routes.
     struct Entry: Codable {
         var link: String
         var route: Route
@@ -85,7 +114,8 @@ public final class ProxyRoutes: @unchecked Sendable {
 
     /// `PBR1`, the length (4 bytes, big-endian), then JSON of the routes — written right after the
     /// grant on the profile's standard input, always, an empty list included, so that the process
-    /// reads exactly what was written. It holds the relays' logins: wipe it once written.
+    /// reads exactly what was written. It holds the relays' logins (and a link's text, its key): wipe
+    /// it once written.
     public static func encodeRecord(_ routes: [String: Route]) throws -> Data {
         let entries = routes.sorted { $0.key < $1.key }.map { Entry(link: $0.key, route: $0.value) }
         let json = try JSONEncoder().encode(entries)

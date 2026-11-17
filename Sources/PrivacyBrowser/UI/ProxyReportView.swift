@@ -268,10 +268,11 @@ struct ProxyReport {
         }
     }
 
-    /// The proxy's type as the person knows it: a link's protocol ("VLESS", "Trojan", …) rather
-    /// than the relay it goes through.
+    /// The proxy's type as the person knows it: a link's protocol ("VLESS", "Trojan", …) or
+    /// "OpenVPN" rather than the relay it goes through, which answers as SOCKS5.
     static func kindName(of proxy: ProxySettings) -> String {
         if proxy.kind == .xray, let link = proxy.shareLink { return link.scheme.displayName }
+        if proxy.isOpenVPN { return "OpenVPN" } // l10n: not text
         return kindName(proxy.kind, tls: proxy.tlsToProxy)
     }
 

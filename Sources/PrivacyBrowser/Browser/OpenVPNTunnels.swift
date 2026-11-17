@@ -159,24 +159,6 @@ final class OpenVPNTunnels {
     /// The tunnel's OpenVPN log, last lines (for the diagnosis; never written anywhere by itself).
     func recentLog(of id: UUID) -> [String] { tunnels[id]?.recentLog ?? [] }
 
-    /// Checks an OpenVPN connection as a proxy is checked (`ProxyChecker`): through a tunnel made
-    /// for the check alone, stopped after it. A tunnel that does not come up is a dead proxy.
-    static func check(_ proxy: ProxySettings, latencySamples: Int, triesUDP: Bool) async -> ProxyCheckResult {
-        let time = Date()
-        let checkID = UUID()
-        let local: ProxySettings
-        do {
-            local = try await shared.start(profile: checkID, proxy: proxy)
-        } catch {
-            log.notice("An OpenVPN connection's check: the tunnel did not come up")
-            return .dead(error as? Failure == .credentialsNeeded || error as? Failure == .authenticationFailed ? .needsCredentials : .noAnswer,
-                         at: time)
-        }
-        let result = await ProxyChecker.check(local, latencySamples: latencySamples, triesUDP: triesUDP)
-        shared.stop(profile: checkID)
-        return result
-    }
-
     /// The servers' addresses: for each, its first IPv4 address, else its first IPv6 one, with its
     /// transport. Servers whose name does not resolve are left out.
     nonisolated static func resolve(_ remotes: [OpenVPNConfiguration.Remote]) async -> [Int: LoopbackForwarders.Target] {

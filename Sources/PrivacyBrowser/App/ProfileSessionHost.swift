@@ -53,21 +53,12 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session was granted another profile\n".utf8))
             exit(2)
         }
-        // The profile's OpenVPN tunnel, when its manager started one: its local port follows the
-        // grant (`OpenVPNHandoff`).
-        if ProcessInfo.processInfo.environment[OpenVPNHandoff.variable] == "1" {
-            do {
-                OpenVPNHandoff.received = try OpenVPNHandoff.read { count in try? FileHandle.standardInput.read(upToCount: count) }
-            } catch {
-                FileHandle.standardError.write(Data("--profile-session expects its tunnel's port after the grant\n".utf8))
-                exit(2)
-            }
-        }
-        // The routes to the relays the manager runs for a share link's proxy (`ProxyRoutes`), right
-        // after the grant: this process reaches a link's server through them alone.
+        // The route to the relay the manager runs for the profile's proxy — a share link's, an
+        // OpenVPN connection (`LocalRelays`, `ProxyRoutes`) — right after the grant: this process
+        // reaches the link's server or the VPN through it alone, and without it not at all.
         do {
             let routes = try ProxyRoutes.readRecord { count in try? FileHandle.standardInput.read(upToCount: count) }
-            for (link, route) in routes { ProxyRoutes.shared.add(route, for: link, id: UUID()) }
+            for (key, route) in routes { ProxyRoutes.shared.add(route, for: key, id: UUID()) }
         } catch {
             FileHandle.standardError.write(Data("--profile-session expects the proxy routes after its grant\n".utf8))
             exit(2)
@@ -85,8 +76,9 @@ enum ProfileSessionHost {
                 DispatchQueue.main.async { MainActor.assumeIsolated { ProfileSessionHost.send(.configurationSaved) } }
             }
             stored = try repository.loadConfiguration(profileID)
-            // An OpenVPN connection is held to its tunnel's port, never to the VPN server's address.
-            try ProfileNetworkGuard.engage(profileID: profileID, proxy: try OpenVPNHandoff.effective(stored.proxy),
+            // A proxy a relay carries is held to its relay's port (`ProxyRoutes`), never to the
+            // link's server or the VPN server.
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy,
                                            safeBrowsing: stored.safeBrowsingEnabled,
                                            protectsLocalNetwork: stored.blocksLocalNetwork)
         } catch {

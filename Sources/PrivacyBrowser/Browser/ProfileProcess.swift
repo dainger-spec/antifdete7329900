@@ -106,7 +106,6 @@ final class ProfileProcess {
                       menusInAppLanguage: Bool = false,
                       cameraAllowed: Bool = true,
                       systemCameraActive: Bool = false,
-                      tunnelProxy: ProxySettings? = nil,
                       routes: [String: ProxyRoutes.Route] = [:]) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
@@ -126,9 +125,6 @@ final class ProfileProcess {
                                                    preferences: preferences, menusInAppLanguage: menusInAppLanguage,
                                                    cameraAllowed: cameraAllowed,
                                                    systemCameraActive: systemCameraActive)
-        // The profile's OpenVPN tunnel: its local port follows the grant on standard input
-        // (`OpenVPNHandoff`); this only says that it does.
-        if tunnelProxy != nil { process.environment?[OpenVPNHandoff.variable] = "1" }
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -141,10 +137,10 @@ final class ProfileProcess {
         process.standardOutput = eventPipe
         var record = try grant.encoded()
         defer { ProfileGrant.erase(&record) }
-        if let tunnelProxy { record.append(try OpenVPNHandoff.record(tunnelProxy)) }
-        // Then the routes to the relays of a share link's proxy (`ProxyRoutes`): their logins, the
-        // profile's to use and no other process's — on this stream for the same reasons. Always
-        // written, an empty one too, so that the process reads exactly what is there.
+        // Then the route to the relay of its proxy, when a relay carries it — a share link's, an
+        // OpenVPN connection (`LocalRelays`, `ProxyRoutes`): its login, the profile's to use and no
+        // other process's — on this stream for the same reasons. Always written, an empty one too,
+        // so that the process reads exactly what is there.
         var routesRecord = try ProxyRoutes.encodeRecord(routes)
         defer { ProxyRoutes.erase(&routesRecord) }
         try process.run()

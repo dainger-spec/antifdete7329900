@@ -343,8 +343,9 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var result = result
         let before = entries[index].proxy
         let kinds = result.diagnosis?.kinds ?? []
-        // A link's proxy is checked through its relay, which answers as SOCKS5: that is not its type.
-        if let found = kinds.first, before.kind != .xray, !entries[index].kindKnown || !kinds.contains(before.kind) {
+        // A proxy a relay carries (a link, an OpenVPN connection) is checked through its relay, which
+        // answers as SOCKS5: that is not its type.
+        if let found = kinds.first, before.localRelay == nil, !entries[index].kindKnown || !kinds.contains(before.kind) {
             result.kindFinding = entries[index].kindKnown ? .corrected(from: before.kind) : .found
             entries[index].proxy.kind = found
             if found == .socks5 { entries[index].proxy.tlsToProxy = false }

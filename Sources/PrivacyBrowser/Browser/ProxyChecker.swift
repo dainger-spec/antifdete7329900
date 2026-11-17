@@ -54,25 +54,27 @@ enum ProxyChecker {
     /// machine's start (`VMCenter.checkProxy`), which asks for the UDP: a machine's HTTP/3 and
     /// WebRTC go through the proxy only where it carries UDP.
     static func check(_ proxy: ProxySettings, latencySamples: Int = 3, triesUDP: Bool = true) async -> ProxyCheckResult {
-        // An OpenVPN connection is checked through a tunnel of its own, made for the check.
-        if proxy.isOpenVPN { return await OpenVPNTunnels.check(proxy, latencySamples: latencySamples, triesUDP: triesUDP) }
-        // A share link's proxy is asked through a relay (`XrayRelays`): the one of a profile running on
-        // it, or one started for this check and stopped after it. Never the link's server itself.
-        guard proxy.kind == .xray, ProxyRoutes.shared.route(for: proxy) == nil else {
+        // A proxy a relay of the app's carries — a share link's, an OpenVPN connection — is asked
+        // through its relay (`LocalRelays`): the one of a profile running on it, or one started for
+        // this check and stopped after it. Never the link's server or the VPN server itself.
+        guard let relay = proxy.localRelay, ProxyRoutes.shared.route(for: proxy) == nil else {
             return await checkThrough(proxy, latencySamples: latencySamples, triesUDP: triesUDP)
         }
         let time = Date()
         guard (try? proxy.validate()) != nil else { return .dead(.invalidSettings, at: time) }
         let owner = UUID()
         do {
-            try await XrayRelays.shared.start(for: proxy, owner: owner)
+            try await LocalRelays.start(for: proxy, owner: owner)
         } catch {
-            var result = ProxyCheckResult.dead(.noAnswer, at: time)
-            result.diagnosis = ProxyDiagnosis(verdict: .relayNotStarted)
+            // A tunnel the VPN server refused the login of needs credentials; any other relay that
+            // did not start is a proxy that does not answer — a link's says its relay did not start.
+            let needsCredentials = (error as? LocalRelays.Failure)?.isCredentials == true
+            var result = ProxyCheckResult.dead(needsCredentials ? .needsCredentials : .noAnswer, at: time)
+            if relay == .xray { result.diagnosis = ProxyDiagnosis(verdict: .relayNotStarted) }
             return result
         }
         let result = await checkThrough(proxy, latencySamples: latencySamples, triesUDP: triesUDP)
-        XrayRelays.shared.stop(owner: owner)
+        LocalRelays.stop(owner: owner)
         return result
     }
 
@@ -94,8 +96,8 @@ enum ProxyChecker {
         }
         // Through it, with the type it answered as.
         var found = proxy
-        // (A link's relay answers as SOCKS5: that is the relay, not the link's type.)
-        if let kind = diagnosis.kinds.first, proxy.kind != .xray, !(proxy.kind == .httpConnect && proxy.tlsToProxy) {
+        // (A relay answers as SOCKS5: that is the relay, not the type of the proxy it carries.)
+        if let kind = diagnosis.kinds.first, proxy.localRelay == nil, !(proxy.kind == .httpConnect && proxy.tlsToProxy) {
             found.kind = kind
             if kind == .socks5 { found.tlsToProxy = false }
         }
@@ -115,7 +117,7 @@ enum ProxyChecker {
     /// the proxy's TCP leaves from (`ProxyExitLookup`, through the proxy), which its UDP must leave
     /// from too. Only the proxy is talked to; the exit is asked only of a proxy whose UDP answered.
     static func udp(_ proxy: ProxySettings) async -> ProxyUDPSupport {
-        // A link's UDP goes through its relay's SOCKS5 UDP, as a launch's would (`ProxyRoutes`).
+        // A relay's proxy's UDP goes through its relay's SOCKS5 UDP, as a launch's would (`ProxyRoutes`).
         guard let reach = ProxyRoutes.shared.connectable(proxy), reach.kind == .socks5,
               let port = UInt16(exactly: reach.port) else { return .unsupported }
         let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: reach.host, port: port,
