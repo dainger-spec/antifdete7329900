@@ -173,6 +173,10 @@ final class MachineNetwork {
     /// Blocks a host name, and every name under it, from now on.
     func block(_ host: String) { network?.block(host: host) }
 
+    /// Ends the network's UDP associations, made anew at the guest's next datagrams: after this
+    /// Mac slept, their proxy side may be gone (`VMNetwork.restartUDP`).
+    func restartUDP() { network?.restartUDP() }
+
     /// Called more than once without harm: the second time there is nothing left to stop.
     func stop() {
         guard !stopped else { return }
@@ -346,6 +350,13 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// script asks for the time (tools 11), answered by this Mac's clock (docs/VM_NETWORK.md).
     /// A profile's machine only: the base's shared folder is the person's to look into.
     private func macWoke() {
+        // The UDP associations through the proxy (or this Mac's own) may have died with the sleep —
+        // closed by the proxy, forgotten by a router —, and one the guest keeps sending on (a call)
+        // would never carry again: made anew at the guest's next datagram.
+        if machine != nil, !finished {
+            network?.restartUDP()
+            HelperIO.log("network: this Mac woke from sleep; the UDP associations are made anew")
+        }
         guard request.settingsRevision != nil, machine != nil, !finished, !stopping, !waking else { return }
         HelperIO.log("clock: this Mac woke from sleep; the machine is told to ask for the time")
         tellTheGuestItWoke()

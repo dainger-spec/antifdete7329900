@@ -231,6 +231,8 @@ final class NetworkLoop: @unchecked Sendable {
     private var published: VMNetCounters
     private var publishedHosts: [String: HostRecord] = [:]
     private var pendingBlocks: [String] = []
+    /// Another thread asked for every UDP association to be ended (`restartUDP`).
+    private var udpRestartRequested = false
     private var finalNames: [VMNetKnownName] = []
     private var stopRequested = false
     private let ended = NSCondition()
@@ -382,6 +384,19 @@ final class NetworkLoop: @unchecked Sendable {
         wake.signal()
     }
 
+    /// Ends every UDP association, so that the guest's next datagram from each port makes a new
+    /// one: after this Mac slept, an association whose proxy side is gone (the proxy closed it, a
+    /// router forgot the connection) would otherwise go on taking the guest's datagrams into
+    /// nothing for as long as the guest keeps sending — a WebRTC call's port, kept alive by its
+    /// own checks every few seconds, never again. TCP is left alone: a connection that died says
+    /// so at its next write, and one that lived through a short sleep goes on.
+    func restartUDP() {
+        lock.lock()
+        udpRestartRequested = true
+        lock.unlock()
+        wake.signal()
+    }
+
     /// Every name the guest was given a fake address for, as the loop left them when it ended.
     var namesAtEnd: [VMNetKnownName] {
         lock.lock()
@@ -473,6 +488,7 @@ final class NetworkLoop: @unchecked Sendable {
             if entries[0].revents != 0 { wake.drain() }
             if shouldStop { break }
             applyBlocks(now)
+            applyUDPRestart(now)
             resolverAnswered(now)
             if channel.isCongested && now >= channel.retryAt && channel.retry() {
                 // The wire has room again: every connection with something to send may go on.
@@ -558,6 +574,19 @@ final class NetworkLoop: @unchecked Sendable {
         change(&record)
         hosts[name] = record
         hostsChanged = true
+    }
+
+    /// The UDP associations other threads asked to have ended (`restartUDP`).
+    private func applyUDPRestart(_ now: Double) {
+        lock.lock()
+        let wanted = udpRestartRequested
+        udpRestartRequested = false
+        lock.unlock()
+        guard wanted, !associations.isEmpty else { return }
+        // Those being set up now are new ones, and go on.
+        for association in Array(associations.values) where association.phase == .open {
+            endAssociation(association, "UDP association ended, made anew at the next datagram (this Mac woke)", now)
+        }
     }
 
     /// The names other threads asked to have blocked: from now on, and what is open to them ends.

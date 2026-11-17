@@ -141,7 +141,9 @@ What the helper does about the Mac and the app around it:
   (`NSWorkspace.didWakeNotification`) the helper leaves the word a wake from a saved state leaves
   (`lumen-woke`), and the boot script asks for the time at once (tools 11); the machine's network
   answers with this Mac's clock, and nothing leaves. A profile's machine only: the base's shared
-  folder is the person's to look into, and gets no such file.
+  folder is the person's to look into, and gets no such file. The machine's UDP associations
+  through the proxy are made anew at the same moment (docs/VM_NETWORK.md, "This Mac woke from
+  sleep"): one that died with the sleep would otherwise have held a call's port for good.
 - **Where the window was left.** A profile's machine opened in the middle of the main screen at
   every start — on the wrong display for whoever keeps it on a second one, and exactly over the
   other machine's window. Its window now opens where the person last put it, at the size they
@@ -289,7 +291,10 @@ leaves the machine with no internet — nothing goes past it — and since 17 No
 window say why (`VMNetworkTrouble.ownProxyUnreachable`, `ownProxyLogin`, `ownProxyNotUnderstood`):
 the network counts the connections the proxy failed by its own fault, one after another, and the
 helper names the trouble after four; a site the proxy says it cannot reach does not count. The first
-connection the proxy carries again clears it. A changed password takes at the machine's next start.
+connection the proxy carries again clears it. A password (or port) corrected in the Proxies section
+is the machine's too — the machines whose proxy was that entry's take the edit, as the Safari
+profiles do (`VMProfiles.follow`; until 17 November a machine kept its old copy until its editor was
+saved again) — and takes at the machine's next start.
 
 A proxy reached over TLS (`https://`) is not supported for machines yet; the editor does not offer
 one, and `VMProfile.validate` refuses it. A proxy's "domains that go direct" are not applied in a

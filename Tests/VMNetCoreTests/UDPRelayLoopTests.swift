@@ -624,6 +624,33 @@ final class UDPRelayLoopTests: XCTestCase {
         XCTAssertEqual(relay.associations.value, 2)
     }
 
+    /// After this Mac slept, an association whose proxy side may be gone is not kept: every open
+    /// one ends, and the guest's next datagram from the same port — a WebRTC call that keeps
+    /// sending on it — makes a new one that carries again.
+    func testAfterTheMacSleptEveryAssociationIsMadeAnew() throws {
+        let relay = proxy()
+        let guest = start(relay.upstream())
+        guest.send(Wire.udp(from: 50_120, to: literal, 443, payload: [1]))
+        XCTAssertEqual(answer(guest, port: 50_120, from: literal, 443), [1])
+        guest.send(Wire.udp(from: 50_121, to: literal, 443, payload: [2]))
+        XCTAssertEqual(answer(guest, port: 50_121, from: literal, 443), [2])
+        XCTAssertEqual(waitForCounters { $0.udpAssociationsActive == 2 }.udpAssociationsActive, 2)
+        network?.restartUDP()
+        let ended = waitForCounters { $0.udpAssociationsActive == 0 }
+        XCTAssertEqual(ended.udpAssociationsActive, 0)
+        XCTAssertEqual(ended.udpAssociationsFailed, 0, "a restart is not a failure")
+        guest.send(Wire.udp(from: 50_120, to: literal, 443, payload: [3]))
+        XCTAssertEqual(answer(guest, port: 50_120, from: literal, 443), [3])
+        XCTAssertEqual(relay.associations.value, 3)
+        // Again: the one open ends too; with none open, nothing happens.
+        network?.restartUDP()
+        XCTAssertEqual(waitForCounters { $0.udpAssociationsActive == 0 }.udpAssociationsActive, 0)
+        network?.restartUDP()
+        usleep(100_000)
+        XCTAssertEqual(network!.counters().udpAssociationsActive, 0)
+        XCTAssertEqual(network!.counters().udpAssociationsFailed, 0)
+    }
+
     func testAQuietAssociationIsClosed() throws {
         let relay = proxy()
         let guest = start(relay.upstream()) { $0.udpIdleTimeout = 0.4 }

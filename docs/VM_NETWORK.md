@@ -209,6 +209,14 @@ addresses go on after the highest known, and the ones below it that nobody has a
 before any is used twice). A machine woken from a saved state (docs/VM.md, "Instant wake")
 still holds those addresses — in its resolver's cache, in connections it is about to open.
 
+**This Mac woke from sleep** with a machine running (17 November): `restartUDP()` ends every open
+UDP association, and the guest's next datagram from each port makes a new one. One whose proxy side
+died with the sleep — the proxy closed it, a router forgot the connection — would otherwise go on
+taking the guest's datagrams into nothing for as long as the guest kept sending on that port: a
+WebRTC call, whose checks every few seconds keep it from ever being idle, never carried again.
+Associations being set up are left to go on; TCP is left alone (a tunnel that died says so at its
+next write, one that lived through a short sleep goes on). `UDPRelayLoopTests` has it.
+
 ## Limits
 
 - **IPv4 only.** TCP through the proxy; UDP through the proxy's relay where the run carries it,

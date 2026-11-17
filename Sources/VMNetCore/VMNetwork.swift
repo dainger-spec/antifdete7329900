@@ -146,6 +146,16 @@ public final class VMNetwork: @unchecked Sendable {
         running?.block(host)
     }
 
+    /// Ends every UDP association the network holds; the guest's next datagram from each port makes
+    /// a new one through the proxy. For after this Mac slept (`NetworkLoop.restartUDP`). May be
+    /// called from any thread; does nothing when the network does not run.
+    public func restartUDP() {
+        state.lock()
+        let running = loop
+        state.unlock()
+        running?.restartUDP()
+    }
+
     /// After `stop()`: every name the guest was given a fake address for, with it — what a later
     /// run is handed (`VMNetConfiguration.knownNames`) for a machine woken from a saved state.
     /// Empty while the network runs. The person's browsing: kept only beside that saved state.
