@@ -15,6 +15,8 @@ enum UpdateWindowMode: Equatable {
     /// An update that did not happen, in calm words (`UpdateOutcome.kind`, the quit's gate):
     /// Install Now when the release is still here, else Try Again.
     case notice(String)
+    /// The first launch of a new version: "Update installed — Lumen 0.1.x", what is new, Continue.
+    case installed(InstalledUpdate)
 }
 
 /// The first launch of a new version: "Update installed — Lumen 0.1.x", and what is new.
@@ -54,8 +56,8 @@ final class UpdateWindowController {
     }
 
     private func make(model: AppModel) -> NSWindow {
-        let window = UpdateWindowLayout.window(closable: true, title: L("updates.window.title"))
-        window.contentView = NSHostingView(rootView: UpdateWindowView().environmentObject(model))
+        let window = UpdateWindowLayout.window(closable: true, title: L("updates.window.title"),
+                                               content: UpdateWindowView().environmentObject(model))
         closeObserver = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window,
                                                                queue: .main) { [weak model] _ in
             MainActor.assumeIsolated { model?.updateWindowClosed() }
@@ -86,6 +88,8 @@ struct UpdateWindowView: View {
                                       Task { await model.updater?.checkNow() }
                                   },
                                   close: { model.closeUpdateWindow() })
+            case .installed(let update)?:
+                UpdateInstalledPanel(update: update, dismiss: { model.closeUpdateWindow() })
             case .updater?, nil:
                 UpdaterPanel(updater: model.updater)
             }
@@ -153,30 +157,84 @@ struct UpdatePanelText: View {
 }
 
 /// What is new, as the feed says it: plain text, never a page — nothing of the feed is rendered by
-/// WebKit outside a profile — in a quiet box that scrolls.
-struct UpdateNotesBox: View {
+/// WebKit outside a profile. A list when the feed writes one ("•", "-", "*" at the lines' starts),
+/// else its paragraphs as they are; long lines wrap. Never taller than about six lines, whatever
+/// the notes' length — the window does not grow with them —: the rest scrolls inside, under a soft
+/// fade at the foot. No notes: no section (`isEmpty`).
+struct UpdateNotesList: View {
     let caption: String
     let notes: String
-    var height: CGFloat = 132
+    /// About six lines of the body's type.
+    static let maximumHeight: CGFloat = 118
+    @State private var height: CGFloat = 0
+
+    static func isEmpty(_ notes: String) -> Bool { notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// The notes as points: their lines without the list marks — or nil when the feed wrote no
+    /// list, and the notes are paragraphs.
+    static func points(_ notes: String) -> [String]? {
+        let lines = notes.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        func marked(_ line: String) -> Bool { line.first.map { "•-*–".contains($0) } ?? false }
+        guard lines.contains(where: marked) else { return nil }
+        return lines.map { marked($0) ? String($0.dropFirst()).trimmingCharacters(in: .whitespaces) : $0 }
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             Text(caption)
                 .lumenCaps()
             ScrollView {
-                Text(verbatim: notes) // l10n: the feed's own text
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .lineSpacing(3)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12)
+                list
+                    .padding(.bottom, height > Self.maximumHeight ? 14 : 0)
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: NotesHeight.self, value: geometry.size.height)
+                    })
             }
-            .frame(height: height)
-            .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Theme.raisedInset.opacity(0.7)))
-            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.hairline))
+            .scrollIndicators(height > Self.maximumHeight ? .automatic : .never)
+            .frame(height: min(max(height, 1), Self.maximumHeight))
+            .mask(alignment: .top) {
+                LinearGradient(stops: [.init(color: .black, location: 0),
+                                       .init(color: .black, location: height > Self.maximumHeight ? 0.78 : 1),
+                                       .init(color: .black.opacity(height > Self.maximumHeight ? 0 : 1), location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .onPreferenceChange(NotesHeight.self) { height = $0 }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var list: some View {
+        if let points = Self.points(notes) {
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(Array(points.enumerated()), id: \.offset) { _, point in
+                    HStack(alignment: .firstTextBaseline, spacing: 9) {
+                        Text(verbatim: "•") // l10n: not text
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textTertiary)
+                        Text(verbatim: point) // l10n: the feed's own text
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            Text(verbatim: notes.trimmingCharacters(in: .whitespacesAndNewlines)) // l10n: the feed's own text
+                .font(.lumenBody)
+                .foregroundStyle(Theme.textSecondary)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+}
+
+private struct NotesHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 /// Checking, up to date, found, downloading in the background, failed, not installable here.
@@ -189,14 +247,14 @@ struct UpdaterStatePanel: View {
         case .idle, .checking:
             UpdateWindowFrame(title: L("updates.checking.title"),
                               subtitle: String(format: L("updates.progress.version"), UpdatePanels.runningVersion)) {
-                LumenActivityLine(width: 200).padding(.top, 30)
+                LumenActivityLine(width: 200).padding(.vertical, 8)
             } buttons: {
                 UpdateCloseButton()
             }
         case .upToDate:
             UpdateWindowFrame(title: L("updates.upToDate.title"),
                               subtitle: String(format: L("updates.upToDate.text"), UpdatePanels.runningVersion)) {
-                Color.clear
+                EmptyView()
             } buttons: {
                 Button(L("common.done")) { model.closeUpdateWindow() }
                     .buttonStyle(.lumenPrimary)
@@ -241,13 +299,14 @@ struct UpdateFoundPanel: View {
         UpdateWindowFrame(title: String(format: L("updates.found.title"), item.version),
                           subtitle: String(format: L("updates.found.subtitle"), UpdatePanels.runningVersion, size)) {
             VStack(alignment: .leading, spacing: 14) {
-                UpdateNotesBox(caption: L("updates.found.notes"), notes: item.notes.isEmpty ? L("updates.notes.none") : item.notes,
-                               height: stops.isEmpty ? 132 : 96)
+                if !UpdateNotesList.isEmpty(item.notes) {
+                    UpdateNotesList(caption: L("updates.found.notes"), notes: item.notes)
+                }
                 if !stops.isEmpty {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(L("updates.found.stops"))
                             .font(.lumenSecondary)
-                            .foregroundStyle(Theme.warning)
+                            .foregroundStyle(Theme.textPrimary)
                         Text(verbatim: stops.prefix(4).map { "• " + $0 }.joined(separator: "\n")
                              + (stops.count > 4 ? "\n…" : "")) // l10n: the profiles' names
                             .font(.lumenSecondary)
@@ -329,12 +388,11 @@ struct UpdateNoticePanel: View {
     }
 }
 
-/// The first launch of a new version: "Update installed — Lumen 0.1.19", what is new, Continue.
-/// Over the window's screens — the lock screen, mostly — on a veil, once per update. It takes no
-/// keyboard: the lock screen's password field keeps it, and the first key typed puts the card
-/// away and goes on to the field (as the launch screen does), so a password typed at once is typed
-/// whole. A click beside it puts it away too.
-struct UpdateInstalledCard: View {
+/// The first launch of a new version: "Update installed — Lumen 0.1.19", what is new, Continue —
+/// the update's window like the others, once per update, over the lock screen. It is shown without
+/// the keyboard (the lock screen's password field keeps it), and the first key typed puts it away
+/// and goes on to the field, so a password typed at once is typed whole; Continue has no Return.
+struct UpdateInstalledPanel: View {
     let update: InstalledUpdate
     let dismiss: () -> Void
     /// The snapshots: no key watching.
@@ -342,25 +400,15 @@ struct UpdateInstalledCard: View {
     @State private var keyMonitor: Any?
 
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.5)
-                .ignoresSafeArea()
-                .contentShape(Rectangle())
-                .onTapGesture { dismiss() }
-                .accessibilityHidden(true)
-            UpdateWindowFrame(title: L("updates.installed.title"),
-                              subtitle: String(format: L("updates.installed.version"), update.version)) {
-                UpdateNotesBox(caption: L("updates.installed.notes"),
-                               notes: update.notes.isEmpty ? L("updates.installed.noNotes") : update.notes, height: 150)
-            } buttons: {
-                // No Return: that is the password field's.
-                Button(L("updates.installed.continue"), action: dismiss)
-                    .buttonStyle(.lumenPrimary)
-                    .focusable(false)
+        UpdateWindowFrame(title: L("updates.installed.title"),
+                          subtitle: String(format: L("updates.installed.version"), update.version)) {
+            if !UpdateNotesList.isEmpty(update.notes) {
+                UpdateNotesList(caption: L("updates.installed.notes"), notes: update.notes)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Theme.hairline))
-            .shadow(color: .black.opacity(0.55), radius: 40, y: 18)
+        } buttons: {
+            Button(L("updates.installed.continue"), action: dismiss)
+                .buttonStyle(.lumenPrimary)
+                .focusable(false)
         }
         .onAppear {
             guard !still, keyMonitor == nil else { return }
@@ -394,13 +442,10 @@ struct UpdateSidebarRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                ZStack {
-                    Circle().fill(Theme.running.opacity(0.14))
-                    Image(systemName: "arrow.down")
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(Theme.running)
-                }
-                .frame(width: 20, height: 20)
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Theme.textSecondary)
+                    .frame(width: 20, height: 20)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(L("updates.sidebar.title"))
                         .font(.lumenLabel)
@@ -414,7 +459,7 @@ struct UpdateSidebarRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hovered ? Theme.rowHover : Theme.accentTint))
+            .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(hovered ? Theme.rowHover : Color.clear))
             .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.hairline))
             .contentShape(Rectangle())
         }

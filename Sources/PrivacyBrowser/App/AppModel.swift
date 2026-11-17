@@ -143,8 +143,6 @@ final class AppModel: ObservableObject {
     @Published var updateWindowMode: UpdateWindowMode?
     /// After "Update and Restart": the download's and the checks' progress the window shows.
     @Published var updateProgress: UpdateProgressModel?
-    /// The first launch after an update: "Update installed — Lumen 0.1.x", over the lock screen.
-    @Published var installedUpdate: InstalledUpdate?
     let updateWindow = UpdateWindowController()
     /// The release the window opened by itself for in this run: once each.
     var updateWindowOpenedFor: String?
@@ -2063,7 +2061,12 @@ final class AppModel: ObservableObject {
         case .outcome(let outcome)?:
             log.notice("Last update: \(outcome.result.rawValue, privacy: .public) (\(outcome.kind.rawValue, privacy: .public)): \(outcome.detail, privacy: .private)")
             if outcome.result == .installed {
-                installedUpdate = InstalledUpdate(version: outcome.version, notes: updater.installedItem?.notes ?? "")
+                // Over the lock screen, once the launch screen (if any) has gone; without the keyboard.
+                let installed = InstalledUpdate(version: outcome.version, notes: updater.installedItem?.notes ?? "")
+                Task { @MainActor [weak self] in
+                    while let self, self.welcome != nil, !self.welcomeFinished { try? await Task.sleep(nanoseconds: 200_000_000) }
+                    self?.showUpdateWindow(.installed(installed), focus: false)
+                }
             } else {
                 showUpdateWindow(.notice(String(format: L("updates.outcome.\(outcome.kind.rawValue)"), outcome.version)), focus: false)
             }

@@ -99,20 +99,26 @@ public final class UpdateProgressModel: ObservableObject {
     }
 }
 
-/// The size every update window has, the app's and the helper's: they stand in the same place.
+/// The update windows' width — their height is their content's — and how they are made: the app's
+/// and the helper's alike, so that one stands where the other stood when Lumen hands over.
 public enum UpdateWindowLayout {
-    public static let size = CGSize(width: 520, height: 540)
-    /// Where the horizon's rim stands, from the top.
-    public static let rimY: CGFloat = 182
+    public static let width: CGFloat = 480
+    /// How far above the window's foot the horizon's rim stands: the buttons are on the disc under
+    /// it, everything else in the sky above, clear of its glow.
+    public static let rimFromBottom: CGFloat = 92
 
     /// A window for the update's content, centred on the screen with the keyboard, dark, its title
-    /// bar the content's. `closable`: the found and failed windows may be closed; the progress
-    /// window is not, while Lumen is being replaced.
+    /// bar the content's, sized to its content (and following it when the content changes).
+    /// `closable`: the found and failed windows may be closed; the progress window is not, while
+    /// Lumen is being replaced.
     @MainActor
-    public static func window(closable: Bool, title: String) -> NSWindow {
+    public static func window<Content: View>(closable: Bool, title: String, content: Content) -> NSWindow {
         var style: NSWindow.StyleMask = [.titled, .fullSizeContentView]
         if closable { style.insert(.closable) }
-        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
+        let host = NSHostingController(rootView: content)
+        host.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: host)
+        window.styleMask = style
         window.title = title
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
@@ -122,36 +128,30 @@ public enum UpdateWindowLayout {
         window.isReleasedWhenClosed = false
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.setContentSize(host.view.fittingSize)
         window.center()
         return window
     }
 }
 
-/// The eclipse's horizon the lock screen stands on, drawn small: a dark disc rising from below,
-/// light breaking along its rim, a haze above it. Decoration only.
+/// The eclipse's horizon the lock screen stands on, at the window's foot: a dark disc rising from
+/// below, light breaking along its rim. The windows' one decoration; nothing is written on it.
 public struct UpdateHorizon: View {
-    public var rimY: CGFloat
+    public var rimFromBottom: CGFloat
 
-    public init(rimY: CGFloat = UpdateWindowLayout.rimY) {
-        self.rimY = rimY
+    public init(rimFromBottom: CGFloat = UpdateWindowLayout.rimFromBottom) {
+        self.rimFromBottom = rimFromBottom
     }
 
     public var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            // Flat enough that the rim stays above the content across the window's width (the
-            // lock screen's is wider still): it drops some 20 pt by the content's edges.
-            let radius = max(width * 2.6, 1300)
+            let rimY = geometry.size.height - rimFromBottom
+            // Flat, as the lock screen's: it drops some 20 pt by the window's edges.
+            let radius = max(width * 2.6, 1250)
             let centre = CGPoint(x: width / 2, y: rimY + radius)
             ZStack {
-                LinearGradient(colors: [UpdatePalette.backdrop, UpdatePalette.sky], startPoint: .top, endPoint: .init(x: 0.5, y: 0.4))
-                // The haze over the rim.
-                Ellipse()
-                    .fill(RadialGradient(colors: [Color.white.opacity(0.13), Color.white.opacity(0.03), .clear],
-                                         center: .center, startRadius: 0, endRadius: width * 0.42))
-                    .frame(width: width * 1.05, height: 150)
-                    .position(x: width / 2, y: rimY + 6)
-                    .blur(radius: 14)
+                UpdatePalette.backdrop
                 // The disc.
                 Circle()
                     .fill(UpdatePalette.backdrop)
@@ -159,10 +159,10 @@ public struct UpdateHorizon: View {
                     .position(centre)
                 // Its rim: a glow, and a hairline of light brightest at the top.
                 Circle()
-                    .stroke(rimLight(0.45), lineWidth: 7)
+                    .stroke(rimLight(0.45), lineWidth: 6)
                     .frame(width: radius * 2, height: radius * 2)
                     .position(centre)
-                    .blur(radius: 7)
+                    .blur(radius: 6)
                 Circle()
                     .stroke(rimLight(0.95), lineWidth: 1.1)
                     .frame(width: radius * 2, height: radius * 2)
@@ -175,7 +175,8 @@ public struct UpdateHorizon: View {
     }
 
     private func rimLight(_ strength: Double) -> AngularGradient {
-        // Brightest at the top of the disc (-90°), gone by a quarter turn either way.
+        // Brightest at the top of the disc (270° from the right, clockwise), gone a quarter turn
+        // either way.
         AngularGradient(stops: [
             .init(color: .white.opacity(0), location: 0),
             .init(color: .white.opacity(0), location: 0.62),
@@ -226,9 +227,10 @@ struct UpdateLumenGlyph: Shape {
     }
 }
 
-/// Every update window's frame, the lock screen's language: Lumen's disc and a title in the sky
-/// over the horizon's glowing rim, a line under it, then the window's own content on the disc, its
-/// buttons at the foot. Clean type, nothing drawn by hand.
+/// Every update window's frame, the lock screen's language: Lumen's disc, a title and a line under
+/// it, the window's own content — all in the sky —, then the horizon's glowing rim, and the buttons
+/// on the disc under it. Clean type, nothing drawn by hand, no text on the glow. As tall as its
+/// content.
 public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
     let title: String
     let subtitle: String
@@ -244,49 +246,52 @@ public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
     }
 
     public var body: some View {
-        ZStack(alignment: .top) {
-            UpdateHorizon()
-            VStack(spacing: 0) {
-                UpdateLumenGlyph()
-                    .fill(UpdatePalette.textPrimary)
-                    .frame(width: 36, height: 36)
-                    .shadow(color: UpdatePalette.rim.opacity(0.28), radius: 16)
-                    .accessibilityHidden(true)
-                    .padding(.top, 40)
-                Text(title)
-                    .font(.system(size: 24, weight: .bold))
-                    .tracking(-0.6)
-                    .foregroundStyle(UpdatePalette.textPrimary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 16)
-                    .accessibilityAddTraits(.isHeader)
-                Text(subtitle)
-                    .font(.system(size: 13))
-                    .foregroundStyle(UpdatePalette.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 6)
-                // On the disc, under the rim, in the middle of what is left.
-                content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .padding(.top, 44)
-                    .padding(.bottom, 16)
-                HStack(spacing: 10) {
-                    buttons()
-                }
-                .padding(.bottom, 26)
+        VStack(spacing: 0) {
+            UpdateLumenGlyph()
+                .fill(UpdatePalette.textPrimary)
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
+                .padding(.top, 46)
+            Text(title)
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.5)
+                .foregroundStyle(UpdatePalette.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 16)
+                .accessibilityAddTraits(.isHeader)
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(UpdatePalette.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            content()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
+            // The sky's last stretch, clear of everything: the rim's glow is under it.
+            Color.clear.frame(height: 52)
+            HStack(spacing: 10) {
+                buttons()
             }
-            .padding(.horizontal, 40)
+            .frame(height: 32)
+            .padding(.top, UpdateWindowLayout.rimFromBottom - 32 - 26)
+            .padding(.bottom, 26)
         }
-        .frame(width: UpdateWindowLayout.size.width, height: UpdateWindowLayout.size.height)
+        .padding(.horizontal, 40)
+        .frame(width: UpdateWindowLayout.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(UpdateHorizon())
         .background(UpdatePalette.backdrop)
         .environment(\.colorScheme, .dark)
     }
 }
 
-/// "Installing the update — don't close Lumen": the download's bar (the app's window), then the
-/// steps checking → installing → restarting, each ticked off as it is done.
+/// "Installing the update — don't close Lumen": one full-width bar under the title — the
+/// download's, with "12.3 MB of 45.6 MB · 15 s left" under it; once the archive is here, full,
+/// with the step under way under it — and the steps as one centred column: download, checking,
+/// installing, restarting, each ticked off as it is done. The same layout in every state, so
+/// nothing moves from one to the next; the app's window and the installer's are the same.
 public struct UpdateProgressView: View {
     @ObservedObject var model: UpdateProgressModel
     let texts: UpdateProgressTexts
@@ -311,54 +316,52 @@ public struct UpdateProgressView: View {
         }
     }
 
+    private var bar: (fraction: Double?, line: String) {
+        switch model.stage {
+        case let .downloading(fraction, detail): return (fraction, detail)
+        case .step(let step): return (1, texts.step(step) + "…")
+        }
+    }
+
     public var body: some View {
         UpdateWindowFrame(title: texts.title,
                           subtitle: String(format: texts.version, model.version) + " · " + (model.reopened ? texts.opensItself : texts.keepOpen)) {
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(Array(rows.enumerated()), id: \.element) { index, row in
-                    rowView(row, index: index)
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    DownloadBar(fraction: bar.fraction)
+                    Text(bar.line)
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(UpdatePalette.textSecondary)
+                        .lineLimit(1)
+                        .frame(height: 16)
                 }
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(rows.enumerated()), id: \.element) { index, row in
+                        let state: StepMark.State = index < current ? .done : (index == current ? .now : .later)
+                        HStack(spacing: 12) {
+                            StepMark(state: state)
+                            Text(title(row))
+                                .font(.system(size: 13, weight: state == .now ? .semibold : .regular))
+                                .foregroundStyle(state == .later ? UpdatePalette.textTertiary : UpdatePalette.textPrimary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .frame(width: 180, alignment: .leading)
+                .padding(.top, 26)
             }
-            .frame(width: 300, alignment: .leading)
-            .frame(maxWidth: .infinity)
+            .animation(.easeOut(duration: 0.25), value: model.stage)
         } buttons: {
             if case .downloading = model.stage, let cancel = model.cancel {
                 Button(texts.cancel, action: cancel)
                     .buttonStyle(UpdateButtonStyle(primary: false))
                     .keyboardShortcut(.cancelAction)
             } else {
-                // The same room whether Cancel is there or not: the steps do not move.
-                Color.clear.frame(height: 32)
+                // The same room whether Cancel is there or not: nothing moves.
+                Color.clear.frame(width: 1, height: 32)
             }
         }
         .accessibilityElement(children: .contain)
-    }
-
-    @ViewBuilder
-    private func rowView(_ row: Row, index: Int) -> some View {
-        let state: StepMark.State = index < current ? .done : (index == current ? .now : .later)
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 12) {
-                StepMark(state: state)
-                Text(title(row))
-                    .font(.system(size: 14, weight: state == .now ? .semibold : .medium))
-                    .foregroundStyle(state == .later ? UpdatePalette.textTertiary : UpdatePalette.textPrimary)
-                Spacer(minLength: 0)
-            }
-            if row == .download, case let .downloading(fraction, detail) = model.stage {
-                VStack(alignment: .leading, spacing: 6) {
-                    DownloadBar(fraction: fraction)
-                    Text(detail)
-                        .font(.system(size: 12).monospacedDigit())
-                        .foregroundStyle(UpdatePalette.textSecondary)
-                }
-                .padding(.leading, 30)
-                .transition(.opacity)
-            }
-        }
-        .padding(.vertical, 9)
-        .animation(.easeOut(duration: 0.25), value: model.stage)
-        .accessibilityElement(children: .combine)
     }
 
     private func title(_ row: Row) -> String {
@@ -369,7 +372,8 @@ public struct UpdateProgressView: View {
     }
 }
 
-/// A step's mark: ticked when done, a turning ring while under way, a quiet circle before.
+/// A step's mark, 18 pt, every kind the same size: a check when done, a turning arc while under
+/// way, a quiet ring before.
 struct StepMark: View {
     enum State { case done, now, later }
     let state: State
@@ -378,52 +382,54 @@ struct StepMark: View {
         ZStack {
             switch state {
             case .done:
-                Circle().fill(UpdatePalette.done.opacity(0.16))
                 Image(systemName: "checkmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(UpdatePalette.done)
             case .now:
-                Circle().stroke(Color.white.opacity(0.12), lineWidth: 2)
+                Circle().inset(by: 1).stroke(Color.white.opacity(0.12), lineWidth: 2)
                 TimelineView(.animation) { context in
                     let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
-                    Circle()
-                        .trim(from: 0, to: 0.28)
+                    Circle().inset(by: 1)
+                        .trim(from: 0, to: 0.3)
                         .stroke(UpdatePalette.textPrimary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
                         .rotationEffect(.degrees(turn * 360))
                 }
             case .later:
-                Circle().stroke(Color.white.opacity(0.14), lineWidth: 1.5)
+                Circle().inset(by: 0.75).stroke(Color.white.opacity(0.16), lineWidth: 1.5)
             }
         }
         .frame(width: 18, height: 18)
+        .padding(1)
         .accessibilityHidden(true)
     }
 }
 
-/// The download's bar, 4 pt: its track at 12 % white, a white fill; with no size yet, a segment
-/// sweeping along.
+/// The bar, 4 pt and the content's full width: its track at 12 % white, a white fill; with no
+/// size yet, a segment sweeping along.
 struct DownloadBar: View {
     let fraction: Double?
-    var width: CGFloat = 270
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            Capsule().fill(Color.white.opacity(0.12))
-            if let fraction {
-                Capsule().fill(UpdatePalette.textPrimary)
-                    .frame(width: max(4, width * min(max(fraction, 0), 1)))
-                    .animation(.easeOut(duration: 0.2), value: fraction)
-            } else {
-                TimelineView(.animation) { context in
-                    let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                if let fraction {
                     Capsule().fill(UpdatePalette.textPrimary)
-                        .frame(width: width * 0.3)
-                        .offset(x: -width * 0.3 + width * 1.3 * t)
+                        .frame(width: max(4, width * min(max(fraction, 0), 1)))
+                        .animation(.easeOut(duration: 0.2), value: fraction)
+                } else {
+                    TimelineView(.animation) { context in
+                        let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                        Capsule().fill(UpdatePalette.textPrimary)
+                            .frame(width: width * 0.3)
+                            .offset(x: -width * 0.3 + width * 1.3 * t)
+                    }
                 }
             }
+            .clipShape(Capsule())
         }
-        .frame(width: width, height: 4)
-        .clipShape(Capsule())
+        .frame(height: 4)
         .accessibilityElement()
         .accessibilityValue(Text(verbatim: fraction.map { "\(Int(($0 * 100).rounded())) %" } ?? ""))
     }

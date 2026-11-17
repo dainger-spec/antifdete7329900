@@ -40,15 +40,6 @@ struct RootView: View {
                 welcomeSplash(welcome)
                     .zIndex(2)
             }
-            if let installed = model.installedUpdate, model.welcome == nil || model.welcomeFinished {
-                // The first launch of a new version: once, over the lock screen, taking no keyboard
-                // from its password field (`UpdateInstalledCard`).
-                UpdateInstalledCard(update: installed) {
-                    withAnimation(Theme.appearAnimation) { model.installedUpdate = nil }
-                }
-                .transition(.opacity)
-                .zIndex(3)
-            }
         }
         .onAppear { showsProfiles = model.phase == .unlocked }
         .onChange(of: model.phase) { _, phase in
@@ -487,7 +478,7 @@ struct ProfileListView: View {
                        dismissEngineWarning: { model.engineWarningSeen() },
                        // A release found is said by the update's window and the sidebar's row
                        // (`UpdateSidebarRow`), which stays while it waits; the first launch of a
-                       // new version by its welcome over the lock screen (`UpdateInstalledCard`).
+                       // new version by the update's window over the lock screen (`UpdateInstalledPanel`).
                        updateOffer: nil,
                        dismissUpdateOffer: { model.updateOfferSeen() },
                        updatedTo: model.updatedTo,

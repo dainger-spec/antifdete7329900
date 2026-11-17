@@ -52,8 +52,8 @@ let window: NSWindow? = MainActor.assumeIsolated {
     NSApplication.shared.setActivationPolicy(.accessory)
     guard let request else { return nil }
     let texts = UpdateProgressTexts(request.texts ?? [:])
-    let shown = UpdateWindowLayout.window(closable: false, title: texts.title)
-    shown.contentView = NSHostingView(rootView: UpdateProgressView(model: progress, texts: texts))
+    let shown = UpdateWindowLayout.window(closable: false, title: texts.title,
+                                          content: UpdateProgressView(model: progress, texts: texts))
     shown.level = .floating
     shown.orderFrontRegardless()
     return shown
