@@ -10,8 +10,9 @@ anything of this Mac's network.
 Until 0.1.18 the file was taken only from the Proxies section's ⋯ → Add OpenVPN…, which the owner
 did not find. Now every way in leads to the same sheet (`OpenVPNImportView`):
 
-- **Proxies → Add → OpenVPN (.ovpn)**: Add is the section's main button; its choices (a proxy, a
-  link, OpenVPN, a list — `ProxyAddChoicesView`) say what each takes. The empty list shows them too.
+- **Proxies → Add → OpenVPN**: Add is the section's main button; its choices (a proxy, a
+  link, OpenVPN, a list — `ProxyAddChoicesView`) say what each takes. The empty list shows the first
+  three as tiles (`ProxyEmptyState`).
 - **Add's sheet** (a proxy line or a link): Choose .ovpn File…, or a `.ovpn` dropped on the sheet,
   turns it into the OpenVPN sheet with the file read (`ProxyAddSheet`). A `.ovpn`'s text pasted into
   any proxy field is said to be one (`ProxyLine.looksLikeOpenVPN`).

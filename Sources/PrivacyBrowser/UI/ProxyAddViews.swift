@@ -52,22 +52,19 @@ struct ProxyAddRequest: Identifiable, Equatable {
 }
 
 /// The choices, each a row with its symbol, its name and what it takes; under them, with
-/// `importList`, a list pasted at once. Shown under Add (a popover) and in the empty list.
+/// `importList`, a list pasted at once. Shown under Add (a popover); the empty list shows the same
+/// as tiles (`ProxyEmptyState`).
 struct ProxyAddChoicesView: View {
     var choose: (ProxyAddChoice) -> Void
     var importList: (() -> Void)?
-    /// With a title over the rows (the popover's); the empty list has its own sentence.
-    var titled = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            if titled {
-                Text(L("proxies.addChoice.title"))
-                    .lumenCaps()
-                    .padding(.horizontal, 10)
-                    .padding(.top, 4)
-                    .padding(.bottom, 6)
-            }
+            Text(L("proxies.addChoice.title"))
+                .lumenCaps()
+                .padding(.horizontal, 10)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
             ForEach(ProxyAddChoice.allCases) { choice in
                 ProxyAddChoiceRow(symbol: choice.symbol, title: choice.title, detail: choice.detail) {
                     choose(choice)
@@ -80,7 +77,7 @@ struct ProxyAddChoicesView: View {
             }
         }
         .padding(8)
-        .frame(width: 380)
+        .frame(width: 320)
     }
 }
 
@@ -216,5 +213,103 @@ enum OpenVPNFile {
             DispatchQueue.main.async { take(url) }
         }
         return true
+    }
+}
+
+// MARK: - The empty list
+
+/// The Proxies section with no proxy yet: a title and a line on the horizon in small, as the
+/// Profiles' empty list (`LumenEmptyState`), and under them Add's three choices as tiles side by
+/// side — stacked in a narrow window — with a list pasted at once as a quiet button below.
+struct ProxyEmptyState: View {
+    var choose: (ProxyAddChoice) -> Void
+    var importList: () -> Void
+
+    var body: some View {
+        LumenEmptyState(title: L("proxies.empty.title"), text: L("proxies.empty")) {
+            VStack(spacing: 18) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { tiles(width: 184) }
+                    VStack(spacing: 10) { tiles(width: 300) }
+                }
+                Button(L("proxies.empty.list"), action: importList)
+                    .buttonStyle(.lumenGhost)
+            }
+        }
+    }
+
+    private func tiles(width: CGFloat) -> some View {
+        ForEach(ProxyAddChoice.allCases) { choice in
+            ProxyAddTile(choice: choice, width: width) { choose(choice) }
+        }
+    }
+}
+
+/// One of Add's choices as a tile: its symbol in a ring, its name, one short line. The pointer
+/// lifts it as it lifts the app's main buttons (a brighter edge, a lighter face, the light under
+/// it); a press sinks it to 98 %.
+private struct ProxyAddTile: View {
+    let choice: ProxyAddChoice
+    let width: CGFloat
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 0) {
+                Image(systemName: choice.symbol)
+                    .font(.system(size: 21, weight: .light))
+                    .foregroundStyle(Theme.textPrimary)
+                    .frame(width: 48, height: 48)
+                    .background(Circle().fill(Theme.raisedInset))
+                    .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
+                Text(choice.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                    .lineLimit(1)
+                    .padding(.top, 14)
+                Text(choice.detail)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 5)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 22)
+            .padding(.bottom, 18)
+            .frame(width: width, height: 152)
+        }
+        .buttonStyle(ProxyTileStyle())
+        .accessibilityLabel(choice.title)
+        .accessibilityHint(choice.detail)
+    }
+}
+
+private struct ProxyTileStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Tile(configuration: configuration)
+    }
+
+    private struct Tile: View {
+        let configuration: Configuration
+        @Environment(\.isEnabled) private var isEnabled
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var hovered = false
+
+        var body: some View {
+            let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+            configuration.label
+                .background(shape.fill(hovered ? Theme.raisedInset : Theme.card))
+                .background(shape.fill(LinearGradient(colors: [Color.white.opacity(0.04), Color.clear], startPoint: .top, endPoint: .bottom)))
+                .overlay(shape.strokeBorder(hovered ? Theme.edgeStrong : Theme.strongBorder, lineWidth: 1))
+                .shadow(color: Theme.rim.opacity(hovered ? 0.14 : 0), radius: 18, y: 8)
+                .contentShape(shape)
+                .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
+                .opacity(isEnabled ? 1 : 0.4)
+                .onHover { hovered = isEnabled && $0 }
+                .animation(Motion.hover(hovered), value: hovered)
+                .animation(Motion.press, value: configuration.isPressed)
+        }
     }
 }

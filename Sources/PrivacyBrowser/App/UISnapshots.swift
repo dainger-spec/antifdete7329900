@@ -1263,7 +1263,7 @@ enum UISnapshots {
     /// under From the List with the list empty.
     private static func proxyAdding(into folder: URL, proxies: ProxyListModel, rows: [ProfileRowItem]) async -> Int {
         var problems = 0
-        problems += await Shot(name: "proxies-add-choices", size: CGSize(width: 380, height: 380), titled: false) {
+        problems += await Shot(name: "proxies-add-choices", size: CGSize(width: 320, height: 300), titled: false) {
             ProxyAddChoicesView(choose: { _ in }, importList: {})
                 .background(Theme.raised)
         }.capture(into: folder)
@@ -1303,6 +1303,10 @@ enum UISnapshots {
             let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
             let empty = ProxyListModel(vault: vault) { print("FAIL sample empty proxy list: \($0)") }
             problems += await Shot(name: "proxies-empty", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
+                                proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-empty-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 760), edges: true) {
                 ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
                                 proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
             }.capture(into: folder)

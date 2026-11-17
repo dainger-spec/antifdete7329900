@@ -293,7 +293,9 @@ struct ProxyListPanel: View {
             .buttonStyle(LumenIconButtonStyle(size: 32, isOn: showsInspector.wrappedValue))
             .help(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
-            checkButton
+            if !proxies.entries.isEmpty {
+                checkButton
+            }
             moreMenu
             ProxyAddButton(choose: add, importList: { importing = true }, showing: $showingAddChoices)
                 .disabled(proxies.loadError != nil)
@@ -311,6 +313,7 @@ struct ProxyListPanel: View {
         if proxies.isChecking {
             return String(format: L("proxies.checking.progress"), proxies.checkedCount, proxies.checkTotal)
         }
+        if proxies.entries.isEmpty { return L("proxies.summary.empty") }
         let checked = proxies.entries.compactMap(\.lastCheck)
         return String(format: L("proxies.summary"), proxies.entries.count, checked.filter(\.isAlive).count,
                       checked.filter { !$0.isAlive }.count)
@@ -380,16 +383,9 @@ struct ProxyListPanel: View {
     @ViewBuilder
     private func content(compact: Bool) -> some View {
         if proxies.entries.isEmpty {
-            // What can be added, each with what it takes, at once: Add's own choices.
-            VStack(spacing: 18) {
-                LumenEmptyHint(symbol: "network", text: L("proxies.empty"))
-                    .frame(maxHeight: 110)
-                ProxyAddChoicesView(choose: add, importList: { importing = true }, titled: false)
-                    .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Theme.raised))
-                    .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Theme.hairline, lineWidth: 1))
-                    .disabled(proxies.loadError != nil)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Add's three choices as tiles, a list pasted at once under them.
+            ProxyEmptyState(choose: add, importList: { importing = true })
+                .disabled(proxies.loadError != nil)
         } else {
             GeometryReader { geometry in
                 let columns = ProxyColumns(contentWidth: geometry.size.width, compact: compact)
