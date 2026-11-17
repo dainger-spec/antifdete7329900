@@ -15,6 +15,8 @@ name: Sweep — a profile's Safari window with real input
 # On request only (Actions › Sweep › Run workflow): macOS runners are shared. `images` and `groups`
 # narrow it: each group is one job, its states run one after another on one build.
 on:
+  push:
+    branches: ['claude/sweep-*']
   workflow_dispatch:
     inputs:
       images:
@@ -33,8 +35,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ${{ fromJSON(inputs.images || '["macos-26","xcode-27"]') }}
-        group: ${{ fromJSON(inputs.groups || '["first-run default","russian fresh-mac","safari-used"]') }}
+        image: ["macos-26"]
+        group: ["default"]
     runs-on: ${{ matrix.image }}
     timeout-minutes: 150
     steps:
