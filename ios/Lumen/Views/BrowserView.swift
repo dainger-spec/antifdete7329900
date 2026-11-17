@@ -16,8 +16,13 @@ struct BrowserView: View {
     var body: some View {
         VStack(spacing: 0) {
             if let tab = runtime.selected {
+                // Above the page and the start page: the start page's eclipse is drawn beyond its own
+                // frame, and drew its disc over the right half of the bar — on iOS 18 the bar did not
+                // take a touch at its middle (DeviceTests on the SE, iOS 18.6), and on any iOS an
+                // address typed on a new tab ran under the disc.
                 AddressBar(tab: tab) { runtime.open($0) }
                     .id(tab.id)
+                    .zIndex(1)
                 // The bar floats over the page (the design): the page scrolls under it, and its end
                 // stays reachable above it (the web view's bottom inset).
                 ZStack(alignment: .bottom) {
