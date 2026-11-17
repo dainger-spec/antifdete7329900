@@ -6,7 +6,8 @@
 // Starts the app as a person opens it — no vault, no preferences of its own (scripts/sweep_state.sh
 // removes them first) — and goes on through what it shows, screen by screen: the welcome, the master
 // password's setup (typed key by key, its "written down" box ticked, Return), the account's screens,
-// the empty profile list, a first profile made and opened. At every screen it keeps a picture of the
+// the empty profile list, a first profile made and opened, then every page of the app's Settings
+// (⌘,), clicked in its sidebar. At every screen it keeps a picture of the
 // screen and the window's accessibility tree, and says what it did there. It acts only with the
 // window server's own events (clicks at an element's place, keys), finding elements through the
 // accessibility API as VoiceOver does. What went wrong is for scripts/sweep.py's companion lines:
@@ -249,8 +250,58 @@ for step in 1...16 {
     pause(4)
 }
 
+// MARK: The app's Settings, every page
+
+/// The window in front of the app, by the accessibility API.
+func focusedWindow() -> AXUIElement? {
+    guard let value = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+    return (value as! AXUIElement)
+}
+
+var settingsPages = 0
+if process.isRunning {
+    NSRunningApplication(processIdentifier: pid)?.activate()
+    pause(1)
+    key(43, flags: .maskCommand)  // ⌘,
+    pause(3)
+    if let window = focusedWindow() {
+        let box = frame(of: window)
+        say("settings: the window '\(attribute(window, kAXTitleAttribute) as? String ?? "")' \(Int(box.width))×\(Int(box.height))")
+        // The sidebar's pages: buttons in its column (SettingsView.sidebarWidth), below the search field.
+        let pages = nodes(under: window).filter {
+            $0.role == (kAXButtonRole as String) && $0.enabled && !$0.name.isEmpty && $0.frame.width > 0
+                && $0.frame.minX < box.minX + 260 && $0.frame.minY > box.minY + 70
+        }.map(\.name)
+        say("settings: pages \(pages)")
+        for (number, page) in pages.enumerated() where process.isRunning {
+            guard let current = focusedWindow(),
+                  let button = nodes(under: current).first(where: { $0.role == (kAXButtonRole as String) && $0.name == page }) else {
+                say("settings: '\(page)' is no longer there")
+                continue
+            }
+            click(button.center)
+            pause(1.5)
+            settingsPages += 1
+            let shot = out.appendingPathComponent(String(format: "settings-%02d.png", number + 1)).path
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", shot]
+            try? capture.run()
+            capture.waitUntilExit()
+            let shown = focusedWindow().map { nodes(under: $0) } ?? []
+            try? describe(shown).write(to: out.appendingPathComponent(String(format: "settings-%02d.txt", number + 1)),
+                                       atomically: true, encoding: .utf8)
+            say("settings: '\(page)': \(shown.count) elements")
+        }
+        key(13, flags: .maskCommand)  // ⌘W
+        pause(1)
+    } else {
+        say("settings: no window came for ⌘,")
+    }
+}
+
 let alive = process.isRunning
-say("the app is \(alive ? "running" : "gone (status \(process.terminationStatus))"); a profile's window reached: \(reachedProfile)")
+say("the app is \(alive ? "running" : "gone (status \(process.terminationStatus))"); a profile's window reached: \(reachedProfile); settings pages shown: \(settingsPages)")
 if alive {
     process.terminate()
     pause(5)
