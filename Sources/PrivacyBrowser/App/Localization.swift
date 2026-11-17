@@ -135,7 +135,8 @@ enum Localization {
     /// sizes and lists in the app's own windows are written with it (`Date.shown`). The system's
     /// locale follows the Mac's language, not the interface's: a Russian interface on a Mac set to
     /// English said "yesterday" and "Oct 31" among Russian words (CI run 541's snapshots). The
-    /// system's own locale, untouched, when its language is the interface's. Only the app's own
+    /// system's own locale, untouched, when its language is the interface's; a Russian one keeps the
+    /// 24-hour clock whatever the region's. Only the app's own
     /// text uses it: what a page sees of languages and formats is WebContentLanguage's.
     static let locale: Locale = {
         let current = Locale.autoupdatingCurrent
@@ -143,6 +144,9 @@ enum Localization {
         var components = Locale.Components(locale: current)
         components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
                                                                    script: nil, region: current.region)
+        // A Russian interface on a Mac of a 12-hour region said "9:36 AM" among Russian words
+        // (Russian has no words of its own for AM and PM): its times are on the 24-hour clock.
+        if languageCode == "ru" { components.hourCycle = .zeroToTwentyThree }
         return Locale(components: components)
     }()
 }

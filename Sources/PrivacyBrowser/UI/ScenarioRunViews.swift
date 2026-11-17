@@ -281,8 +281,9 @@ struct ScenarioEntryState: View {
                 Text(L("scenarios.state.finished")).foregroundStyle(Theme.textPrimary)
             case .failed(let reason, let line):
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.danger)
+                // The inspector says the reason on lines of its own: no dash left hanging after the title.
                 (Text(Self.failedTitle(line: line, steps: steps)).foregroundColor(Theme.danger).fontWeight(.medium)
-                    + Text(verbatim: " — " + ScenarioFailureText.text(reason)).foregroundColor(Theme.textSecondary))
+                    + Text(verbatim: reason.isEmpty ? "" : " — " + ScenarioFailureText.text(reason)).foregroundColor(Theme.textSecondary))
             case .stopped:
                 Image(systemName: "stop.circle").foregroundStyle(Theme.textSecondary)
                 Text(L("scenarios.state.stopped")).foregroundStyle(Theme.textSecondary)
