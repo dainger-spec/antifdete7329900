@@ -1,3 +1,4 @@
+import BrowserCore
 import Foundation
 import MachO
 import os
@@ -98,6 +99,42 @@ enum SafariPaths {
         return isSafariImage(String(cString: image))
     }
 
+    /// Safari's container settings folder in a profile's home: where Safari, which runs in its own
+    /// container, keeps CloudTabs.db, SafariTabs.db, its profiles' folders and its extensions' state
+    /// (`~/Library/Containers/com.apple.Safari/Data/Library/Safari`, measured on CI's runners). The
+    /// same path under the profile's home, as `moved` puts anything of that container's.
+    static let containerSettingsFolder = SafariStoreLayout.containerSettingsFolder
+
+    /// Getters of Safari's that answer nil in a profile's process — they ask for Safari's own
+    /// container, and a profile's process has none — and the folder in the profile's home they answer
+    /// instead. With nil, what Safari keeps there had no place at all: the iCloud tabs the address
+    /// bar completes from (CloudTabs.db), the tab collection ("Failed to instantiate tab collection"),
+    /// Safari's profiles' folder (measured nil: the address bar check's getters, CI, macOS 27.0.1).
+    /// Another browser hosting Safari's chrome gives each of its profiles this folder of its own.
+    /// Not the extensions' folder (`safari_webExtensionsSettingsDirectoryURL`): extensions stay off.
+    static let nilAnswers: [String: String] = [
+        "-[NSFileManager safari_containerSettingsDirectory]": containerSettingsFolder,
+        "-[NSFileManager safari_productionSafariContainerSettingsDirectory]": containerSettingsFolder,
+        "-[NSFileManager safari_profilesDirectoryURL]": containerSettingsFolder + "/Profiles",
+    ]
+
+    /// Whether a getter of `nilAnswers` answers with a URL or with a path string: a name that ends in
+    /// URL does; otherwise as its sibling for the account's own settings folder does
+    /// (`safari_productionSafariSettingsDirectory`, which answers in a profile's process too).
+    private static func answersWithURL(_ getter: String, receiver: AnyObject) -> Bool {
+        if getter.hasSuffix("URL]") { return true }
+        if let known = siblingAnswersWithURL { return known }
+        let sibling = NSSelectorFromString("safari_productionSafariSettingsDirectory")
+        var isURL = true
+        if let object = receiver as? NSObject, object.responds(to: sibling),
+           let answer = object.perform(sibling)?.takeUnretainedValue() {
+            isURL = answer is NSURL
+        }
+        siblingAnswersWithURL = isURL
+        return isURL
+    }
+    nonisolated(unsafe) private static var siblingAnswersWithURL: Bool?
+
     /// Where `path` goes in the profile's home: a path under the real ~/Library comes back under
     /// `home`, with the rest of it as it was; nil for a path that stays as it is — one outside the
     /// real ~/Library, and one already in the profile's home.
@@ -124,6 +161,13 @@ enum SafariPaths {
         let replacement: @convention(block) (AnyObject) -> Unmanaged<AnyObject>? = { receiver in
             let result = original(receiver, selector)
             guard let value = result?.takeUnretainedValue() else {
+                if let folder = SafariPaths.nilAnswers[name] {
+                    let path = home + "/" + folder
+                    SafariPaths.note(name, path)
+                    let answer: AnyObject = SafariPaths.answersWithURL(name, receiver: receiver)
+                        ? NSURL(fileURLWithPath: path, isDirectory: true) : NSString(string: path)
+                    return Unmanaged.passRetained(answer).autorelease()
+                }
                 SafariPaths.note(name, "nil")
                 return result
             }

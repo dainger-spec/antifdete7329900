@@ -171,6 +171,8 @@ enum AddressBarTyping {
         var navigationFrames: [String] = []
         /// The commit's methods guarded in this Safari (`SafariTypingGuard.commitMethods`).
         var commitMethods: [String] = []
+        /// The search went to the profile's engine by the profile's process, Safari's having another.
+        var searchedWithProfilesEngine = false
 
         var json: String {
             guard let data = try? JSONEncoder().encode(self) else { return "{}" }
@@ -208,6 +210,7 @@ enum AddressBarTyping {
         let returnsBefore = AddressBarCommit.returns
         let rescuesBefore = AddressBarCommit.rescues.count
         let thrownBefore = AddressBarCommit.thrownAfterReturn.count
+        let searchesBefore = AddressBarCommit.searchesDone
         if firstCompletion {
             for event in keyEvents(code: 125, characters: "\u{F701}", modifiers: [.numericPad, .function], in: window) {
                 if PBCatchException({ window.sendEvent(event) }) != nil { entered.outOfKeyPresses += 1 }
@@ -243,6 +246,7 @@ enum AddressBarTyping {
         entered.thrownAfterReturn = Array(AddressBarCommit.thrownAfterReturn.dropFirst(thrownBefore))
         entered.navigationFrames = AddressBarCommit.lastNavigationFrames
         entered.commitMethods = SafariTypingGuard.commitMethods
+        entered.searchedWithProfilesEngine = AddressBarCommit.searchesDone > searchesBefore
         return entered
     }
 

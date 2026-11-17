@@ -54,9 +54,14 @@ enum SafariTypingGuard {
     /// answers nothing, is written down with the method's name, and the address bar's Return does what
     /// was asked itself when no page started loading (`AddressBarCommit`). Their names on each Safari
     /// are in the address bar check's report (`commitMethods`).
-    static let commitClassWords = ["UnifiedField", "BrowserWindowController", "Completion", "SearchProvider", "TopHit",
-                                   "History", "BrowserTabViewItem"]
+    /// Measured on macOS 27.0.1 (the address bar check's frames of a search's start): Return goes
+    /// from `-[BrowserWindowController control:textView:doCommandBySelector:]` through the completion
+    /// controller (C++) to `-[BrowserWindowController performWebSearchWithSearchString:punchoutDetails:]`,
+    /// `_searchWebForString:withWindowPolicy:punchoutDetails:` and `-[BrowserViewController loadURL:…]`.
+    static let commitClassWords = ["UnifiedField", "BrowserWindowController", "BrowserViewController", "Completion",
+                                   "SearchProvider", "TopHit", "History", "BrowserTabViewItem"]
     static let commitSelectorWords = ["goTo", "ToolbarLocation", "ommit", "earchURL", "URLForQuery", "URLForSearch", "opHit",
+                                      "WebSearch", "earchWeb",
                                       "ypedURL", "ypedAddress", "ypedText", "addTyped", "navigateTo", "performSearch",
                                       "handleReturn", "insertNewline", "loadURL", "hooseCompletion", "ompletionChosen",
                                       "electedCompletion", "electCompletion", "cceptCompletion", "ctivateCompletion",

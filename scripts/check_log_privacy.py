@@ -108,6 +108,9 @@ ALLOWED_IN_FILE = {
         "where Safari's code threw after Return: a class and selector of Safari's (SafariTypingGuard's lists), a fixed text of "
         "this file's and an exception's name — never its reason, never what was typed",
     ("AddressBarCommit.swift", "intent.thrownIn.joined(separator: \"; \")"): "the same places, one after the other",
+    ("AddressBarCommit.swift", "encodings.joined(separator: \" \")"): "Objective-C type encodings of a method of Safari's",
+    ("AddressBarCommit.swift", "SafariChrome.searchEngineInUse"): "the name of a search engine in Safari's own provider list",
+    ("AddressBarCommit.swift", "wanted.name"): "the name of a search engine of the app's fixed list (SearchEngine.name)",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
     ("ProxyExitLookup.swift", "endpoint.host ?? \"?\""): "Cloudflare's trace address of the app's own list (1.1.1.1, 1.0.0.1), not the proxy",

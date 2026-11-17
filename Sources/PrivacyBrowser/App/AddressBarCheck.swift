@@ -248,11 +248,15 @@ enum AddressBarCheck {
         guard let entered = try? JSONDecoder().decode(AddressBarTyping.Entered.self, from: Data(look.detail.utf8)) else {
             return ["an answer that is not a report: \(look.detail.prefix(300))"]
         }
-        print("\(tag) RETURN \(label): field at Return \"\(entered.fieldAtReturn)\", the front page \(entered.pageBefore) → "
-              + "\(entered.pagesSeen.joined(separator: " → ")) (another page in front: \(entered.frontPageChanged)), "
-              + "tabs \(entered.tabsBefore) → \(entered.tabsAfter), the proxy saw \(targets.isEmpty ? "nothing" : targets.joined(separator: " ")); "
-              + "taken for the address bar's \(entered.returnSeen), caught by the typing guard \(entered.caughtByTypingGuard), "
-              + "by the run loop \(entered.caughtByRunLoop), thrown in all \(entered.thrown.count), notices \(entered.notices)")
+        let seenByProxy = targets.isEmpty ? "nothing" : targets.joined(separator: " ")
+        var line = "\(tag) RETURN \(label): field at Return \"\(entered.fieldAtReturn)\", the front page \(entered.pageBefore) → "
+        line += "\(entered.pagesSeen.joined(separator: " → ")) (another page in front: \(entered.frontPageChanged)), "
+        line += "tabs \(entered.tabsBefore) → \(entered.tabsAfter), the proxy saw \(seenByProxy); "
+        line += "taken for the address bar's \(entered.returnSeen), "
+        if entered.searchedWithProfilesEngine { line += "searched with the profile's engine by the profile's process (Safari's is another), " }
+        line += "caught by the typing guard \(entered.caughtByTypingGuard), by the run loop \(entered.caughtByRunLoop), "
+        line += "thrown in all \(entered.thrown.count), notices \(entered.notices)"
+        print(line)
         for place in entered.thrownAfterReturn { print("\(tag) COMMIT-THREW \(label): \(place.prefix(300))") }
         for rescue in entered.rescues { print("\(tag) RESCUED \(label): \(rescue.prefix(300))") }
         printThrown(entered.thrown, label: label)

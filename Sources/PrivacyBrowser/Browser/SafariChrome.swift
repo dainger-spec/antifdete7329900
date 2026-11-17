@@ -892,26 +892,38 @@ enum SafariChrome {
             if let thrown { parts.append("\(name) threw \(thrown.name.rawValue)") }
             return answer
         }
+        /// The no-argument methods answering an object whose names hold one of `words`, of the
+        /// object's class and its superclasses up to NSObject.
+        func getters(_ object: NSObject, _ words: [String]) -> [String] {
+            var names: [String] = []
+            var current: AnyClass? = Swift.type(of: object)
+            while let cls = current, cls != NSObject.self {
+                var count: UInt32 = 0
+                if let methods = class_copyMethodList(cls, &count) {
+                    for index in 0..<Int(count) {
+                        let name = NSStringFromSelector(method_getName(methods[index]))
+                        guard !name.contains(":"), !name.hasPrefix("."), !names.contains(name),
+                              words.contains(where: { name.localizedCaseInsensitiveContains($0) }) else { continue }
+                        let returns = method_copyReturnType(methods[index])
+                        let isObject = String(cString: returns) == "@"
+                        free(returns)
+                        if isObject { names.append(name) }
+                    }
+                    free(methods)
+                }
+                current = class_getSuperclass(cls)
+            }
+            return names
+        }
         func describe(_ provider: NSObject) -> String {
             var fields: [String] = [String(describing: Swift.type(of: provider))]
-            var count: UInt32 = 0
-            if let methods = class_copyMethodList(Swift.type(of: provider), &count) {
-                for index in 0..<Int(count) {
-                    let name = NSStringFromSelector(method_getName(methods[index]))
-                    guard !name.contains(":"), !name.hasPrefix("_"), !name.hasPrefix("."),
-                          name.localizedCaseInsensitiveContains("name") || name.localizedCaseInsensitiveContains("template")
-                            || name.localizedCaseInsensitiveContains("suggest") || name.localizedCaseInsensitiveContains("identifier") else { continue }
-                    let returns = method_copyReturnType(methods[index])
-                    let isObject = String(cString: returns) == "@"
-                    free(returns)
-                    guard isObject else { continue }
-                    let value = ask(provider, name)
-                    fields.append("\(name)=\(value.map { String(describing: $0).prefix(90) } ?? "nil")")
-                }
-                free(methods)
+            for name in getters(provider, ["name", "template", "identifier"]) where !name.hasPrefix("_") {
+                let value = ask(provider, name)
+                fields.append("\(name)=\(value.map { String(describing: $0).prefix(90) } ?? "nil")")
             }
             return fields.joined(separator: ", ")
         }
+        parts.append("the controller's lists: " + getters(controller, ["provider", "engine"]).joined(separator: " "))
         for name in ["defaultSearchEngineName", "defaultSearchProvider", "defaultSearchProviderForPrivateBrowsing"] {
             guard let value = ask(controller, name) else { continue }
             if let object = value as? NSObject, !(value is NSString) {
@@ -920,7 +932,9 @@ enum SafariChrome {
                 parts.append("\(name)=\(String(describing: value))")
             }
         }
-        for name in ["providers", "allProviders", "searchProviders", "availableProviders"] {
+        let lists = ["providers", "allProviders", "searchProviders", "availableProviders"]
+            + getters(controller, ["providers"]).filter { !$0.hasPrefix("_") && !$0.hasPrefix("reload") && !$0.hasPrefix("load") }
+        for name in lists {
             if let list = ask(controller, name) as? [NSObject] {
                 parts.append("\(name): \(list.count)")
                 for provider in list.prefix(12) { parts.append("  " + describe(provider)) }

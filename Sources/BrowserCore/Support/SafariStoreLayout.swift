@@ -5,9 +5,11 @@ import Foundation
 /// before Safari's chrome loads.
 ///
 /// WHERE. In a profile's process the home is the profile's (`CFFIXED_USER_HOME`), so Safari's code
-/// that keeps its state in its container (`NSHomeDirectory()/Library/Safari` in Safari, which is
-/// sandboxed) and its code that keeps it in the account's `~/Library/Safari` (moved to the home by
-/// `SafariPaths`) both land in the home's `Library/Safari`. A complete Safari data tree there —
+/// that keeps its state in its settings folder (`safari_settingsDirectoryURL`) and its code that
+/// keeps it in the account's `~/Library/Safari` (moved to the home by `SafariPaths`) both land in the
+/// home's `Library/Safari` (measured: the address bar check's getters, CI, macOS 27.0.1). What
+/// Safari keeps in its container's own settings folder — CloudTabs.db, SafariTabs.db — goes to
+/// `containerSettingsFolder` in the home. A complete Safari data tree there —
 /// the stores Safari opens, as another browser hosting Safari's chrome keeps them for each of its
 /// profiles (docs/SAFARI_PROCESS.md, "Profile state in Safari's own file formats") — is `stores`.
 ///
@@ -62,7 +64,18 @@ public enum SafariStoreLayout {
         Store("Library/Safari/Databases/___IndexedDB", .folder),
         Store("Library/Safari/ResourceLoadStatistics/pcm.db", .database),
         Store("Library/Safari/ResourceLoadStatistics/observations.db", .database),
+        // Safari's container settings folder (`containerSettingsFolder`): the iCloud tabs the
+        // address bar completes from, the tab collection, Safari's profiles' folder.
+        Store(containerSettingsFolder + "/CloudTabs.db", .database),
+        Store(containerSettingsFolder + "/SafariTabs.db", .database),
+        Store(containerSettingsFolder + "/Profiles", .folder),
     ]
+
+    /// Where Safari, in its own container, keeps its container's settings — CloudTabs.db,
+    /// SafariTabs.db, its profiles' folders — relative to the home: a profile's process answers
+    /// Safari's getters of that folder with this one in the profile's home (`SafariPaths`), as
+    /// anything of Safari's container is moved there.
+    public static let containerSettingsFolder = "Library/Containers/com.apple.Safari/Data/Library/Safari"
 
     /// The Library folders every account's home has, which a profile's new home did not: code that
     /// writes into one of them without making it first fails in a home that lacks it.

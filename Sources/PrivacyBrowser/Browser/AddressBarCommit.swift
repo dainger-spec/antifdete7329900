@@ -71,6 +71,7 @@ enum AddressBarCommit {
         guard !isInstalled else { return }
         isInstalled = true
         watchReturn()
+        searchWithTheProfilesEngine()
         SafariTypingGuard.onCaught = { key, name in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { AddressBarCommit.noteThrow("-[\(key)] \(name)") }
@@ -102,6 +103,68 @@ enum AddressBarCommit {
             MainActor.assumeIsolated { AddressBarCommit.settleLater() }
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    // MARK: The profile's engine
+
+    /// Searches Safari does with another engine than the profile's (`searchesDone`).
+    private(set) static var searchesDone = 0
+
+    /// A search from the address bar goes to the profile's engine even where this Safari has no
+    /// such engine. Safari's provider list depends on the Mac's region: on an English Mac it has no
+    /// Yandex, and setting Yahoo did not take — both profiles' searches went to Google (the address
+    /// bar check, CI, macOS 27.0.1). Safari's own search with the words typed
+    /// (`-[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:]`, where
+    /// Return's search goes) is let through when Safari's engine is the profile's; otherwise the
+    /// profile's process loads the profile's engine's results page itself, in the front tab.
+    private static func searchWithTheProfilesEngine() {
+        typealias Search = @convention(c) (AnyObject, Selector, AnyObject?, Int, AnyObject?) -> Void
+        let selector = NSSelectorFromString("_searchWebForString:withWindowPolicy:punchoutDetails:")
+        guard let cls = NSClassFromString("BrowserWindowController"), let method = class_getInstanceMethod(cls, selector),
+              method_getNumberOfArguments(method) == 5 else {
+            log.notice("No -[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] in this Safari")
+            return
+        }
+        // An object, an integer and an object, and nothing back: anything else is not the method measured.
+        var encodings: [String] = []
+        for index in 2..<5 {
+            guard let raw = method_copyArgumentType(method, UInt32(index)) else { return }
+            encodings.append(String(cString: raw))
+            free(raw)
+        }
+        let returns = method_copyReturnType(method)
+        let returnsNothing = String(cString: returns) == "v"
+        free(returns)
+        guard returnsNothing, encodings[0].hasSuffix("@"), "qQlLiI".contains(encodings[1].last ?? "?"), encodings[2].hasSuffix("@") else {
+            log.notice("-[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] is not as measured (\(encodings.joined(separator: " "), privacy: .public)): Safari's search is left as it is")
+            return
+        }
+        let original = unsafeBitCast(method_getImplementation(method), to: Search.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?, Int, AnyObject?) -> Void = { controller, text, policy, details in
+            let done = Thread.isMainThread && MainActor.assumeIsolated { AddressBarCommit.searchItself(controller, text as? String) }
+            if !done { original(controller, selector, text, policy, details) }
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// The profile's engine's results for `text` in the front tab of `controller`'s window, when
+    /// Safari's engine is not the profile's. False when Safari is to search itself.
+    private static func searchItself(_ controller: AnyObject, _ text: String?) -> Bool {
+        let wanted = SafariChrome.profileSearchEngine
+        guard SafariChrome.searchEngineInUse != wanted.name, let text,
+              let url = WebAddress.searchURL(for: text, engine: wanted),
+              let window = (controller as? NSWindowController)?.window else { return false }
+        let tab = SafariTabs.tabs().first { $0.window === window && $0.isSelected }?.item
+        if let tab, SafariChrome.load(url, in: tab) {
+            searchesDone += 1
+        } else if let page = SafariChromeHost.frontPage(in: window) {
+            page.load(URLRequest(url: url))
+            searchesDone += 1
+        } else {
+            return false
+        }
+        log.notice("Safari's engine is \(SafariChrome.searchEngineInUse, privacy: .public), the profile's \(wanted.name, privacy: .public): the profile's process searched with the profile's")
+        return true
     }
 
     /// The field editor of Safari's address bar, when it is `window`'s first responder.
