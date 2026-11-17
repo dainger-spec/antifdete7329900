@@ -201,6 +201,8 @@ enum ProfileSessionHost {
             SafariChromeHost.onLastWindowClosed = { NSApp.terminate(nil) }
             // How the data was sealed, told to the manager before this process exits.
             manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
+            // Cookies the launch put back: the manager keeps it in the profile's journal.
+            manager.onCookiesRecovered = { _, report in ProfileSessionHost.send(.cookiesRecovered(report)) }
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
@@ -415,6 +417,8 @@ enum ProfileSessionHost {
             if !SafariChromeHost.open(session: session, url: url) {
                 session.openWindow(url: url)
             }
+            // Cookies its launch put back while it had no window (a warm-up's): said in this one.
+            manager?.presentCookieRecovery(profileID)
         }
 
         /// Closing the window must not quit before the data is sealed; the quit path does that.

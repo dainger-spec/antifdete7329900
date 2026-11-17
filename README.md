@@ -28,6 +28,7 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
 - [docs/LEAK_AUDIT.md](docs/LEAK_AUDIT.md): the leak audit's short list — each channel, why it is reachable, what proves it, its state
 - [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
+- [docs/COOKIE_RECOVERY.md](docs/COOKIE_RECOVERY.md): snapshots of each profile's cookies, kept encrypted while it runs, and what a launch puts back when the cookie store lost them
 - [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
 - [docs/AUTOMATION_API.md](docs/AUTOMATION_API.md): the local automation API and `scripts/pbctl` (a developer script here, not shipped in the app)
 - [docs/UPDATES.md](docs/UPDATES.md): automatic updates — why our own updater rather than Sparkle, installing only after every profile is sealed, what each file on disk may hold across versions (in force: a version refuses, and never writes over, a file a newer one wrote), the privacy of the check (design; implemented step by step)

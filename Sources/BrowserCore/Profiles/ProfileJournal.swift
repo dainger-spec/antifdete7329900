@@ -1,7 +1,7 @@
 import Foundation
 
-/// What happened to a profile, newest last: launched, warmed up, cookies imported, its proxy
-/// changed or given a new IP, a restore point made or restored. For the person to see at a
+/// What happened to a profile, newest last: launched, warmed up, cookies imported or put back from a
+/// snapshot, its proxy changed or given a new IP, a restore point made or restored. For the person to see at a
 /// glance what a profile went through before an account on it was asked questions — the inspector
 /// and the restore points' sheet show it.
 ///
@@ -39,6 +39,11 @@ public struct ProfileJournal: Codable, Equatable, Sendable {
         case restored
         /// Made as a copy of another profile (`ProfileClone`); the detail is that one's name.
         case copied
+        /// A launch put back cookies the store had lost (docs/COOKIE_RECOVERY.md); the detail is
+        /// when the snapshot they came from was taken.
+        case cookiesRecovered
+        /// The person put back the cookies of a snapshot; the detail is when it was taken.
+        case cookiesRestored
     }
 
     public static let maximumEvents = 300

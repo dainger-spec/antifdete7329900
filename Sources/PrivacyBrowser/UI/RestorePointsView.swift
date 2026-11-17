@@ -237,6 +237,7 @@ struct JournalLine: View {
         case .restorePointMade?: return "clock.arrow.circlepath"
         case .restored?: return "arrow.uturn.backward"
         case .copied?: return "plus.square.on.square"
+        case .cookiesRecovered?, .cookiesRestored?: return "clock.arrow.circlepath"
         case nil: return "circle"
         }
     }
@@ -257,6 +258,8 @@ struct JournalLine: View {
         case .restorePointMade?: return with("journal.restorePointMade", "journal.restorePointMade.plain")
         case .restored?: return with("journal.restored", "journal.restored.plain")
         case .copied?: return with("journal.copied", "journal.copied.plain")
+        case .cookiesRecovered?: return with("journal.cookiesRecovered", "journal.cookiesRecovered.plain")
+        case .cookiesRestored?: return with("journal.cookiesRestored", "journal.cookiesRestored.plain")
         case nil: return L("journal.other")
         }
     }

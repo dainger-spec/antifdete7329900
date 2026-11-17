@@ -3910,3 +3910,35 @@
 "openvpn.import.password" = "Password";
 "openvpn.import.servers.more" = "%1$@ and %2$ld more servers";
 "vm.error.openVPN" = "Not started: a virtual machine cannot use an OpenVPN connection yet. Give it a proxy instead.";
+
+/* Cookie recovery: snapshots of a profile's cookies, put back when its store lost them (CookieSnapshotKeeper, CookieRecoveryNotice, CookieSnapshotsView; docs/COOKIE_RECOVERY.md) */
+"cookieRecovery.notice" = "Cookies were restored from a snapshot of %@";
+"cookieRecovery.notice.detail" = "The profile’s cookie store had lost them after the last run. Cookies back: %ld.";
+"cookieRecovery.notice.close" = "Close";
+"editor.cookies.snapshots" = "Keep cookie snapshots and restore lost cookies";
+"editor.cookies.snapshots.footer" = "While the profile runs, Lumen keeps its last three snapshots of its persistent cookies, encrypted with the profile’s data on this Mac — never synced. If a crash, a forced quit or a damaged store loses them, the next launch puts them back before the first page loads and says so. Turning this off removes the snapshots.";
+"editor.cookies.snapshots.footer.ephemeral" = "An ephemeral profile keeps no website data, so it keeps no cookie snapshots.";
+"profiles.row.cookieSnapshots" = "Restore Cookies from a Snapshot…";
+"cookieSnapshots.title" = "Cookie Snapshots — %@";
+"cookieSnapshots.explanation" = "Lumen copies the profile’s persistent cookies every few minutes while they change, and when it stops. When its cookie store loses them, the next launch puts them back by itself; here you can put back a snapshot yourself.";
+"cookieSnapshots.ephemeral" = "A temporary profile keeps no website data: it has no snapshots.";
+"cookieSnapshots.off" = "Cookie snapshots are off for this profile (its settings → Data). The snapshots below, if any, are removed at its next launch.";
+"cookieSnapshots.unreadable" = "The snapshots could not be read. They are not deleted: the next snapshot moves the file aside.";
+"cookieSnapshots.list" = "Snapshots: %1$ld of %2$ld";
+"cookieSnapshots.none" = "No snapshot yet: the first is taken while the profile runs and has cookies.";
+"cookieSnapshots.count" = "cookies: %ld";
+"cookieSnapshots.count.valid" = "cookies still valid: %1$ld of %2$ld";
+"cookieSnapshots.restore" = "Restore…";
+"cookieSnapshots.restore.title" = "Restore the cookies of %@?";
+"cookieSnapshots.restore.message" = "Its cookies that have not expired (%ld) replace the profile’s cookies of the same name; cookies set since stay. Expired and session cookies are not restored.";
+"cookieSnapshots.restore.now" = "The profile is running: they go in at once.";
+"cookieSnapshots.restore.nextLaunch" = "The profile is stopped: they go in at its next launch, before its first page loads.";
+"cookieSnapshots.restore.sync" = "This profile syncs its cookies: the restored ones also reach your other devices at the next sync.";
+"cookieSnapshots.restore.confirm" = "Restore";
+"cookieSnapshots.restored.now" = "Cookies restored into the running profile: %ld.";
+"cookieSnapshots.restored.refused" = "Cookies restored: %1$ld; WebKit did not keep %2$ld.";
+"cookieSnapshots.restored.queued" = "%1$ld cookies will be restored when “%2$@” next starts, before its first page loads.";
+"journal.cookiesRecovered" = "Lost cookies restored from the snapshot of %@";
+"journal.cookiesRecovered.plain" = "Lost cookies restored from a snapshot";
+"journal.cookiesRestored" = "Cookies restored from the snapshot of %@";
+"journal.cookiesRestored.plain" = "Cookies restored from a snapshot";

@@ -101,6 +101,7 @@ profile key (random 256-bit per profile, stored only wrapped)
    ├─ HKDF "cookie-import"     → cookies-import.bin            (AAD "cookie-import:v1:<uuid>")
    ├─ HKDF "cookies"           → cookies.bin                   (AAD "cookies:v1:<uuid>")
    ├─ HKDF "cookie-baseline"   → cookies-baseline.bin          (AAD "cookie-baseline:v1:<uuid>")
+   ├─ HKDF "cookie-snapshots"  → cookie-snapshots.bin          (AAD "cookie-snapshots:v1:<uuid>")
    ├─ HKDF "warm-up"           → warmup.bin                    (AAD "warm-up:v1:<uuid>")
    ├─ HKDF "warm-up-schedule"  → warmup-schedule.bin           (AAD "warm-up-schedule:v1:<uuid>")
    ├─ HKDF "warm-up-last"      → warmup-last.bin               (AAD "warm-up-last:v1:<uuid>")
@@ -233,13 +234,16 @@ Application Support/PrivacyBrowser/      (0700)
     cookies-import.bin            AES-GCM(cookie-import key, [ImportedCookie] JSON)   [only while imported cookies wait for the next launch]
     cookies.bin                   AES-GCM(cookies key, CookieJarDocument JSON)        [persistent cookies, synced; with cookie sync on]
     cookies-baseline.bin          AES-GCM(cookie-baseline key, CookieBaseline JSON)   [this Mac only: the store at the last record or apply]
+    cookie-snapshots.bin          AES-GCM(cookie-snapshots key, CookieSnapshots JSON) [this Mac only, not synced or exported: the last 3
+                                                                                       snapshots of the persistent cookies (docs/COOKIE_RECOVERY.md)]
+    cookies-running               empty; there while a run of the profile has its cookie store open, left by a run that did not stop cleanly
     warmup.bin                    AES-GCM(warm-up key, WarmUpPlan JSON)               [this Mac only: the last warm-up plan]
     warmup-schedule.bin           AES-GCM(warm-up-schedule key, WarmUpSchedule JSON)  [this Mac only, not exported: every N hours, last run]
     warmup-last.bin               AES-GCM(warm-up-last key, WarmUpRecord JSON)        [this Mac only, not exported: how the last run went]
     warmup-history.bin            AES-GCM(warm-up-history key, WarmUpHistory JSON)    [this Mac only, not exported: the last 50 runs with their sites]
     journal.bin                   AES-GCM(journal key, ProfileJournal JSON)           [this Mac only, not exported: what happened to the profile]
     restore-points/<p>/           copies of webdata.pbsa, safarihome.pbsa, history.bin, cookies.bin, cookies-baseline.bin,
-                                  tabs.bin as they were (still encrypted), and point.bin AES-GCM(restore-point key,
+                                  tabs.bin, cookie-snapshots.bin, cookies-running as they were (still encrypted), and point.bin AES-GCM(restore-point key,
                                   RestorePoint JSON)                                   [this Mac only, not exported]
     tabs.bin                      AES-GCM(open-tabs key, OpenTabs JSON)               [this Mac only, not synced or exported: http(s) tabs
                                                                                        left open, with Settings → Startup → restore tabs]
@@ -373,7 +377,15 @@ before the queued imports and the first window, the synced document — merged b
 other devices' — is applied to the store, and the imported cookies are then recorded into it;
 at stop, before the seal, what the run changed in the store since the launch (the local
 `cookies-baseline.bin`) is recorded as changes of that time. Sync itself never touches a live
-store: it runs only while no profile does. See SYNC_FORMAT.md § Cookies. History changes are saved encrypted after a 3 s debounce, off the main
+store: it runs only while no profile does. See SYNC_FORMAT.md § Cookies.
+
+Before both, cookie recovery (COOKIE_RECOVERY.md, `CookieSnapshotKeeper`): while a profile runs,
+its persistent cookies are copied into `cookie-snapshots.bin` when they change (every few minutes;
+at once after an import, a WebDriver cookie command or a mass removal) and at its clean stop, which
+also removes its running mark `cookies-running`; at the next launch, before synced cookies, imports
+or the first page, a store that lost them — missing website data, a damaged cookie file, a clean end
+with cookies gone, far fewer after a run that did not stop cleanly — gets back from the newest
+snapshot every cookie it lacks, and the profile's window says so. History changes are saved encrypted after a 3 s debounce, off the main
 thread; `BrowserSession.shutDown()` flushes them synchronously before the data store is
 released.
 

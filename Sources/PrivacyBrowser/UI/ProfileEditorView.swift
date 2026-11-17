@@ -89,6 +89,8 @@ struct ProfileDraft {
     var historyRetentionDays = 90
     var passwordAutoFill = true
     var syncCookies = true
+    /// Keep snapshots of the cookies and put back what the store loses (docs/COOKIE_RECOVERY.md).
+    var cookieRecovery = true
     var searchEngine = SearchEngine.standard
     /// The person's own labels and notes, and the glyph's colour and letters (nil, empty: the defaults).
     var tags: [String] = []
@@ -224,6 +226,7 @@ struct ProfileDraft {
         historyRetentionDays = c.historyRetentionDays ?? 0
         passwordAutoFill = c.passwordAutoFill
         syncCookies = c.syncCookies
+        cookieRecovery = c.cookieRecovery
         searchEngine = c.searchEngine ?? .standard
         tags = c.tags
         notes = c.notes
@@ -491,6 +494,7 @@ struct ProfileDraft {
         // (ProfileConfiguration.keepingStoredState).
         configuration.passwordAutoFill = passwordAutoFill
         configuration.syncCookies = syncCookies
+        configuration.cookieRecovery = cookieRecovery
         // The standard engine is stored as none, as every profile from before the choice has it:
         // saving such a profile unchanged is no edit.
         configuration.searchEngine = searchEngine == .standard ? nil : searchEngine

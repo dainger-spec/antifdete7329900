@@ -552,6 +552,11 @@ final class AppModel: ObservableObject {
             self?.refresh()
         }
         manager.onConfigurationChanged = { [weak self] _ in self?.refresh() }
+        // Cookies a launch put back from their snapshot (docs/COOKIE_RECOVERY.md): in the profile's
+        // journal, with the time of the snapshot they came from.
+        manager.onCookiesRecovered = { [weak self] id, report in
+            self?.recordInJournal(.cookiesRecovered, detail: report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened), for: id)
+        }
         // ⌘, in a profile's window: this app's Settings, in front.
         manager.onShowSettings = { Self.openSettingsWindow() }
         manager.onShowPasswords = { [weak self] id in
@@ -1047,6 +1052,9 @@ final class AppModel: ObservableObject {
         }
         // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
         if !saved.syncsCookies { try repository.clearSyncedCookies(for: id) }
+        // Cookie snapshots off (or the profile made ephemeral): no copy of its cookies is kept. A run
+        // of it under way stops copying at its next look (`CookieSnapshotKeeper.snapshot`).
+        if !saved.keepsCookieSnapshots, stored.keepsCookieSnapshots { try repository.removeCookieSnapshots(for: id) }
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)
         }
@@ -1233,6 +1241,25 @@ final class AppModel: ObservableObject {
         case .applied(let stored, _): recordInJournal(.cookiesImported, detail: String(stored), for: id)
         case .queued: recordInJournal(.cookiesImported, detail: String(cookies.count), for: id)
         }
+        return outcome
+    }
+
+    /// The profile's cookie snapshots, newest first (docs/COOKIE_RECOVERY.md); nil when they could
+    /// not be read — the next copy moves the file aside, a newer version's is left as it is.
+    func cookieSnapshots(for id: UUID) -> [CookieSnapshot]? {
+        guard let repository else { return [] }
+        return (try? repository.cookieSnapshots(for: id))?.newestFirst
+    }
+
+    /// Puts back the cookies of `snapshot` the person chose, still valid now
+    /// (`CookieRecovery.manualRestore`): they replace the profile's cookies of the same name, domain
+    /// and path, and leave the others. At once when it runs, else at its next launch, before its first
+    /// page — as an import, which it is: Lumen's own change, copied at once, and with cookie sync on
+    /// recorded as a change of now.
+    func restoreCookies(from snapshot: CookieSnapshot, into id: UUID) async throws -> ProfileManager.CookieImportOutcome {
+        guard let manager else { throw CoreError.vaultNotFound }
+        let outcome = try await manager.importCookies(CookieRecovery.manualRestore(from: snapshot, now: Date()), into: id)
+        recordInJournal(.cookiesRestored, detail: snapshot.takenAt.shown(date: .abbreviated, time: .shortened), for: id)
         return outcome
     }
 
@@ -2150,6 +2177,8 @@ struct ProfileDetails: Equatable {
     var languages: String
     var window: String
     var syncsCookies: Bool
+    /// It keeps snapshots of its cookies (docs/COOKIE_RECOVERY.md).
+    var keepsCookieSnapshots: Bool
     var historyPolicy: HistoryStore.Policy
     /// Its time zone and language follow where its proxy comes out (`matchProxyLocation`).
     var followsProxyLocation: Bool
@@ -2190,6 +2219,7 @@ struct ProfileDetails: Equatable {
                 : L("inspector.asThisMac"))
         window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
         syncsCookies = configuration.syncsCookies
+        keepsCookieSnapshots = configuration.keepsCookieSnapshots
         historyPolicy = configuration.historyPolicy
     }
 }

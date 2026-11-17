@@ -13,7 +13,8 @@ import Foundation
 /// bookmarks and last warm-up plan, its website data (`webdata.pbsa`: cookies, localStorage,
 /// IndexedDB, caches — what makes a warmed-up profile worth carrying) and Safari's own state of
 /// it (`safarihome.pbsa`, for a profile whose window is Safari's chrome). Not what belongs to this
-/// Mac: the synced-cookie record and its baseline (sync rebuilds them), cookies queued for the
+/// Mac: the synced-cookie record and its baseline (sync rebuilds them), its cookie snapshots and
+/// running mark (docs/COOKIE_RECOVERY.md: a profile starts its own on the Mac it runs on), cookies queued for the
 /// next launch (they are applied first, when the profile next runs here), the exit IP last seen —
 /// and where a profile without a proxy last came out at all, which is this Mac's own connection —
 /// nor this Mac's name and history on the saved logins (`withoutThisMac`). A file is often handed

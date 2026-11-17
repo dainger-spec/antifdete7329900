@@ -13,8 +13,10 @@ import WebKit
 /// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
 ///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
 ///         → create WKWebsiteDataStore(forIdentifier:) + proxy
+///         → cookies the store lost put back from their snapshot (cookie-snapshots.bin)
 ///         → synced cookies (cookies.bin) and queued imported cookies into the store → open window(s)
-/// stop:   write cookies to disk → record them for sync → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
+/// run:    the store's cookies copied when they change (CookieSnapshotKeeper)
+/// stop:   write cookies to disk → record them for sync → last snapshot → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -96,6 +98,9 @@ final class ProfileManager: ObservableObject {
     var onChildStopped: ((UUID, Int32) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// A launch put back cookies the profile's store had lost (docs/COOKIE_RECOVERY.md), here or in
+    /// the profile's own process: told once per launch, for the profile's journal.
+    var onCookiesRecovered: ((UUID, CookieSnapshotKeeper.Report) -> Void)?
     /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
     /// are blocked often): said once when it happens, and shown in the profile's row and editor
     /// until its next launch.
@@ -120,6 +125,8 @@ final class ProfileManager: ObservableObject {
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
+    /// The cookie snapshots of the profiles run in this process, and what their launches put back.
+    let cookieSnapshots: CookieSnapshotKeeper
     /// The directory Safari's frameworks use as their home in a profile's own process, encrypted
     /// between runs like everything else (`SafariHomeVault`).
     private let safariHomeVault: SafariHomeVault
@@ -210,6 +217,7 @@ final class ProfileManager: ObservableObject {
     init(repository: ProfileRepository) {
         self.repository = repository
         self.webDataVault = WebDataStoreVault(repository: repository)
+        self.cookieSnapshots = CookieSnapshotKeeper(repository: repository)
         self.safariHomeVault = SafariHomeVault(repository: repository)
         // The guard stopped answering for processes it held: their relays stop at once, and their
         // profiles stop — nothing of theirs runs on without it.
@@ -342,6 +350,7 @@ final class ProfileManager: ObservableObject {
                 if !SafariChromeHost.open(session: session, url: session.configuration.startURL, restoring: tabs) {
                     session.openFirstWindows(restoring: tabs, startURL: session.configuration.startURL)
                 }
+                presentCookieRecovery(id)
             }
             session.bringToFront()
             return
@@ -470,9 +479,13 @@ final class ProfileManager: ObservableObject {
         // A warm-up that spares traffic needs its tab's list as it starts (`openOffscreenWindow`).
         if !stored.ephemeral { await ContentRules.prepareWarmUp() }
         var restored = WebDataStoreVault.Restored.nothing
+        var storeState = (state: CookieRecovery.StoreState.present, note: "")
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             restored = try await webDataVault.prepareForLaunch(profileID: id, key: key)
+            // What cookie recovery needs of the disk: before the store exists, and CFNetwork reads
+            // (and rewrites) its cookie file.
+            if stored.keepsCookieSnapshots { storeState = CookieSnapshotKeeper.storeState(for: id, restored: restored) }
         }
         // The proxy's time zone and language should apply from the first page: the launch waits
         // a little for the lookup (briefly when a location is remembered for this proxy, which is
@@ -561,9 +574,10 @@ final class ProfileManager: ObservableObject {
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
         }
-        // Synced cookies, and cookies imported while the profile was stopped: into its store
-        // before the first page loads.
-        await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, storeRestored: restored != .nothing, session: session)
+        // Cookies the store lost, synced cookies, and cookies imported while the profile was
+        // stopped: into its store before the first page loads.
+        await prepareCookies(of: id, summary: summary, stored: stored, storeRestored: restored != .nothing,
+                             storeState: storeState, session: session)
         // Attribution reports a page set up before Private Click Measurement was off for proxied
         // profiles would still be sent by WebKit, later, outside the page's session: removed.
         if configuration.proxy != nil, let store = session.dataStore {
@@ -600,6 +614,8 @@ final class ProfileManager: ObservableObject {
                 session.openFirstWindows(restoring: tabs, startURL: configuration.startURL)
             }
         }
+        // Cookies put back at this launch: said in its window, or told for the journal when it has none.
+        presentCookieRecovery(id)
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let runningZone = configuration.timeZoneIdentifier
@@ -736,6 +752,9 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .proxyLocationUnknown:
                 self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
+            case .cookiesRecovered(let report):
+                self.log.notice("Profile \(id.uuidString, privacy: .public)'s process put back \(report.restored) cookies its store had lost (\(report.cause.rawValue, privacy: .public)); notice shown: \(report.noticeShown, privacy: .public)")
+                self.onCookiesRecovered?(id, report)
             case .sealed(let report):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public), archived \(Int(report.archivePasses ?? -1), privacy: .public) time(s), unchanged at \(Int(report.archivePassesSkipped ?? -1), privacy: .public) more attempt(s)")
                 self.onChildSealed?(id, report)
@@ -1250,13 +1269,23 @@ final class ProfileManager: ObservableObject {
         }
         do {
             let executor = try await webDriverExecutor(for: id, session)
-            return WebDriverAnswer(id: call.id, value: try await executor.perform(call), error: nil)
+            let value = try await executor.perform(call)
+            // Cookies set or deleted through WebDriver are Lumen's own change: on disk and copied at once,
+            // so that a crash right after neither loses them nor brings back the ones deleted.
+            if Self.webDriverCookieCommands.contains(call.command), let store = session.dataStore?.httpCookieStore {
+                await CookieStoreImport.flush(store)
+                await cookieSnapshots.snapshot(id, store: store, trigger: .change)
+            }
+            return WebDriverAnswer(id: call.id, value: value, error: nil)
         } catch let error as WebDriverError {
             return refused(error)
         } catch {
             return refused(.unknown(String(describing: error)))
         }
     }
+
+    /// The WebDriver commands that change the profile's cookies.
+    static let webDriverCookieCommands: Set<String> = ["addCookie", "deleteCookie", "deleteCookies"]
 
     /// The profile's process is gone, or its session here: calls still waiting for it get their
     /// answer now — the window is closed — and the page it had is forgotten.
@@ -1511,7 +1540,11 @@ final class ProfileManager: ObservableObject {
             if let key, (try? repository.loadConfiguration(id, key: key))?.syncsCookies == true {
                 await recordSyncedCookies(of: id, in: store.httpCookieStore)
             }
+            // A clean stop: the last snapshot of its cookies, and its running mark gone
+            // (docs/COOKIE_RECOVERY.md). After the cookies are on disk, before the seal.
+            await cookieSnapshots.close(id, store: store.httpCookieStore)
         }
+        cookieSnapshots.stopWatching(id)
         session.shutDown()
         rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
                          emptyForgets: SafariChromeHost.isHosting)
@@ -1872,6 +1905,9 @@ final class ProfileManager: ObservableObject {
         if let store = sessions[id]?.dataStore {
             let result = await CookieStoreImport.apply(cookies, to: store.httpCookieStore)
             log.notice("Imported \(result.stored) cookies into a running profile, \(result.refused.count) refused")
+            // Lumen's own change: copied at once — a crash right after neither loses the imported
+            // cookies nor takes those they replaced for ones to put back (docs/COOKIE_RECOVERY.md).
+            await cookieSnapshots.snapshot(id, store: store.httpCookieStore, trigger: .change)
             return .applied(stored: result.stored, refused: result.refused)
         }
         // Starting or being encrypted: its store is about to exist or to go.
@@ -1919,43 +1955,90 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Synced cookies
 
-    /// At launch, before the first page loads. With cookie sync on: what the store changed since
-    /// it was last recorded (a run that ended without a stop) is recorded as changes of that
-    /// time, the earliest they can be — with nothing recorded yet (sync just turned on), as old
-    /// as can be: they fill in what the synced cookies lack, and any synced change wins over
-    /// them — unless the store came up with nothing (`storeRestored` false: no archive, no
-    /// plaintext), which is not every cookie deleted (CookieJarDocument.atLaunch). Then the
-    /// document (with what sync brought from the other devices) is applied to the store, then the
-    /// cookies imported while the profile was stopped go in and are recorded as changes of now.
-    /// With sync off, the profile keeps no synced cookies (`clearSyncedCookies`).
-    private func prepareCookies(of id: UUID, summary: ProfileSummary, syncs: Bool, storeRestored: Bool, session: BrowserSession) async {
-        guard syncs else {
+    /// At launch, before the first page loads. First cookie recovery (docs/COOKIE_RECOVERY.md): a
+    /// store that lost the profile's cookies — missing website data, a damaged cookie file, far
+    /// fewer than its newest snapshot after a run that did not stop cleanly — gets back from that
+    /// snapshot the cookies it lacks, before anything reads it as the person's.
+    ///
+    /// Then, with cookie sync on: what the store changed since it was last recorded (a run that
+    /// ended without a stop) is recorded as changes of that time, the earliest they can be — with
+    /// nothing recorded yet (sync just turned on), as old as can be: they fill in what the synced
+    /// cookies lack, and any synced change wins over them — unless the store came up with nothing
+    /// (`storeRestored` false: no archive, no plaintext), which is not every cookie deleted
+    /// (CookieJarDocument.atLaunch); a store that lost cookies records no deletion either, but for
+    /// what the newest snapshot says was deleted since the baseline (`atLaunch(afterLoss:)`). Then the
+    /// document (with what sync brought from the other devices)
+    /// is applied to the store, then the cookies imported while the profile was stopped go in and
+    /// are recorded as changes of now. With sync off, the profile keeps no synced cookies
+    /// (`clearSyncedCookies`).
+    ///
+    /// Last, what the launch changed is copied, the run is marked as begun, and its store is looked
+    /// at from now on (`CookieSnapshotKeeper.begin`).
+    private func prepareCookies(of id: UUID, summary: ProfileSummary, stored: ProfileConfiguration, storeRestored: Bool,
+                                storeState: (state: CookieRecovery.StoreState, note: String), session: BrowserSession) async {
+        var finding = CookieSnapshotKeeper.LaunchFinding()
+        if stored.keepsCookieSnapshots, let store = session.dataStore?.httpCookieStore {
+            finding = await cookieSnapshots.recover(id, store: store, state: storeState.state, note: storeState.note)
+        } else {
+            // Turned off, or an ephemeral profile: no copy of its cookies is kept.
+            cookieSnapshots.forget(id)
+        }
+        // Cookies put back are the profile's state now; none put back (WebKit kept none of them) is
+        // tried again at the next launch — unless a clean stop copies the store first.
+        var changedAtLaunch = (finding.report?.restored ?? 0) > 0
+        if !stored.syncsCookies {
             try? repository.clearSyncedCookies(for: id)
-            await applyQueuedCookies(of: id, name: summary.name, to: session)
-            return
+            if await applyQueuedCookies(of: id, name: summary.name, to: session) > 0 { changedAtLaunch = true }
+        } else if let store = session.dataStore?.httpCookieStore {
+            var synced: (loaded: CookieJarDocument, jar: CookieJarDocument, baseline: [ImportedCookie])?
+            do {
+                let loaded = try repository.cookieJar(for: id)
+                let baseline = try repository.cookieBaseline(for: id)
+                // A store that came up with nothing (its website data lost) records no deletions, nor one
+                // that lost cookies — but for what this Mac's newest snapshot, at least as new as the
+                // baseline, says was deleted since (`atLaunch(afterLoss:)`); nor one whose cookie file
+                // was damaged.
+                let found = await CookieStoreSync.persistentCookies(in: store)
+                let jar: CookieJarDocument
+                if finding.lost {
+                    jar = loaded.atLaunch(afterLoss: found, snapshot: finding.latest, baseline: baseline)
+                } else {
+                    let came: CookieJarDocument.LaunchStore = finding.damaged ? .recovered : (storeRestored ? .asLeft : .withNothing)
+                    jar = loaded.atLaunch(store: found, baseline: baseline, came: came)
+                }
+                let applied = await CookieStoreSync.apply(jar, to: store)
+                log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
+                if applied.set + applied.deleted > 0 { changedAtLaunch = true }
+                synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
+            } catch {
+                log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+                onError?(String(format: L("cookies.sync.unreadable"), summary.name))
+            }
+            if await applyQueuedCookies(of: id, name: summary.name, to: session) > 0 { changedAtLaunch = true }
+            if let synced {
+                let now = Date()
+                let current = await CookieStoreSync.persistentCookies(in: store)
+                saveSyncedCookies(of: id, name: summary.name, loaded: synced.loaded,
+                                  jar: synced.jar.recording(store: current, baseline: synced.baseline, at: now),
+                                  baseline: CookieBaseline(cookies: current, savedAt: now))
+            }
         }
-        guard let store = session.dataStore?.httpCookieStore else { return }
-        var synced: (loaded: CookieJarDocument, jar: CookieJarDocument, baseline: [ImportedCookie])?
-        do {
-            let loaded = try repository.cookieJar(for: id)
-            let baseline = try repository.cookieBaseline(for: id)
-            // A store that came up with nothing (its website data lost) records no deletions.
-            let jar = loaded.atLaunch(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline,
-                                      storeRestored: storeRestored)
-            let applied = await CookieStoreSync.apply(jar, to: store)
-            log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
-            synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
-        } catch {
-            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
-            onError?(String(format: L("cookies.sync.unreadable"), summary.name))
+        if stored.keepsCookieSnapshots, let store = session.dataStore?.httpCookieStore {
+            await cookieSnapshots.begin(id, store: store, changedAtLaunch: changedAtLaunch) { [weak session] in
+                session?.dataStore?.httpCookieStore
+            }
         }
-        await applyQueuedCookies(of: id, name: summary.name, to: session)
-        guard let synced else { return }
-        let now = Date()
-        let current = await CookieStoreSync.persistentCookies(in: store)
-        saveSyncedCookies(of: id, name: summary.name, loaded: synced.loaded,
-                          jar: synced.jar.recording(store: current, baseline: synced.baseline, at: now),
-                          baseline: CookieBaseline(cookies: current, savedAt: now))
+    }
+
+    /// Cookies put back at this launch (`CookieSnapshotKeeper.recover`), shown in the profile's window
+    /// once it has one (`CookieRecoveryNotice`), and told once for the profile's journal — at once, with
+    /// or without a window. Called when the launch opened its window, and again when a profile that
+    /// had none gets one.
+    func presentCookieRecovery(_ id: UUID) {
+        guard let session = sessions[id], let pending = cookieSnapshots.untoldReport(id) else { return }
+        let shown = CookieRecoveryNotice.present(pending, in: session)
+        guard let taken = cookieSnapshots.takeUntold(id, shown: shown), taken.firstTime else { return }
+        onCookiesRecovered?(id, taken.report)
     }
 
     /// At stop: what the run changed, as changes of now.
@@ -1987,7 +2070,11 @@ final class ProfileManager: ObservableObject {
         }
     }
 
-    private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async {
+    /// The cookies imported while the profile was stopped, into its store; returns how many it kept.
+    /// One that expired while it waited is not set: setting it would delete the profile's own cookie
+    /// of that name (a restore from a snapshot, queued for days, as an import).
+    @discardableResult
+    private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async -> Int {
         let queued: [ImportedCookie]
         do {
             queued = try repository.importedCookiesForLaunch(id)
@@ -2001,16 +2088,19 @@ final class ProfileManager: ObservableObject {
                 let aside = try? repository.moveUnreadableImportedCookiesAside(id)
                 onError?(String(format: L("cookies.launch.unreadable"), name, aside?.lastPathComponent ?? "cookies-import.bin"))
             }
-            return
+            return 0
         }
-        guard !queued.isEmpty, let store = session.dataStore else { return }
-        let result = await CookieStoreImport.apply(queued, to: store.httpCookieStore)
+        guard !queued.isEmpty, let store = session.dataStore else { return 0 }
+        let now = Date()
+        let live = queued.filter { ($0.expires ?? .distantFuture) > now }
+        let result = await CookieStoreImport.apply(live, to: store.httpCookieStore)
         repository.clearImportedCookies(id)
-        log.notice("Applied \(result.stored) imported cookies at launch, \(result.refused.count) refused")
+        log.notice("Applied \(result.stored) imported cookies at launch, \(result.refused.count) refused, \(queued.count - live.count) expired while they waited")
         if !result.refused.isEmpty {
             onError?(String(format: L("cookies.launch.refused"), result.refused.count, name,
                             result.refused.prefix(5).map { "\($0.name) (\($0.domain))" }.joined(separator: ", ")))
         }
+        return result.stored
     }
 
     // MARK: Passwords

@@ -98,6 +98,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// ephemeral profile. Default on; older configurations decode as on.
     public var syncCookies: Bool
 
+    /// Keep snapshots of the profile's persistent cookies while it runs and as it stops, and put
+    /// back what its cookie store lost at the next launch (docs/COOKIE_RECOVERY.md). Never for an
+    /// ephemeral profile. Default on; older configurations decode as on, and it is written only when
+    /// it is off, so a profile that keeps it on is stored as before.
+    public var cookieRecovery: Bool
+
     /// When the user last changed these settings (the editor, "Never for This Website", the
     /// passwords' excluded websites); not what the browser keeps for itself (the proxy location).
     /// When two devices changed a profile's settings, sync keeps the newer ones and the other
@@ -196,6 +202,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 passwordAutoFill: Bool = true,
                 passwordNeverSaveSites: [String] = [],
                 syncCookies: Bool = true,
+                cookieRecovery: Bool = true,
                 settingsModifiedAt: Date? = nil,
                 searchEngine: SearchEngine? = nil,
                 tags: [String] = [],
@@ -226,6 +233,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.passwordAutoFill = passwordAutoFill
         self.passwordNeverSaveSites = passwordNeverSaveSites
         self.syncCookies = syncCookies
+        self.cookieRecovery = cookieRecovery
         self.settingsModifiedAt = settingsModifiedAt
         self.searchEngine = searchEngine
         self.tags = ProfileTags.normalized(tags)
@@ -242,6 +250,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
     public var syncsCookies: Bool { syncCookies && !ephemeral }
+
+    /// Whether this profile's cookies are copied and recovered (never for an ephemeral profile).
+    public var keepsCookieSnapshots: Bool { cookieRecovery && !ephemeral }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
     /// via `deviceGenerationID`) and its suggested defaults.
@@ -398,7 +409,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, webRTCAutomatic, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
+             syncCookies, cookieRecovery, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
              localRequests, languageOverride, localeSource, menusInAppLanguage,
              cameraSubstitution, format
     }
@@ -437,6 +448,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         passwordAutoFill = try c.decodeIfPresent(Bool.self, forKey: .passwordAutoFill) ?? defaults.passwordAutoFill
         passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
         syncCookies = try c.decodeIfPresent(Bool.self, forKey: .syncCookies) ?? defaults.syncCookies
+        cookieRecovery = (try? c.decodeIfPresent(Bool.self, forKey: .cookieRecovery)) ?? defaults.cookieRecovery
         settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
         // One a later build knows and this one does not is the standard one here, not a failure.
         searchEngine = try? c.decodeIfPresent(SearchEngine.self, forKey: .searchEngine)
@@ -486,6 +498,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(passwordAutoFill, forKey: .passwordAutoFill)
         try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
         try c.encode(syncCookies, forKey: .syncCookies)
+        // Written only when it is off: a profile that keeps snapshots is written as before.
+        if !cookieRecovery { try c.encode(false, forKey: .cookieRecovery) }
         try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
         try c.encodeIfPresent(searchEngine, forKey: .searchEngine)
         // Written only when there is something: a profile without them is written as before.
