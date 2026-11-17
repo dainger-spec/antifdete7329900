@@ -242,6 +242,12 @@ def analyse(capture, marks, server_address, server_ports, server_names=()):
         return owner[1] in profile_pids or (manager is not None and owner[1] == manager[1]) \
             or any(owner[0][:16].startswith(name) for name in app_names)
 
+    def webkit(owner):
+        # WebKit's own processes (its network process: "com.apple.WebKit.Networking", cut to 16): on this
+        # runner only the profiles run WebKit, so while one runs, theirs are the profile's, whether or not
+        # the capture names the profile as the one they act for.
+        return owner is not None and owner[0].startswith("com.apple.WebKi")
+
     def service(owner):
         # A service that was running before the first profile started was not started for it (egress_check).
         return owner is not None and any(name in owner[0] for name in SERVICES) \
@@ -293,7 +299,7 @@ def analyse(capture, marks, server_address, server_ports, server_names=()):
                     leaks.append("a packet of a relay (%s %d) to something other than its server: %s" % (who[0], who[1], text))
                 continue
             profile = any(owner is not None and owner[1] in profile_pids for owner in (proc, eproc))
-            if profile or (in_window(packet) and (app(proc) or app(eproc))):
+            if profile or (in_window(packet) and (app(proc) or app(eproc) or webkit(proc))):
                 if packet["dns_answer"] and not profile:
                     # An answer is not a packet the app sent; the question would have been, and fails above or here.
                     listed.setdefault("DNS answers to the app", []).append(text)
