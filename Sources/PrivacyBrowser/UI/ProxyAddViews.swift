@@ -218,15 +218,32 @@ enum OpenVPNFile {
 
 // MARK: - The empty list
 
-/// The Proxies section with no proxy yet: a title and a line on the horizon in small, as the
-/// Profiles' empty list (`LumenEmptyState`), and under them Add's three choices as tiles side by
+/// The Proxies section with no proxy yet: a symbol, a title and a line, and under them Add's three choices as tiles side by
 /// side — stacked in a narrow window — with a list pasted at once as a quiet button below.
 struct ProxyEmptyState: View {
     var choose: (ProxyAddChoice) -> Void
     var importList: () -> Void
 
     var body: some View {
-        LumenEmptyState(title: L("proxies.empty.title"), text: L("proxies.empty")) {
+        // No horizon here: its line ran into the tiles' top edges (DESIGN_RULES 1).
+        VStack(spacing: 0) {
+            Image(systemName: "network")
+                .font(.system(size: 34, weight: .ultraLight))
+                .foregroundStyle(Theme.textTertiary)
+                .accessibilityHidden(true)
+            Text(L("proxies.empty.title"))
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.4)
+                .foregroundStyle(Theme.textPrimary)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.top, 16)
+            Text(L("proxies.empty"))
+                .font(.system(size: 14))
+                .foregroundStyle(Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 8)
             VStack(spacing: 18) {
                 // Side by side down to the narrowest Profiles window; narrower still, rows.
                 ViewThatFits(in: .horizontal) {
@@ -236,7 +253,10 @@ struct ProxyEmptyState: View {
                 Button(L("proxies.empty.list"), action: importList)
                     .buttonStyle(.lumenGhost)
             }
+            .padding(.top, 28)
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func tiles(width: CGFloat, compact: Bool) -> some View {
@@ -247,8 +267,7 @@ struct ProxyEmptyState: View {
 }
 
 /// One of Add's choices as a tile: its symbol in a ring, its name, one short line. The pointer
-/// lifts it as it lifts the app's main buttons (a brighter edge, a lighter face, the light under
-/// it); a press sinks it to 98 %.
+/// lifts it: a brighter edge, a lighter face — no glow; a press sinks it to 98 %.
 private struct ProxyAddTile: View {
     let choice: ProxyAddChoice
     let width: CGFloat
@@ -330,9 +349,7 @@ private struct ProxyTileStyle: ButtonStyle {
             let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
             configuration.label
                 .background(shape.fill(hovered ? Theme.raisedInset : Theme.card))
-                .background(shape.fill(LinearGradient(colors: [Color.white.opacity(0.04), Color.clear], startPoint: .top, endPoint: .bottom)))
                 .overlay(shape.strokeBorder(hovered ? Theme.edgeStrong : Theme.strongBorder, lineWidth: 1))
-                .shadow(color: Theme.rim.opacity(hovered ? 0.14 : 0), radius: 18, y: 8)
                 .contentShape(shape)
                 .scaleEffect(configuration.isPressed && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
                 .opacity(isEnabled ? 1 : 0.4)

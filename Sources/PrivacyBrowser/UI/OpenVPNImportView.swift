@@ -59,14 +59,19 @@ struct OpenVPNImportView: View {
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textSecondary)
                     if !configuration.notices.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(Array(configuration.notices.enumerated()), id: \.offset) { _, notice in
-                                Text(OpenVPNTexts.notice(notice))
-                                    .font(.lumenSecondary)
-                                    .foregroundStyle(Theme.textTertiary)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        // Many notices scroll in a fixed area: the sheet never grows with them.
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(Array(configuration.notices.enumerated()), id: \.offset) { _, notice in
+                                    Text(OpenVPNTexts.notice(notice))
+                                        .font(.lumenSecondary)
+                                        .foregroundStyle(Theme.textTertiary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
+                        .frame(height: configuration.notices.count > 3 ? 84 : nil)
                     }
                 }
                 if let problem {

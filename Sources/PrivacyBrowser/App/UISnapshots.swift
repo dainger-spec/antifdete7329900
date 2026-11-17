@@ -1292,6 +1292,16 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-openvpn-add-file", size: CGSize(width: 560, height: 560), titled: false) {
                 OpenVPNImportView(proxies: proxies, file: ovpn)
             }.capture(into: folder)
+            // Stressed: a long file name, many servers, many notices.
+            let long = ovpnFolder.appendingPathComponent("Provider-Netherlands-Amsterdam-Mobile-4G-Rotating-Pool-UDP-1194-very-long-name.ovpn")
+            let stressed = ["client", "dev tun"] + (1...12).map { "remote nl\($0).vpn.example.net 1194 udp" } // l10n: not text
+                + ["nobind", "persist-tun", "persist-key", "resolv-retry infinite", "verb 3", "mute 20", "route-delay 2", // l10n: not text
+                   "redirect-gateway def1", "user nobody", "group nogroup", "remote-cert-tls server", "auth-user-pass", // l10n: not text
+                   "<ca>", certificate, "</ca>"] // l10n: not text
+            try stressed.joined(separator: "\n").write(to: long, atomically: true, encoding: .utf8)
+            problems += await Shot(name: "sheet-openvpn-add-long", size: CGSize(width: 560, height: 600), titled: false) {
+                OpenVPNImportView(proxies: proxies, file: long)
+            }.capture(into: folder)
         } catch {
             print("FAIL could not write the sample .ovpn: \(error)")
             problems += 1
