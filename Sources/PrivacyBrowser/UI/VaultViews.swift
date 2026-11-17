@@ -618,7 +618,10 @@ struct UnlockView: View {
     @State private var attempts = 0
 
     var body: some View {
-        LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle"), footer: footer) {
+        // No footer: which folder the vault is in (`~/Library/Application Support/PrivacyBrowser`, the
+        // product's old name) was a technical tail on the lock screen (the owner, 17 November). A
+        // developer's build still says it after a wrong password (`unlock.vault.info`).
+        LockScreen(title: L("unlock.title"), subtitle: L("unlock.subtitle")) {
             VStack(alignment: .leading, spacing: 0) {
                 LockPasswordField(label: L("setup.field.password"), password: $password,
                                   error: model.unlockFailed && password.isEmpty, attempts: attempts, onSubmit: unlock)
@@ -663,12 +666,12 @@ struct UnlockView: View {
                         .disabled(model.isWorking)
                 }
                 .padding(.top, 28)
-                if model.unlockFailed {
+                if model.unlockFailed && !BuildKind.madeForRelease {
                     // Which vault was tried: another build (sandboxed or not, other bundle id)
-                    // opens a different folder with a vault of its own.
-                    // Another build's own vault is a developer's case (Cursor, swift run, another bundle id):
-                    // a released Lumen has one vault, and is not told about builds it never was.
-                    Text(String(format: BuildKind.madeForRelease ? L("unlock.vault.info.release") : L("unlock.vault.info"),
+                    // opens a different folder with a vault of its own — a developer's case (Cursor,
+                    // swift run, another bundle id). A released Lumen has one vault: its folder is
+                    // no one's concern on the lock screen (the owner, 17 November).
+                    Text(String(format: L("unlock.vault.info"),
                                 model.vaultCreatedDescription, model.vaultPathDescription))
                         .font(.system(size: 12))
                         .foregroundStyle(Theme.textTertiary)
@@ -718,11 +721,6 @@ struct UnlockView: View {
         case .password(let reason): return TouchIDText.passwordAsked(reason)
         case .touchID: return TouchIDText.sensorNote(model.touchID.sensor)
         }
-    }
-
-    private var footer: String {
-        // Without its day (a vault that does not say when it was made): the folder alone.
-        model.vaultCreatedDay.map { String(format: L("unlock.footer"), $0, model.vaultPathDescription) } ?? model.vaultPathDescription
     }
 
     private func unlock() {
