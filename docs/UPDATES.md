@@ -183,8 +183,8 @@ and sealed, the vault locked, then the gate. If the gate fails then, the app doe
 locked, says why, and keeps the update.
 
 The helper is the only process that touches the bundle: `Contents/Helpers/Lumen
-Updater.app` (`<bundle-id>.Updater`, background only, hardened runtime, **no** sandbox
-entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
+Updater.app` (`<bundle-id>.Updater`, an agent — no Dock icon, no menu, but the update's progress
+window —, hardened runtime, **no** sandbox entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
 started by LaunchServices — so it is neither in the sandbox of the sandboxed build nor a child that
 ends with the app.
 
@@ -205,12 +205,14 @@ takes no arguments and makes no network request.
    trusted, nothing installed);
 2. refuses a request for another app, or one older than 15 minutes (not from this quit);
 3. waits until no process runs from the bundle — the app first of all — and **kills nothing**:
-   after 10 minutes it gives up and keeps the archive for the next quit; a process of the bundle
-   started after the request (the app opened again) ends the request at once, since that quit is
-   over and the next one asks again. It looks again right before the swap (step 6) and right after
-   it, at the old app's new place: the app opened again while steps 4 and 5 ran (a Dock click, a
-   link, a profile's file) ends the request the same way — the old app swapped back if need be,
-   nothing replaced, the archive kept — and never runs on from a bundle swapped away and deleted;
+   after 10 minutes it gives up and keeps the archive for the next quit. A process of the bundle
+   started after the request (the app opened again) is given 15 seconds to end by itself — a Lumen
+   opened now steps aside (below) within a second —; one that stays open ends the request, since
+   the person is using Lumen and the next quit asks again. It looks again, with the same grace,
+   right before the swap (step 6) and right after it, at the old app's new place: an app opened
+   while steps 4 and 5 ran (a Dock click, a link, a profile's file) and left open ends the request
+   the same way — the old app swapped back if need be, nothing replaced, the archive kept — and
+   never runs on from a bundle swapped away and deleted;
 4. checks the release again: newer than the installed build, for this macOS, the archive's
    length, SHA-256 and Ed25519 signature with a key the installed app carries;
 5. extracts it with `ditto` next to the app (same volume): exactly one app, the installed app's
@@ -220,8 +222,28 @@ takes no arguments and makes no network request.
    and starts it; if it does not check or cannot start, swaps back and starts the previous one.
    Should even swapping back fail, the previous app is kept beside it as `… (previous
    version).app`, never deleted;
-7. leaves `outcome.json` (installed, rolled back, refused, gave up — and why) for the app's next
-   launch. One helper at a time (a lock in the folder).
+7. leaves `outcome.json` (installed, rolled back, refused, gave up — the reason as a code, and the
+   log's English detail) for the app's next launch. One helper at a time (a lock in the folder).
+
+**A Lumen opened during an install** (0.1.18's tester: Lumen reopened a moment after quitting, the
+install given up, and the next start said "the app was started again before it could be replaced"
+— in English, as an error, on the lock screen). While it works the helper keeps `installing.json`
+in the staging folder — its pid, the app it replaces, the step, rewritten every few seconds — and
+removes it before it starts any app. A Lumen started as a person starts it looks there before
+anything else of it runs (`UpdateLaunchGuard`, `UpdateStepAside`): a marker for this very app, not
+older than 2 minutes since it last changed, from an installer at it for less than 3 minutes and
+whose pid is alive — and a release newer than this build — and it **steps aside**: it leaves
+`relaunch.json` and exits. The helper then brings its window to the front ("Lumen opens by itself
+as soon as the update is installed") and, whatever comes of the install, Lumen is opened at the
+end: the new version, or the one there was. A request without a marker yet (the helper starting)
+is waited for 5 seconds. A dead installer, a stale marker, another copy of the app, or the new
+version itself start as usual — and the installer's grace and checks above still hold for anything
+that stays open.
+
+**The installer's window.** The helper shows the update's progress window (`UpdateProgress`, the
+same view the app shows until it quits) in the app's words, which the request carries
+(`UpdateRequest.texts`): "Installing the update — don't close Lumen", the steps checking →
+installing → restarting.
 
 ## 4. Data on disk across versions
 
@@ -675,17 +697,46 @@ release is made on; on another macOS a profile whose window cannot be Safari's s
 
 ## 7. Interface
 
-The **Updates** section of the app's Settings window (⌘, or Profiles window → ⋯ → Settings…;
-`UpdatesPane` in `SettingsView`; it was a sheet of its own before the settings had one window): the version running; Check
-Now; "Check for updates automatically"; what to do with an update (download it and install at quit
-— the default — or only tell me, then Download); the release notes as text; the state — not checked
-yet, up to date (when), checking, downloading, "downloaded and checked, installs when you quit",
-failed with the reason, not available in this build (no feed URL), or a place the update cannot be
-installed to (App Translocation; a folder this user cannot write). Install Now asks first, listing
-what it will stop. What the server sees is said under the settings. After an update the sheet says
-which one this launch is; an update that was not installed — refused, rolled back, given up, or not
-handed over at the last quit — is said once at the next launch. In the UI snapshots
-(`settings-updates-ready`, `settings-updates-up-to-date`, `settings-updates-unavailable`).
+**The update's window** (`UpdateWindowView`, an AppKit window of its own so that it opens over the
+lock screen as over the profiles; `UpdateWindowFrame`: the app's icon over the lock screen's
+horizon, a title, a line, the content, the buttons):
+
+- **Found** — "Lumen 0.1.x is available", the version running and the update's size, the release
+  notes as plain text (never a page), **Update and Restart** (the default) and **Later**; with
+  profiles running, what Update and Restart stops and encrypts is listed above the buttons — the
+  press is the answer. It opens by itself once a run when a release is downloaded (or, "only tell
+  me", found) — never over the lock screen's password field: found while locked, it waits for the
+  unlock — and from Lumen › Check for Updates…, the palette, Settings › Updates' Install Now and
+  the sidebar's row, which stays while a release waits.
+- **Installing** — "Installing the update — don't close Lumen": the download's bar with MB and
+  the time left (Cancel), then checking (the profiles stopped and encrypted, the quit's gate) →
+  installing → restarting. The window cannot be closed. Lumen quits; the installer's window — the
+  same view, in the same place — takes over and opens the new version. The person does nothing.
+- **Failed** — a check or a download that failed, in the interface's words (the system's own error
+  texts follow the Mac's language, so they are not shown), with **Try Again**.
+- **Not installed** — an install that did not happen (the installer's outcome, by its reason; the
+  quit's gate; an installer that did not start), said calmly — never an "Error" alert, never the
+  installer's English, which goes to the log only — with **Install Now** while the release is still
+  here, else **Try Again**.
+- **Installed** — the first launch of the new version: "Update installed — Lumen 0.1.x", what is
+  new, **Continue**; once per update, over the lock screen on a veil. It takes no keyboard: the
+  password's field keeps it, and the first key typed puts the card away and goes on to the field
+  (as the launch screen does).
+
+**Settings › Updates** (⌘, or Profiles window → ⋯ → Settings…; `UpdatesPane` in `SettingsView`): the
+version running; Check Now; "Check for updates automatically"; what to do with an update (download
+it and install at quit — the default — or only tell me, then Download); the release notes as text;
+the state — not checked yet, up to date (when), checking, downloading, "downloaded and checked,
+installs when you quit", failed with the reason, not available in this build (no feed URL), or a
+place the update cannot be installed to (App Translocation; a folder this user cannot write).
+Install Now opens the update's window. A quit with a release ready installs it as before, the
+installer's window showing it, and the new version opens by itself.
+
+In the UI snapshots: `update-found`, `update-found-stopping`, `update-checking`, `update-up-to-date`,
+`update-downloading`, `update-checking-release`, `update-installing`, `update-restarting`,
+`update-installing-reopened`, `update-failed`, `update-not-installed`, `update-not-installed-check`,
+`update-installed`, `profiles-update-offer` (the sidebar's row), and Settings' `settings-updates-…`.
+`PB_SNAPSHOTS_ONLY=updates` renders the update's alone.
 
 ## 8. How it is proven
 
@@ -709,7 +760,14 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4
   (`UpdateTests`, `FormatPolicyTests`).
 - **The installer on real bundles (macOS):** `UpdateInstallerTests` — apps signed ad hoc, zipped,
-  their zips signed; the swap, the swap back, waiting without killing, every refusal.
+  their zips signed; the swap, the swap back, waiting without killing, every refusal; a Lumen that
+  steps aside during the wait or the checks (installed) and one left open (given up after the
+  grace, the old app swapped back); the marker and the steps; the relaunch wish.
+- **Stepping aside, and the words (BrowserCore, Linux and macOS):** `UpdateStepAsideTests` — a
+  fresh marker of a live installer steps aside; a dead pid, a stale or too old marker, another copy
+  of the app, the version being installed do not; a recent request without a marker waits; every
+  outcome's reason has its sentence in ru and en, the Russian with no English in it, none an
+  "error"; an earlier installer's outcome told from its English detail.
 - **Self-test (macOS, real app):** the quit gate on the real layout (`updateGate`); Safari's home
   archive of a newer version refused, no home left, nothing sealed over it (`formatPolicy`).
 - **End to end (CI, sandboxed and unsandboxed builds):** `scripts/update_check.py` makes an
@@ -728,7 +786,9 @@ handed over at the last quit — is said once at the next launch. In the UI snap
     up without one — in the unsandboxed build, each in its own process — the gate does not pass
     and nothing is handed over: no request written, no installer running;
   - the quit path stops and seals both; the gate passes, no process had to be killed, and the real
-    installer is started; the script sees the swap and, at that moment, looks for profile data in
+    installer is started; the moment the old build has quit, the script opens it again through
+    LaunchServices, as a Dock click does: it must step aside (the app's log says so) and the
+    install go on, leaving no marker and no relaunch wish; the script sees the swap and, at that moment, looks for profile data in
     plaintext where it can see from outside the app — and says what it could not see: macOS may keep a
     sandboxed app's container from other programs, and there the app's own gate, which ran inside
     it, is the check — then sees the new build started by the installer and the installer's

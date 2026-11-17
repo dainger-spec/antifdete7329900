@@ -192,7 +192,7 @@ final class InstallerTests: XCTestCase {
     /// within the grace — does not end the request: the release is installed and started.
     func testALumenThatStepsAsideDuringTheWaitDoesNotEndTheRequest() async throws {
         try stage()
-        let reopened = BundleProcess(pid: 4343, startedAt: start.addingTimeInterval(1))
+        let reopened = BundleProcess(pid: 4343, startedAt: start.addingTimeInterval(5))
         processLists = [[reopened], [reopened], []]
         let outcome = await installer().run()
         XCTAssertEqual(outcome.result, .installed, outcome.detail)

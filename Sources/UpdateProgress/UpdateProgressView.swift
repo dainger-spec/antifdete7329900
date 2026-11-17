@@ -178,7 +178,7 @@ public struct UpdateHorizon: View {
             .init(color: .white.opacity(strength), location: 0.75),
             .init(color: .white.opacity(0), location: 0.88),
             .init(color: .white.opacity(0), location: 1),
-        ], center: .center)
+        ], center: .center, startAngle: .degrees(0), endAngle: .degrees(360))
     }
 }
 
