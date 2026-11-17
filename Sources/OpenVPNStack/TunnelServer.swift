@@ -404,13 +404,13 @@ public final class TunnelServer {
             }
             if count > 0 {
                 client.input += buffer[0..<count]
-                // A handshake is a few hundred bytes at most.
-                if client.input.count > 1024 { close(client); return }
                 handshake(client)
+                // A handshake is a few hundred bytes at most: more, still in it, is not a client's.
+                // (Bytes after a complete request are its optimistic data, kept for the connection.)
+                if [.greeting, .credentials, .request].contains(client.phase), client.input.count > 1024 { close(client) }
             }
         case .resolving, .connecting:
-            // Nothing is read until the tunnel's connection is up (the client waits for the reply),
-            // but an end of the client is noticed.
+            // Only a hang-up comes here (nothing is asked to be read until the connection is up).
             var probe: UInt8 = 0
             let count = recv(client.descriptor, &probe, 1, Int32(MSG_PEEK | MSG_DONTWAIT))
             if count == 0 || (count < 0 && !TunnelSystem.wouldBlock(TunnelSystem.lastError)) { close(client, reset: true) }
@@ -568,6 +568,13 @@ public final class TunnelServer {
                 client.queueControl(SOCKS5Server.reply(.succeeded, bound: bound, port: port))
                 client.phase = .relaying
                 client.deadline = nil
+                // Bytes that came in the same read as the request (optimistic data) are the first
+                // the connection carries.
+                if !client.input.isEmpty {
+                    client.pendingToTunnel = client.input
+                    client.input = []
+                    sendPendingToTunnel(client)
+                }
             }
         }
         if let error = client.failedNoted {
@@ -764,7 +771,11 @@ final class SOCKSClient {
     var wantsRead: Bool {
         switch phase {
         case .greeting, .credentials, .request: return !closeAfterOutput
-        case .resolving, .connecting, .associated: return true
+        // Bytes a client sends before its reply (optimistic data) wait in its socket until the
+        // connection is up: asking for them now would wake the loop for nothing until then. Its
+        // end is still seen (POLLHUP).
+        case .resolving, .connecting: return false
+        case .associated: return true
         case .relaying: return pendingToTunnel.isEmpty && !clientFinished
         case .closing: return false
         }

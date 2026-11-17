@@ -350,3 +350,27 @@ final class ScriptedPeerTests: XCTestCase {
         XCTAssertTrue(peer.udpSources.contains { $0.hasPrefix("10.99.0.2:") && $0.hasSuffix(">10.99.0.1:7") }, "from the tunnel's address")
     }
 }
+
+extension ScriptedPeerTests {
+    /// A client that sends its first bytes with the request, before the reply (optimistic data):
+    /// they wait in its socket and go out once the connection is up.
+    func testBytesSentBeforeTheReplyGoOutOnceTheConnectionIsUp() {
+        let client = connectClient()
+        defer { close(client) }
+        TestSockets.sendAll(client, [5, 1, 2])
+        XCTAssertEqual(TestSockets.receive(client, count: 2), [5, 2])
+        let user = Array(TestSockets.username.utf8), pass = Array(TestSockets.password.utf8)
+        var auth: [UInt8] = [1, UInt8(user.count)]
+        auth += user
+        auth.append(UInt8(pass.count))
+        auth += pass
+        TestSockets.sendAll(client, auth)
+        XCTAssertEqual(TestSockets.receive(client, count: 2), [1, 0])
+        var request = TestSockets.connectRequest(name: "known.test", port: 7)
+        request += Array("early".utf8)
+        TestSockets.sendAll(client, request)
+        let reply = TestSockets.receive(client, count: 10)
+        XCTAssertEqual(reply.first.map { _ in reply[1] }, 0)
+        XCTAssertEqual(TestSockets.receive(client, count: 10), Array("echo:early".utf8))
+    }
+}
