@@ -104,26 +104,26 @@ enum LicenseText {
         case .notSignedIn: return L("contract.mode.not_signed_in")
         case .accountDisabled: return L("contract.error.account_disabled")
         case let .periodEnded(owner, endedAt):
-            let when = endedAt.map(date) ?? "—"
+            let when = endedAt.map { shortDate($0) } ?? "—"
             if owner { return String(format: L("contract.export.period_ended"), when) }
             if let ownerEmail { return String(format: L("contract.export.period_ended.member"), when, ownerEmail) }
             return String(format: L("contract.export.period_ended.member.noEmail"), when)
         case .noLicense: return L("contract.export.no_license")
         case let .grace(outdated, lastSuccessAt, until):
             return String(format: L(outdated ? "contract.mode.grace.outdated" : "contract.mode.grace.unreachable"),
-                          lastSuccessAt.map(date) ?? "—", date(until))
+                          lastSuccessAt.map { shortDate($0) } ?? "—", date(until))
         case let .expired(outdated, lastSuccessAt):
             return String(format: L(outdated ? "contract.mode.expired.outdated" : "contract.mode.expired.unreachable"),
-                          lastSuccessAt.map(date) ?? "—")
+                          lastSuccessAt.map { shortDate($0) } ?? "—")
         case .unverified: return L("contract.mode.unverified")
         case .appOutdated: return L("contract.app.outdated")
         case let .clockSkew(seconds): return String(format: L("contract.clock.skew"), duration(seconds))
         case let .periodEnding(owner, endsAt, _):
-            let text = String(format: L(owner ? "contract.period.ending" : "contract.period.ending.member"), date(endsAt))
+            let text = String(format: L(owner ? "contract.period.ending" : "contract.period.ending.member"), shortDate(endsAt))
             return withoutEmail ? text + " " + L("license.periodEnding.noEmail") : text
-        case let .trialStarted(until): return String(format: L("contract.trial.started"), date(until))
+        case let .trialStarted(until): return String(format: L("contract.trial.started"), shortDate(until))
         case let .renewalFailing(since, reason, status, until):
-            return String(format: L("license.renewal.failing"), date(since), renewalFailure(reason, status: status), date(until))
+            return String(format: L("license.renewal.failing"), shortDate(since), renewalFailure(reason, status: status), date(until))
         }
     }
 
