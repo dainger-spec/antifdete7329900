@@ -11,6 +11,10 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: build/openvpn
+          key: openvpn-${{ hashFiles('scripts/build-openvpn.sh') }}
       - name: Build the app with OpenVPN
         run: CONFIG=debug OVPN=1 SANDBOX=0 APP_DIR=build/ovpn scripts/build-app.sh 2>&1 | tail -60
       - name: OpenVPN end to end
