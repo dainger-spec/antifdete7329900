@@ -1231,7 +1231,7 @@
 "sync.folder.none" = "None chosen";
 "sync.folder.note" = "A network drive or an external disk. One folder per vault.";
 "sync.folder.panel" = "Choose a folder to use as the encrypted sync store.";
-"sync.footer" = "Profiles, settings, passwords, bookmarks, history and cookies — end-to-end encrypted.";
+"sync.footer" = "Profiles, settings, passwords, bookmarks, history and cookies.";
 "sync.mode.folder" = "Folder";
 "sync.mode.off" = "Off";
 "sync.mode.server" = "Own Server";
@@ -1986,7 +1986,7 @@
 "settings.section.automation" = "Automation API";
 "settings.webRTC.subtitle" = "Lumen's network guard: with it, the WebRTC of profiles with a SOCKS5 proxy works through that proxy and cannot go around it.";
 "settings.webRTC.how" = "How it works";
-"settings.sync.subtitle" = "Where this Mac syncs its profiles to, and a sync now.";
+"settings.sync.subtitle" = "The same profiles on all your Macs.";
 "settings.automation.subtitle" = "A local API for scripts and Selenium on this Mac: off until you turn it on.";
 "settings.appearance.subtitle" = "Dark monochrome, the light at entry and the list's density — for the app's own windows. Pages follow macOS, as in Safari.";
 "settings.appearance.entry" = "Entry screen";

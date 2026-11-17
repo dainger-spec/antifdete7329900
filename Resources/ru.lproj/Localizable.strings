@@ -1231,7 +1231,7 @@
 "sync.folder.none" = "Не выбрана";
 "sync.folder.note" = "Сетевой диск или внешний накопитель. Одна папка — одно хранилище.";
 "sync.folder.panel" = "Выберите папку для зашифрованного хранилища синхронизации.";
-"sync.footer" = "Профили, настройки, пароли, закладки, история и cookies — со сквозным шифрованием.";
+"sync.footer" = "Профили, настройки, пароли, закладки, история и cookies.";
 "sync.mode.folder" = "Папка";
 "sync.mode.off" = "Выключена";
 "sync.mode.server" = "Свой сервер";
@@ -1986,7 +1986,7 @@
 "settings.section.automation" = "API автоматизации";
 "settings.webRTC.subtitle" = "Сетевая защита Lumen: с ней WebRTC профилей с SOCKS5-прокси работает через их прокси и не может уйти мимо.";
 "settings.webRTC.how" = "Как это работает";
-"settings.sync.subtitle" = "Куда этот Mac синхронизирует профили, и синхронизация сейчас.";
+"settings.sync.subtitle" = "Одни и те же профили на всех ваших Mac.";
 "settings.automation.subtitle" = "Локальный API для скриптов и Selenium на этом Mac: выключен, пока вы его не включите.";
 "settings.appearance.subtitle" = "Тёмный монохром, свет при входе и плотность списка — для окон самого приложения. Страницы сайтов следуют настройке macOS, как в Safari.";
 "settings.appearance.entry" = "Экран входа";
