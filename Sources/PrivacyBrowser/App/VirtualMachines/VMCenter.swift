@@ -737,6 +737,21 @@ final class VMCenter: ObservableObject {
         list = updated
     }
 
+    /// An entry of the Proxies section was edited (`AppModel.followProxyEntry`): the machines
+    /// whose proxy it was take it from their next start (`VMProfiles.follow`) — a corrected
+    /// password, a new port — as the Safari profiles do.
+    func followProxyEntry(_ proxy: ProxySettings, previous: ProxySettings) {
+        guard loadError == nil else { return }
+        var updated = list
+        guard !updated.follow(proxy, previous: previous).isEmpty else { return }
+        do {
+            try updated.save(to: vault)
+            list = updated
+        } catch {
+            log.error("The machines' list was not saved after a proxy was edited: \(error.logKind, privacy: .public)")
+        }
+    }
+
     /// Deletes a profile's machine — its disk, with everything in its macOS — and the profile.
     /// Only from the person's Delete, confirmed (scripts/check_deletion_paths.py); never while the
     /// machine runs.

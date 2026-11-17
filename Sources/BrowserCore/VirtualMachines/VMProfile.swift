@@ -613,6 +613,26 @@ public struct VMProfiles: Codable, Equatable, Sendable {
         return profiles.remove(at: index)
     }
 
+    /// The machines whose proxy is `previous` — the same connection (`ProxyList.sameConnection`) —
+    /// given `proxy` instead: an entry of the Proxies section edited there (a password the
+    /// provider changed, a new port) reaches the machines that use it, as it reaches the Safari
+    /// profiles (`ProxyAssignment.follow`). A machine keeps a copy of its proxy, and the copy used
+    /// to stay as it was: its start then failed on the old password however often the person
+    /// corrected it in the Proxies section. A proxy a machine cannot use (TLS to the proxy) is not
+    /// given; the machine keeps its own. Returns the ids of the machines changed.
+    public mutating func follow(_ proxy: ProxySettings, previous: ProxySettings) -> [UUID] {
+        var changed: [UUID] = []
+        for index in profiles.indices {
+            guard let current = profiles[index].proxy, ProxyList.sameConnection(current, previous) else { continue }
+            var followed = profiles[index]
+            followed.proxy = current.withConnection(of: proxy)
+            guard followed != profiles[index], (try? followed.validate()) != nil else { continue }
+            profiles[index] = followed
+            changed.append(followed.id)
+        }
+        return changed
+    }
+
     public mutating func markLaunched(_ id: UUID, at date: Date = Date()) {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return }
         profiles[index].lastLaunchedAt = date

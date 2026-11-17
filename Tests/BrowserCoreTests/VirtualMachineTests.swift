@@ -92,6 +92,39 @@ final class VMProfileTests: XCTestCase {
         XCTAssertEqual(list.profiles.map(\.name), ["Shop DE", "Shop DE 2", "Shop DE 3"])
     }
 
+    /// A password corrected in the Proxies section reaches the machines that use the proxy, as it
+    /// reaches the Safari profiles: a machine keeps a copy of its proxy, and its start failed on
+    /// the old password however often the person corrected it there.
+    func testAMachineFollowsItsProxyEditedInTheProxiesSection() throws {
+        let old = ProxySettings(kind: .socks5, host: "de.example", port: 1080, username: "u", password: "expired")
+        let other = ProxySettings(kind: .socks5, host: "fr.example", port: 1080, username: "u", password: "expired")
+        var list = VMProfiles()
+        let first = VMProfile(name: "Shop DE", proxy: old)
+        let second = VMProfile(name: "Shop DE 2", proxy: old)
+        let elsewhere = VMProfile(name: "Shop FR", proxy: other)
+        let direct = VMProfile(name: "Direct")
+        for profile in [first, second, elsewhere, direct] { try list.save(profile) }
+        var corrected = old
+        corrected.password = "new"
+        XCTAssertEqual(Set(list.follow(corrected, previous: old)), [first.id, second.id])
+        XCTAssertEqual(list.profile(first.id)?.proxy?.password, "new")
+        XCTAssertEqual(list.profile(second.id)?.proxy?.password, "new")
+        XCTAssertEqual(list.profile(elsewhere.id)?.proxy, other)
+        XCTAssertNil(list.profile(direct.id)?.proxy)
+        // Nothing more to follow the second time.
+        XCTAssertEqual(list.follow(corrected, previous: old), [])
+        // A new port the provider gave: followed too.
+        var moved = corrected
+        moved.port = 2080
+        XCTAssertEqual(Set(list.follow(moved, previous: corrected)), [first.id, second.id])
+        XCTAssertEqual(list.profile(first.id)?.proxy?.port, 2080)
+        // A proxy a machine cannot use (TLS to the proxy): the machine keeps its own.
+        var tls = moved
+        tls.tlsToProxy = true
+        XCTAssertEqual(list.follow(tls, previous: moved), [])
+        XCTAssertEqual(list.profile(first.id)?.proxy, moved)
+    }
+
     func testAMachineMadeLikeAnotherGetsTheNextNameNobodyHas() {
         XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE"]), "Shop DE 2")
         XCTAssertEqual(VMProfile.nameForDuplicate(of: "Shop DE", taken: ["Shop DE", "Shop DE 2", "Shop DE 3"]), "Shop DE 4")
