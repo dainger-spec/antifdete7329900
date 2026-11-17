@@ -13,7 +13,11 @@ Needs sudo (tcpdump on pktap), macOS, and an app built with the links' relay (`X
    Shadowsocks 2022 (REALITY's target and the TLS certificate made for the run). The server's only
    way out is the self-test proxy (scripts/selftest_proxy.py `--socks-udp`), which answers every page
    and STUN request itself and connects nowhere — but for `--quic-site`'s host, which the server
-   lets out to the Internet (a page that offers HTTP/3).
+   lets out to the Internet (a page that offers HTTP/3). Two more links, REALITY + vision and
+   Shadowsocks 2022, name the server by a host name (`xray-server.lumen-xray-check.test`): this Mac's
+   resolver is pointed for that domain at a name server of this script (/etc/resolver, taken back at
+   the end), so the relay, inside its sandbox, resolves its server's name the way it would a
+   provider's — through mDNSResponder — and the name server notes the question.
 2. `Lumen --xray-check` (XrayCheck.swift) starts a profile on each link the way the app does — its
    own process, its relay started by the app, the profile held to it — loads the leak page, makes a
    WebRTC call, knocks on the relay's door, and kills one relay to see the profile fail closed.
@@ -27,7 +31,8 @@ Needs sudo (tcpdump on pktap), macOS, and an app built with the links' relay (`X
    and on its controls not being there: the DNS question the check asks on purpose for a name with
    the token (the capture sees questions), and the relays' own packets to their servers, counted for
    the relay's pid (the capture sees the relays and tells processes apart). A control missing is
-   SKIPPED, and fails the run: a capture that could not see is never a pass.
+   SKIPPED, and fails the run: a capture that could not see is never a pass. A link by name whose
+   server's name was not asked of this Mac's resolver while its profile ran fails too.
 
 Exit 1 on any leak, any check of the app failing, or any control missing.
 """
@@ -39,8 +44,10 @@ import os
 import re
 import shutil
 import socket
+import struct
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,6 +58,13 @@ DOCUMENTATION = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0
 # The kinds the app is checked with: every protocol, REALITY and TLS, two transports.
 CHECKED = ["reality-vision", "tls-ws", "vmess-ws", "trojan-tls", "ss2022"]
 FAIL_CLOSED = "reality-vision"
+# Links that name their server by a host name, not an address: the relay resolves it, inside its
+# sandbox, through this Mac's resolver (mDNSResponder) — as a provider's link with a name would.
+# The name is under a domain this Mac's resolver is pointed at a server of this script for
+# (/etc/resolver), which answers with this Mac's address and notes every question.
+NAME_DOMAIN = "lumen-xray-check.test"
+SERVER_NAME = "xray-server." + NAME_DOMAIN
+BY_NAME = {"reality-vision-by-name": "reality-vision", "ss2022-by-name": "ss2022"}
 SELFTEST = {"http": 18080, "socks": 18081, "canary": 18087, "socks-udp": 18089}
 
 
@@ -59,6 +73,69 @@ def own_address():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
         probe.connect(("192.0.2.1", 9))
         return probe.getsockname()[0]
+
+
+class NameServer:
+    """A DNS server on 127.0.0.1 (UDP) for NAME_DOMAIN alone: its names answered with an IPv4 address
+    (TTL 0, so that nothing keeps them), anything else of the domain NXDOMAIN; every question noted."""
+
+    def __init__(self, names):
+        self.names = {name.lower(): address for name, address in names.items()}
+        self.questions = []
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.bind(("127.0.0.1", 0))
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self.serve, daemon=True).start()
+
+    def serve(self):
+        while True:
+            try:
+                data, peer = self.sock.recvfrom(4096)
+            except OSError:
+                return
+            try:
+                answer = self.answer(data)
+            except (IndexError, ValueError):
+                continue
+            if answer:
+                self.sock.sendto(answer, peer)
+
+    def answer(self, data):
+        if len(data) < 12 or struct.unpack("!H", data[4:6])[0] != 1:
+            return None
+        labels, offset = [], 12
+        while data[offset]:
+            length = data[offset]
+            labels.append(data[offset + 1:offset + 1 + length].decode("ascii", "replace"))
+            offset += 1 + length
+        offset += 1
+        qtype, _ = struct.unpack("!HH", data[offset:offset + 4])
+        question = data[12:offset + 4]
+        name = ".".join(labels).lower()
+        self.questions.append((time.time(), name, qtype))
+        flags = 0x8180 | (0x0100 & struct.unpack("!H", data[2:4])[0])
+        records = b""
+        if name not in self.names:
+            flags |= 3  # NXDOMAIN
+        elif qtype == 1:
+            records = struct.pack("!HHHIH", 0xC00C, 1, 1, 0, 4) + socket.inet_aton(self.names[name])
+        header = data[:2] + struct.pack("!HHHHH", flags, 1, 1 if records else 0, 0, 0)
+        return header + question + records
+
+    def close(self):
+        self.sock.close()
+
+
+def point_resolver(domain, port):
+    """This Mac's resolver asks 127.0.0.1:port for names under `domain` (resolver(5)); taken back by
+    `unpoint_resolver`."""
+    text = "nameserver 127.0.0.1\nport %d\n" % port
+    subprocess.run(["sudo", "mkdir", "-p", "/etc/resolver"], check=True)
+    subprocess.run(["sudo", "tee", "/etc/resolver/" + domain], input=text.encode(), stdout=subprocess.DEVNULL, check=True)
+
+
+def unpoint_resolver(domain):
+    subprocess.run(["sudo", "rm", "-f", "/etc/resolver/" + domain], check=False)
 
 
 def server_config(material, target, ports, address, quic_host):
@@ -197,6 +274,8 @@ def main():
     address = own_address()
     print("XRAY-LEAK INFO this Mac's address for the servers: %s" % address)
     processes = []
+    pointed = []
+    names = None
     status = 0
     try:
         # The self-test proxy: the servers' only way out, answering every page itself.
@@ -232,12 +311,32 @@ def main():
                     time.sleep(0.2)
             else:
                 sys.exit("XRAY-LEAK FAIL the server did not listen for %s" % tag)
+        # The server's name: this Mac's resolver pointed at a name server of this script for its domain,
+        # and seen to answer through it (a name of the domain the relay never asks) before anything runs.
+        names = NameServer({SERVER_NAME: address, "probe." + NAME_DOMAIN: address})
+        point_resolver(NAME_DOMAIN, names.port)
+        pointed.append(NAME_DOMAIN)
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            try:
+                if address in {info[4][0] for info in socket.getaddrinfo("probe." + NAME_DOMAIN, 80, socket.AF_INET)}:
+                    break
+            except OSError:
+                pass
+            time.sleep(0.5)
+        else:
+            sys.exit("XRAY-LEAK FAIL this Mac's resolver did not take the name server for %s (/etc/resolver)" % NAME_DOMAIN)
+        print("XRAY-LEAK INFO this Mac's resolver answers %s through the check's name server (port %d)" % (NAME_DOMAIN, names.port))
         made = {tag: link.replace("@127.0.0.1:", "@%s:" % address) for tag, link in links(material, ports)}
         # VMess's link is base64 of JSON: made again with this Mac's address.
         vmess = {"v": "2", "ps": "vmess-ws", "add": address, "port": str(ports["vmess-ws"]), "id": material["id"], "aid": "0",
                  "scy": "auto", "net": "ws", "path": "/vm", "tls": ""}
         made["vmess-ws"] = "vmess://" + base64.b64encode(json.dumps(vmess).encode()).decode()
-        spec = {"links": [{"name": tag, "link": made[tag]} for tag in CHECKED], "httpProxyPort": SELFTEST["http"],
+        for name, tag in BY_NAME.items():
+            made[name] = made[tag].replace("@%s:" % address, "@%s:" % SERVER_NAME)
+            if SERVER_NAME not in made[name]:
+                sys.exit("XRAY-LEAK FAIL the link %s could not be made to name its server" % name)
+        spec = {"links": [{"name": tag, "link": made[tag]} for tag in CHECKED + list(BY_NAME)], "httpProxyPort": SELFTEST["http"],
                 "exitTrace": "http://exit.selftest.invalid/cdn-cgi/trace", "failClosed": FAIL_CLOSED}
         if options.quic_site:
             spec["quicSite"] = options.quic_site
@@ -299,7 +398,27 @@ def main():
         if result["with_metadata"] == 0:
             status = 1
             print("XRAY-LEAK SKIPPED no packet of the capture names its process (pktap): nothing could be told")
+        # The links by name: their relay, inside its sandbox, asked this Mac's resolver for the server's
+        # name while their profile ran — the question reached the name server — and their checks passed
+        # (above, in --xray-check's own lines): the name was resolved, and resolved only by the relay's way.
+        for name in BY_NAME:
+            spans = [(begin, end) for window, begin, end in marks["windows"] if window == name]
+            asked = [q for q in names.questions if q[1] == SERVER_NAME and any(b <= q[0] <= e for b, e in spans)]
+            if spans and asked:
+                print("XRAY-LEAK PASS %s: its relay resolved %s through this Mac's resolver (%d question(s) while it ran)"
+                      % (name, SERVER_NAME, len(asked)))
+            else:
+                status = 1
+                print("XRAY-LEAK FAIL %s: no question for %s reached this Mac's resolver while its profile ran (%s)"
+                      % (name, SERVER_NAME, "window seen" if spans else "no window"))
+        with open(os.path.join(options.out, "names.txt"), "w") as handle:
+            for when, name, qtype in names.questions:
+                handle.write("%.3f %s %d\n" % (when, name, qtype))
     finally:
+        for domain in pointed:
+            unpoint_resolver(domain)
+        if names:
+            names.close()
         for process in processes:
             if process.poll() is None:
                 process.terminate()

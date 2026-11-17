@@ -15,6 +15,8 @@ name: Links — VLESS, VMess, Trojan, Shadowsocks
 #   under a running profile fails closed (scripts/xray_leak_check.py, `Lumen --xray-check`).
 #
 # On a push to a branch claude/xray-*, on request, and from the full pipeline (full.yml).
+# Each step after the relay's build runs even when one before it failed (the app's build excepted, for
+# the steps that use the app), so that one run says everything it can; the job fails if any step did.
 on:
   push:
     branches: ['claude/xray-*']
@@ -36,6 +38,7 @@ jobs:
           go-version: '1.27.4'
           cache: false
       - name: Xray from its pinned source, the bytes scripts/xray.lock records (arm64 and x86_64)
+        id: xray
         run: |
           scripts/build-xray.sh --arch arm64 --out "$PWD/build/xray/xray-darwin-arm64"
           scripts/build-xray.sh --arch amd64 --out "$PWD/build/xray/xray-darwin-amd64"
@@ -43,16 +46,22 @@ jobs:
           shasum -a 256 build/xray/xray-darwin-* | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY"
           ls -l build/xray/xray-darwin-* | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY"
       - name: The relay's licences match the pin
+        if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
         run: scripts/build-xray.sh --check-notices --out "$PWD/build/xray/xray-darwin-arm64"
       - name: The links' core tests on macOS (CryptoKit, Foundation's JSON)
+        if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
         run: swift test --filter 'ShareLinkTests|XrayLinkProxyTests|FormatPolicyTests|ProxyListTests|ProxyProbeTests|WebRTCGateTests'
       - name: Every kind of link against a real Xray server (and the door check's control)
+        if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
         run: |
           swift build --product lumen-xray-config
           python3 -I scripts/xray_relay_check.py --xray build/xray/xray-darwin-arm64 --config-tool .build/debug/lumen-xray-config
       - name: Build the app with the links' relay (XRAY=1, unsandboxed, ad hoc)
+        if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
+        id: app
         run: XRAY=1 XRAY_BINARY="$PWD/build/xray/xray-darwin-arm64" SANDBOX=0 APP_DIR=build/xray-app scripts/build-app.sh
       - name: The relay as built into the app — signed apart, no entitlement, the pinned version
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
         run: |
           relay=build/xray-app/Lumen.app/Contents/MacOS/LumenXray
           codesign -dv "$relay" 2>&1 | grep -E '^(Identifier|CodeDirectory|Format)'
@@ -60,6 +69,7 @@ jobs:
           "$relay" version | head -1
           ls -l "$relay"
       - name: The leak test — a profile on each link, inside a capture of every packet
+        if: ${{ !cancelled() && steps.app.outcome == 'success' }}
         timeout-minutes: 40
         run: python3 -I scripts/xray_leak_check.py --app build/xray-app/Lumen.app --out build/xray-leaks
       - name: What the leak test saw

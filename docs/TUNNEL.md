@@ -629,7 +629,7 @@ then holds through the relay.
 |---|---|---|
 | Pages (TCP), WebSocket, fetch, media | the data store's proxy: the relay's SOCKS5 on 127.0.0.1, with the launch's login (failover off) → the link's server | `xray_relay_check.py` (every kind against a real server); `Lumen --xray-check` (the leak page through each kind) inside a capture |
 | DNS of pages | carried as names to the far end: the relay resolves nothing (no DNS section, no sniffing, routing `AsIs`) | `.invalid` names load only if carried as names; the capture holds no question with the run's token |
-| The link server's own name | resolved by this Mac's resolver, by the relay, when it connects to its server — the one name of a link asked here, as a SOCKS5 proxy's own name is | written down, not hidden: an IP address in the link asks nothing |
+| The link server's own name | resolved by this Mac's resolver, by the relay, when it connects to its server — the one name of a link asked here, as a SOCKS5 proxy's own name is | written down, not hidden: an IP address in the link asks nothing; `xray_leak_check.py` runs two links that name their server, the relay resolving it inside its sandbox |
 | QUIC / HTTP/3 | not used: through a store's proxy WebKit sends HTTP/2 | `--xray-check` on a site that offers HTTP/3 |
 | WebRTC | the app's TURN relay → a SOCKS5 UDP association at the relay (with its login) → the link's UDP (inside the stream for VLESS, VMess and Trojan; Shadowsocks's own UDP to the server's port) | `--xray-check`: relay candidates only, at the far side's address |
 | Anything else the profile's process opens | the kernel refuses it: TCP to the relay's port only ("tcp-relay-only"), no UDP | the sandbox's closure, required at the start; the capture |
@@ -679,9 +679,10 @@ then holds through the relay.
 - **Fail closed.** The relay ending while its profile runs — killed, crashed — is started again on its
   port with its login, at most twice a minute; meanwhile the profile's loads fail (nothing listens,
   failover is off). One that does not come back stops its profile, which says why
-  (`launch.relayEnded`). `--xray-check` kills a relay under a page fetching every 300 ms with
-  restarts off: no fetch gets through after it, the profile stops and says so, and the capture shows
-  nothing going another way. A relay is stopped after its profile's process has ended (never before,
+  (`launch.relayEnded`). `--xray-check` kills a relay three times under a page fetching every 300 ms,
+  as the app runs it: after the first two it is started again on its port with its login and the
+  fetches go through again; after the third no fetch gets through, the profile stops and says so; and
+  the capture shows nothing going another way at any time. A relay is stopped after its profile's process has ended (never before,
   which would leave its port to anyone for a moment); relays an earlier run of the app left when it
   crashed are ended at the start (nobody knows their login), and every relay at quit.
 
@@ -741,10 +742,13 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
 - `.github/workflows/xray-tunnels.yml` (macOS): the reproducible build and the notices, those tests, the
   relay check, the app built with `XRAY=1`, and `scripts/xray_leak_check.py` — a profile on each kind,
   started as the app starts one, inside a capture of every packet of the runner (pktap: each packet
-  with its process), the servers on the runner's own address so that the relays' packets are in it.
-  It fails on any packet of a profile's process off loopback, any of a relay to anything but its
-  server, any page's name resolved on the runner, any packet to a documentation address; its controls
-  — a DNS question asked on purpose, each relay's packets counted for its pid — must be seen.
+  with its process), the servers on the runner's own address so that the relays' packets are in it;
+  two of the links name their server by a host name, which the runner's resolver is pointed at a name
+  server of the check for, so that the relay resolves it inside its sandbox, as a provider's link has
+  it. It fails on any packet of a profile's process off loopback, any of a relay to anything but its
+  server, any page's name resolved on the runner, any packet to a documentation address, and a link
+  by name whose server's name was not asked; its controls — a DNS question asked on purpose, each
+  relay's packets counted for its pid — must be seen.
 
 ### Limits
 

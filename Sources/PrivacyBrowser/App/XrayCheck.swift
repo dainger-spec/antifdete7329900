@@ -20,9 +20,11 @@ import Network
 /// - the WebRTC call page (`/pb-rtc`, `call`): two peer connections through the app's relay, the
 ///   link's UDP and the server — relay candidates only, at the self-test proxy's address;
 /// - the relay's door: SOCKS5 without the launch's login, and with a wrong password, refused; with it, taken;
-/// - for the link named `failClosed`: a page fetching every 300 ms, the relay killed and not started
-///   again (`restartLimit` 0) — no fetch succeeds after it, the profile is stopped and says why, and
-///   (the capture) nothing went another way meanwhile.
+/// - for the link named `failClosed`: a page fetching every 300 ms and its relay killed three times,
+///   as the app runs it (`restartLimit` 2): after the first two kills the relay is started again on its
+///   port with its login and the fetches go through again; after the third, within the minute, it is
+///   not — no fetch succeeds after it, the profile is stopped and says why. The capture shows that
+///   nothing went another way at any time.
 ///
 /// Prints `XRAY-CHECK PASS/FAIL/INFO …`, and the capture's marks (`INFO egress-window begin/end`,
 /// `egress-pid`, `xray-relay-pid`, `egress-token`, `egress-control`). Exit 1 on any FAIL.
@@ -98,7 +100,8 @@ enum XrayCheck {
         if let trace = spec.exitTrace.flatMap(URL.init(string:)) { ProxyExitLookup.endpoints = [trace] }
         // CI cannot load the network guard: the self-test's stand-in takes its place, as in the self-test.
         NetworkGuard.shared.selfTestStandIn = true
-        XrayRelays.shared.restartLimit = 0
+        // The relay's restarts as the app has them; a profile whose relay stays dead runs on for a few
+        // seconds before it stops, to see its pages fail meanwhile.
         ProfileManager.relayDeathGrace = 8
 
         // The capture's own control: this process asks this Mac's resolver for a name with the
@@ -255,17 +258,50 @@ enum XrayCheck {
             return true;
             """
         let read = "return JSON.stringify(window.__fc || null);"
+        func now() async -> (ok: Int, failed: Int) {
+            counters(await webDriver(manager, id, "executeSync", ["script": read, "args": []]))
+        }
         _ = await webDriver(manager, id, "executeSync", ["script": loop, "args": []])
         try? await Task.sleep(nanoseconds: 3_000_000_000)
-        let before = counters(await webDriver(manager, id, "executeSync", ["script": read, "args": []]))
-        check("\(name), fail closed: the page fetches through the link before the relay is killed", before.ok > 0,
-              "\(before)")
+        let before = await now()
+        check("\(name), fail closed: the page fetches through the link before the relay is killed", before.ok > 0, "\(before)")
+        let route = XrayRelays.shared.route(owner: id)
+
+        // Twice: the relay killed, started again on its port with its login, and the fetches through again.
+        var current = relayPID
+        for round in 1...2 {
+            info("egress-relay-killed \(Date().timeIntervalSince1970) \(name)")
+            kill(current, SIGKILL)
+            let atKill = await now()
+            var again: pid_t?
+            _ = await waitUntil(20) {
+                again = XrayRelays.shared.processIdentifier(owner: id).flatMap { $0 != current ? $0 : nil }
+                return again != nil
+            }
+            guard let again else {
+                fail("\(name), fail closed: the relay killed (\(round)) was not started again")
+                return
+            }
+            info("xray-relay-pid \(again) \(name)")
+            let sameDoor = XrayRelays.shared.route(owner: id) == route
+            check("\(name), fail closed: the relay killed (\(round)) is started again, on its port with its login", sameDoor)
+            let resumed = await waitUntil(20) { await now().ok > atKill.ok + 1 }
+            let after = await now()
+            check("\(name), fail closed: after the relay's restart (\(round)) the page fetches through the link again", resumed,
+                  "at the kill \(atKill), now \(after)")
+            info("\(name), fail closed: restart \(round): fetches at the kill \(atKill), after \(after)")
+            current = again
+        }
+
+        // The third time in the minute: not started again — the fetches fail, the profile stops and says why.
         info("egress-relay-killed \(Date().timeIntervalSince1970) \(name)")
-        kill(relayPID, SIGKILL)
+        kill(current, SIGKILL)
         try? await Task.sleep(nanoseconds: 500_000_000)
-        let atKill = counters(await webDriver(manager, id, "executeSync", ["script": read, "args": []]))
+        let atKill = await now()
         try? await Task.sleep(nanoseconds: 4_500_000_000)
-        let after = counters(await webDriver(manager, id, "executeSync", ["script": read, "args": []]))
+        let after = await now()
+        check("\(name), fail closed: the relay killed a third time in a minute is not started again",
+              XrayRelays.shared.processIdentifier(owner: id) == nil)
         check("\(name), fail closed: with its relay dead, the profile's fetches fail — none gets through another way",
               after.ok <= atKill.ok + 1 && after.failed > atKill.failed, "at the kill \(atKill), 5 s later \(after)")
         let stopped = await waitUntil(60) { !manager.isRunning(id) && manager.processIdentifier(of: id) == nil }
