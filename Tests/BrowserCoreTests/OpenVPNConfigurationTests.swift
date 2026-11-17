@@ -322,3 +322,15 @@ final class OpenVPNFormatTests: XCTestCase {
         XCTAssertFalse(ProxyList.sameConnection(first, second))
     }
 }
+
+extension OpenVPNFormatTests {
+    func testAnExportOfTheListDoesNotTurnAConnectionIntoAProxyLine() throws {
+        let configuration = try OpenVPNConfiguration.parse(OpenVPNConfigurationTests.typical("auth-user-pass"))
+        let entry = ProxyListEntry(label: "Mobile DE", proxy: ProxySettings.openVPN(configuration, username: "alice", password: "s3cret"))
+        let text = ProxyList.exportText([entry])
+        XCTAssertFalse(text.contains("s3cret"))
+        XCTAssertFalse(text.contains("socks5://"))
+        XCTAssertTrue(text.contains("# OpenVPN connection, not exported as a line: vpn.example.net:1194  (Mobile DE)"))
+        XCTAssertTrue(ProxyListImport.read(text).proxies.isEmpty, "and nothing reads back from it")
+    }
+}

@@ -437,6 +437,13 @@ public struct ProxyList: Codable, Equatable, Sendable {
     public static func exportText(_ entries: [ProxyListEntry]) -> String {
         var lines = ["# Lumen proxies. The user names and passwords below are in plaintext."]
         for entry in entries {
+            // An OpenVPN connection is its .ovpn, not a line: written as one, it would read back as
+            // SOCKS5 at the VPN server. Said by a comment instead.
+            if entry.proxy.isOpenVPN {
+                let label = Self.cleanLabel(entry.label)
+                lines.append("# OpenVPN connection, not exported as a line: \(entry.address)" + (label.isEmpty ? "" : "  (\(label))"))
+                continue
+            }
             var line = ProxyListImport.line(for: entry.proxy, kindKnown: entry.kindKnown)
             // As providers and other browsers write it: the link in brackets right after the proxy.
             if let link = entry.changeIPURL { line += "[" + link.absoluteString + "]" }
