@@ -754,7 +754,7 @@ records), and the profile goes through that relay as through a SOCKS5 proxy on 1
 login made for the launch — so everything above holds through it: fail closed, remote DNS, no
 QUIC, WebRTC through its UDP with the network guard. On top: the profile's process is held by the
 kernel to TCP to the relay's port alone; the relay has one way out, the link's server, and runs in a
-sandbox that lets it reach nothing but the server's port, loopback and the resolver; a relay that
+sandbox that lets it reach nothing but the server's port, UDP to loopback and the resolver; a relay that
 ends is started again, and one that does not come back stops its profile — its pages fail meanwhile,
 never going another way. What is verified, how, and the limits (the server's own name is resolved by
 this Mac, as a proxy's name is): [TUNNEL.md](TUNNEL.md), "Links". Measured on CI's Mac inside a

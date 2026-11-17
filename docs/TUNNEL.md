@@ -633,7 +633,7 @@ then holds through the relay.
 | QUIC / HTTP/3 | not used: through a store's proxy WebKit sends HTTP/2 | `--xray-check` on a site that offers HTTP/3 |
 | WebRTC | the app's TURN relay → a SOCKS5 UDP association at the relay (with its login) → the link's UDP (inside the stream for VLESS, VMess and Trojan; Shadowsocks's own UDP to the server's port) | `--xray-check`: relay candidates only, at the far side's address |
 | Anything else the profile's process opens | the kernel refuses it: TCP to the relay's port only ("tcp-relay-only"), no UDP | the sandbox's closure, required at the start; the capture |
-| The relay itself | its configuration: one outbound, the link's server; its sandbox: the server's port, loopback, the resolver | the capture: every packet of the relay is to or from its server |
+| The relay itself | its configuration: one outbound, the link's server; its sandbox: the server's port, UDP to loopback, the resolver | the capture: every packet of the relay is to or from its server; `xray_leak_check.py` knocks on the sandbox itself, with a configuration that would go anywhere |
 
 ### The relay
 
@@ -656,11 +656,17 @@ then holds through the relay.
 - **Its sandbox.** The relay's process starts as the app's own executable with `--xray-relay`
   (`XrayRelayLauncher`), puts itself in a sandbox the kernel holds it and every process it becomes to,
   and only then becomes Xray (`execve`): no outgoing connection but TCP and UDP to the server's port,
-  loopback, and the system's resolver (`/var/run/mDNSResponder`); no file written. The kernel's rules
-  can name a host only as "any" or "loopback": the server's address is held by the configuration, its
-  port by the kernel. Binding is not limited (Xray sends UDP from a socket it binds to any address on a
-  port of the system's choosing); what it listens on for others is its configuration's 127.0.0.1. A sandbox that does not apply is no relay
-  (exit 70), and the profile does not start.
+  UDP to loopback (the answers of the profile's UDP associations), and the system's resolver
+  (`/var/run/mDNSResponder`); no file written. The kernel's rules can name a host only as "any" or
+  "loopback": the server's address is held by the configuration, its port by the kernel. Binding is not
+  limited (Xray sends UDP from a socket it binds to any address on a port of the system's choosing);
+  what it listens on for others is its configuration's 127.0.0.1. A sandbox that does not apply is no
+  relay (exit 70), and the profile does not start. Measured, not assumed: `xray_leak_check.py` starts
+  Xray as the app starts a relay but with a configuration that would go anywhere, and it reaches the
+  server's port and nothing else — no other port of this Mac's address, of its loopback or of a host
+  outside — and writes no file, while the same Xray without the sandbox reaches all of it. (The first
+  rule for loopback named "ip", and the same check found it let TCP through to every port of this Mac's
+  own network address: it names UDP now.)
 - **Not held by the network guard.** The guard holds only processes signed as Lumen itself, and that
   identity is also what lets a process ask the guard anything. A program of a third party that parses
   what servers send gets neither. The relay is held by its configuration and its sandbox, and the

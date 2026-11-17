@@ -15,7 +15,7 @@ import os
 ///   never in argv or the environment; the configuration reaches Xray the same way (`-c stdin:`).
 /// - **Out.** The link's server and nothing else: the configuration has no other outbound
 ///   (`XrayConfig`), and the relay runs in a sandbox the kernel holds it to before Xray's code is
-///   loaded (`XrayRelayLauncher`): no connection but to the server's port, to this Mac's loopback and
+///   loaded (`XrayRelayLauncher`): no connection but to the server's port, UDP to this Mac's loopback and
 ///   to the system's resolver (the server's own name is the one it resolves), no file written.
 /// - **Fail closed.** A relay that ends while its profile runs is started again on the same port with
 ///   the same login (twice in a minute at most); until it answers, the profile's loads fail — its
@@ -339,8 +339,8 @@ final class XrayRelays {
 /// whose configuration is waiting on its standard input.
 ///
 /// The sandbox: no outgoing connection but to the link's server's port (TCP and UDP: the transports
-/// and Shadowsocks's UDP), to loopback (the UDP associations answer the profile's relay there), and
-/// to the system's resolver (`mDNSResponder`, for the server's own name); no file written. The kernel's rules name hosts only as "any" or "loopback", so the
+/// and Shadowsocks's UDP), UDP to loopback (the UDP associations answer the profile's relay there),
+/// and the system's resolver (`mDNSResponder`, for the server's own name); no file written. The kernel's rules name hosts only as "any" or "loopback", so the
 /// server's address is held by the configuration — its one outbound — and the port by the kernel.
 /// Should the sandbox not apply, the relay does not run (exit 70): never a relay outside it.
 enum XrayRelayLauncher {
@@ -356,7 +356,9 @@ enum XrayRelayLauncher {
             "(version 1)",
             "(allow default)",
             "(deny network-outbound)",
-            "(allow network-outbound (remote ip \"localhost:*\"))",
+            // UDP alone to loopback: the answers of a profile's UDP associations. A rule for "ip"
+            // there let TCP through to any port of this Mac's own network address (run 44020981433).
+            "(allow network-outbound (remote udp \"localhost:*\"))",
             "(allow network-outbound (remote tcp \"*:\(port)\"))",
             "(allow network-outbound (remote udp \"*:\(port)\"))",
             "(allow network-outbound \(resolver))",

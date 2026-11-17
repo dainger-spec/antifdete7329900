@@ -259,55 +259,90 @@ def run_relay(command, config, port=None, seconds=2.0):
     return process, listening, stop
 
 
+def http_through(port, address, target):
+    """True when a plain HTTP request through the SOCKS5 relay on `port` to address:target is answered
+    (an HTTPS port answers one with a 400 too)."""
+    try:
+        with socks_open(port) as sock:
+            sock.sendall(b"\x05\x01\x00\x01" + socket.inet_aton(address) + struct.pack("!H", target))
+            read_reply(sock)
+            sock.settimeout(6)
+            sock.sendall(b"GET / HTTP/1.1\r\nHost: one.one.one.one\r\nConnection: close\r\n\r\n")
+            return sock.recv(16).startswith(b"HTTP/")
+    except (OSError, ConnectionError):
+        return False
+
+
+# Outside this Mac, for the sandbox's own check: Cloudflare's resolver answers HTTP on 80 and 443.
+OUTSIDE = "1.1.1.1"
+
+
 def relay_sandbox_check(lumen, relay, address, out):
     """The relay's sandbox apart from its configuration (XrayRelayLauncher): Xray started as the app
     starts a relay — `Lumen --xray-relay <Xray> <server port>` — but with a configuration that would go
-    anywhere (freedom), must reach the server's port, TCP and UDP, and nothing else; and, given a log
-    file, write none. The control: the same configurations in Xray without the sandbox reach the other
-    port and write the file — so what stops the sandboxed one is the sandbox. Returns the failures."""
-    server, other = Listener(address), Listener(address)
+    anywhere (freedom), must reach the server's port, TCP and UDP, and nothing else: no other port of
+    this Mac's network address, of its loopback (TCP) or of a host outside (OUTSIDE, its 443 standing
+    for the server's port and its 80 for another); and, given a log file, write none. The control: the
+    same configurations in Xray without the sandbox reach all of it and write the file — so what stops
+    the sandboxed one is the sandbox. Returns the failures."""
+    server, other, loopback = Listener(address), Listener(address), Listener("127.0.0.1")
     failures = []
+
+    def config(port):
+        return {
+            "log": {"loglevel": "warning"},
+            "inbounds": [{"listen": "127.0.0.1", "port": port, "protocol": "socks",
+                          "settings": {"auth": "noauth", "udp": True, "ip": "127.0.0.1"}}],
+            # A freedom refuses private addresses by default; this Mac's and its loopback are.
+            "outbounds": [{"protocol": "freedom", "settings": {"finalRules": [
+                {"action": "allow", "network": "tcp,udp", "ip": [address + "/32", "127.0.0.1/32", OUTSIDE + "/32"]}]}}],
+        }
+
     try:
         for sandboxed in (True, False):
             label = "sandboxed, as the app runs it" if sandboxed else "the control, the same Xray without the sandbox"
+
+            def command(server_port):
+                return [lumen, "--xray-relay", relay, str(server_port)] if sandboxed else [relay, "run", "-c", "stdin:"]
             port = free_port()
-            command = [lumen, "--xray-relay", relay, str(server.port)] if sandboxed else [relay, "run", "-c", "stdin:"]
-            config = {
-                "log": {"loglevel": "warning"},
-                "inbounds": [{"listen": "127.0.0.1", "port": port, "protocol": "socks",
-                              "settings": {"auth": "noauth", "udp": True, "ip": "127.0.0.1"}}],
-                # A freedom refuses private addresses by default; this Mac's is one.
-                "outbounds": [{"protocol": "freedom", "settings": {
-                    "finalRules": [{"action": "allow", "network": "tcp,udp", "ip": [address + "/32"]}]}}],
-            }
-            _, listening, stop = run_relay(command, config, port=port)
+            _, listening, stop = run_relay(command(server.port), config(port), port=port)
             results = {
                 "tcp to the server's port": bool(listening) and tcp_through(port, address, server.port),
                 "tcp to another port": bool(listening) and tcp_through(port, address, other.port),
                 "udp to the server's port": bool(listening) and udp_through_relay(port, address, server.port),
                 "udp to another port": bool(listening) and udp_through_relay(port, address, other.port),
+                "tcp to loopback": bool(listening) and tcp_through(port, "127.0.0.1", loopback.port),
             }
             said = stop()
+            # Outside this Mac: its 443 as the server's port, its 80 as another.
+            port = free_port()
+            _, listening_outside, stop = run_relay(command(443), config(port), port=port)
+            results["tcp outside, the server's port"] = bool(listening_outside) and http_through(port, OUTSIDE, 443)
+            results["tcp outside, another port"] = bool(listening_outside) and http_through(port, OUTSIDE, 80)
+            said_outside = stop()
             # A file to write: Xray opens its log file as it starts.
             written = os.path.join(out, "relay-sandbox-%s.log" % ("in" if sandboxed else "out"))
             if os.path.exists(written):
                 os.remove(written)
-            config["log"]["error"] = written
-            config["inbounds"][0]["port"] = free_port()
-            _, _, stop_writer = run_relay(command, config)
+            writer = config(free_port())
+            writer["log"]["error"] = written
+            _, _, stop_writer = run_relay(command(server.port), writer)
             said_writing = stop_writer()
             results["a file written"] = os.path.exists(written)
-            print("XRAY-LEAK INFO the relay's sandbox, %s: %s; it listened %s; it said %s; given a log file: %s"
-                  % (label, results, listening, said or "nothing", said_writing or "nothing"))
+            print("XRAY-LEAK INFO the relay's sandbox, %s: %s; it listened %s/%s; it said %s; outside: %s; given a log file: %s"
+                  % (label, results, listening, listening_outside, said or "nothing", said_outside or "nothing",
+                     said_writing or "nothing"))
             expected = {"tcp to the server's port": True, "tcp to another port": not sandboxed,
                         "udp to the server's port": True, "udp to another port": not sandboxed,
+                        "tcp to loopback": not sandboxed,
+                        "tcp outside, the server's port": True, "tcp outside, another port": not sandboxed,
                         "a file written": not sandboxed}
             wrong = {name: value for name, value in results.items() if expected[name] != value}
-            if wrong or not listening:
+            if wrong or not listening or not listening_outside:
                 failures.append("%s: %s (expected %s)" % (label, wrong or "it did not listen", expected))
     finally:
-        server.close()
-        other.close()
+        for listener in (server, other, loopback):
+            listener.close()
     return failures
 
 
@@ -624,8 +659,9 @@ def main():
             status = 1
         else:
             print("XRAY-LEAK PASS the relay's sandbox: Xray started as the app starts a relay, with a configuration that "
-                  "would go anywhere, reached the server's port (TCP and UDP) and no other, and wrote no file; the same "
-                  "Xray without the sandbox reached the other port and wrote its file")
+                  "would go anywhere, reached the server's port (TCP and UDP, on this Mac's address and outside it) and no "
+                  "other port — of this Mac's address, its loopback or a host outside — and wrote no file; the same Xray "
+                  "without the sandbox reached all of it and wrote its file")
 
         capture_path = os.path.join(options.out, "capture.txt")
         capture = subprocess.Popen(["sudo", "tcpdump", "-i", "pktap,all", "-k", "NP", "-n", "-tt", "-l", "-s", "256",
