@@ -143,6 +143,9 @@ enum Localization {
         var components = Locale.Components(locale: current)
         components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
                                                                    script: nil, region: current.region)
+        // Russian is written with a 24-hour clock: on a Mac whose region keeps 12 hours (the runners',
+        // and many a Mac bought abroad) the Russian windows said «4:29 PM».
+        if languageCode == "ru" { components.hourCycle = .zeroToTwentyThree }
         return Locale(components: components)
     }()
 }
