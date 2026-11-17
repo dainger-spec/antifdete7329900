@@ -81,7 +81,10 @@ enum ProxyChecker {
         guard (try? proxy.validate()) != nil, let configurations = try? ProxyConfigurationFactory.make(proxy), !configurations.isEmpty else {
             return .dead(.invalidSettings, at: time)
         }
-        let diagnosis = await probe(latencySamples: latencySamples).run(proxy)
+        var diagnosis = await probe(latencySamples: latencySamples).run(proxy)
+        // What answered a link's check is its relay, as SOCKS5: the type found is the link's own, so
+        // that nothing takes the relay's for it (the list's entry, the field's reading).
+        if proxy.kind == .xray, !diagnosis.kinds.isEmpty { diagnosis.kinds = [.xray] }
         guard diagnosis.isWorking else {
             var result = ProxyCheckResult.dead(diagnosis.verdict == .credentialsNeeded ? .needsCredentials : .noAnswer, at: time)
             result.diagnosis = diagnosis

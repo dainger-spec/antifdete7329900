@@ -106,7 +106,8 @@ struct ProxyLine: Equatable {
             guard var proxy = checkable else { return .empty }
             let found = currentCheck?.result.diagnosis?.kinds ?? []
             if line.kindGiven {
-                guard let first = found.first, !found.contains(proxy.kind) else { return .proxy(proxy, .scheme) }
+                // A link is the link it is, whatever its relay answered as.
+                guard proxy.kind != .xray, let first = found.first, !found.contains(proxy.kind) else { return .proxy(proxy, .scheme) }
                 let given = proxy.kind
                 proxy.kind = first
                 if first == .socks5 { proxy.tlsToProxy = false }
