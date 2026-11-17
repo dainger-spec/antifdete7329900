@@ -79,10 +79,29 @@ class LumenUITestCase: XCTestCase {
     func reveal(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         for _ in 0..<12 {
             if element.exists && element.isHittable { return element }
-            app.swipeUp(velocity: .slow)
+            scrollTowardEnd()
         }
         XCTAssertTrue(element.exists && element.isHittable, what, file: file, line: line)
         return element
+    }
+
+    /// One drag up the open screen, as a person scrolls it. With the keyboard up a person drags the
+    /// part of the form the keyboard leaves free, beside its rows: DeviceTests at the largest text
+    /// (devices run 143) — the swipe from the screen's middle started on the field being typed in, just
+    /// above the keyboard, and twelve of them never moved the form; the tags' field stayed under the
+    /// keyboard. Without a keyboard, the swipe the other tests have always made.
+    func scrollTowardEnd() {
+        let keyboard = app.keyboards.firstMatch
+        let window = app.windows.firstMatch.frame
+        guard keyboard.exists, !window.isEmpty else { app.swipeUp(velocity: .slow); return }
+        let top = window.minY + window.height * 0.15                      // below the bar
+        let bottom = min(window.maxY, keyboard.frame.minY) - 8
+        guard bottom - top > 80 else { app.swipeUp(velocity: .slow); return }
+        let screen = app.coordinate(withNormalizedOffset: .zero)
+        let x = window.minX + 12                                           // the form's margin, no field there
+        let from = screen.withOffset(CGVector(dx: x, dy: bottom - (bottom - top) * 0.1))
+        let to = screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * 0.1))
+        from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
     /// The one of the matching buttons a person can touch (iOS 27 shows a dialog's button twice in

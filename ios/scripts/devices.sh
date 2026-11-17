@@ -10,8 +10,10 @@
 #   small-largest  the smallest iPhone the newest iOS runs, the largest accessibility text, dark
 #
 # The app is iPhone only (TARGETED_DEVICE_FAMILY 1) and portrait only: no iPad leg; the test turns the
-# iPhone on its side and checks the app stays upright. One job, legs in turn, not a wider matrix: the
-# macOS machines are few and shared.
+# iPhone on its side and checks the app stays upright. Legs in turn, not a wider matrix: the macOS
+# machines are few and shared. Only small-oldest needs a machine of its own: Xcode 27 has no iOS 18
+# simulator ("iOS 18.6 is not available for download", run 143), so the workflow runs that leg on
+# macos-26 (Xcode 26, as ios-floor.yml) and the two others on xcode-27.
 #
 #   ios/scripts/devices.sh <out-dir> [legs, comma-separated; default all three]
 set -uo pipefail
@@ -33,48 +35,72 @@ runtimes() { xcrun simctl list -j runtimes | python3 -c '
 import json, sys
 print(" ".join(r["version"] for r in json.load(sys.stdin)["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)))'; }
 
-# pick <iOS: newest | a major such as 18> <device names, in order of preference...>
+# pick <iOS: newest | a major such as 18> <smallest | largest> <device names, in order of preference...>
 #   -> "<runtime id> <version> <device type id> <device name with _ for spaces>"
-# A major gives its oldest runtime here (the floor); "newest" the newest. With none of the names on
-# that runtime: the first iPhone it supports, so the leg still runs and says which one it took.
+# A major gives its oldest runtime here (the floor); "newest" the newest. Every runtime of that version
+# is looked in: Xcode can hold two of one version, one for every iPhone and one made for a single new
+# model (run 143: a 27.2 for the "iPhone Duo" alone came first, and both newest legs ran on that
+# phone instead of the Pro Max and the smallest). "largest" takes the newest Pro Max first. With none
+# of the names there: the iPhone with the smallest or the largest screen in points (the device type's
+# profile.plist), so the leg still runs on the screen it is for, and says which iPhone it took.
 pick() {
     xcrun simctl list -j | python3 -c '
-import json, sys
-want, wanted = sys.argv[1], sys.argv[2:]
+import json, os, plistlib, re, sys
+want, size, wanted = sys.argv[1], sys.argv[2], sys.argv[3:]
 data = json.load(sys.stdin)
-names = {t["identifier"]: t["name"] for t in data["devicetypes"]}
-rs = [r for r in data["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)]
+types = {t["identifier"]: t for t in data["devicetypes"]}
+name = lambda i: types.get(i, {}).get("name", "")
 version = lambda r: tuple(int(x) for x in r["version"].split("."))
-if want == "newest":
-    rs.sort(key=version, reverse=True)
-else:
-    rs = sorted((r for r in rs if r["version"].split(".")[0] == want), key=version)
+rs = [r for r in data["runtimes"] if r.get("platform", "iOS") == "iOS" and r.get("isAvailable", True)]
+if want != "newest":
+    rs = [r for r in rs if r["version"].split(".")[0] == want]
 if not rs:
     sys.exit()
+target = (max if want == "newest" else min)(version(r) for r in rs)
+# The runtime for every iPhone before one made for a single model.
+rs = sorted((r for r in rs if version(r) == target), key=lambda r: -len(r.get("supportedDeviceTypes", [])))
+supported = lambda r: [t["identifier"] for t in r.get("supportedDeviceTypes", [])] or list(types)
+if size == "largest":
+    every = {name(i) for r in rs for i in supported(r)}
+    promax = sorted((n for n in every if re.fullmatch(r"iPhone \d+ Pro Max", n)), key=lambda n: -int(n.split()[1]))
+    wanted = promax + [n for n in wanted if n not in promax]
+for n in wanted:
+    for r in rs:
+        hit = [i for i in supported(r) if name(i) == n]
+        if hit:
+            print(r["identifier"], r["version"], hit[0], n.replace(" ", "_")); sys.exit()
+def points(i):
+    try:
+        p = plistlib.load(open(os.path.join(types[i]["bundlePath"], "Contents/Resources/profile.plist"), "rb"))
+        return p["mainScreenWidth"] * p["mainScreenHeight"] / p["mainScreenScale"] ** 2
+    except Exception:
+        return None
 r = rs[0]
-supported = [i for i in [t["identifier"] for t in r.get("supportedDeviceTypes", [])] or list(names)]
-for name in wanted:
-    hit = [i for i in supported if names.get(i) == name]
-    if hit:
-        print(r["identifier"], r["version"], hit[0], name.replace(" ", "_")); sys.exit()
-phones = [i for i in supported if names.get(i, "").startswith("iPhone")]
-if phones:
-    print(r["identifier"], r["version"], phones[0], names[phones[0]].replace(" ", "_"))
+phones = [i for i in supported(r) if name(i).startswith("iPhone")]
+sized = [i for i in phones if points(i)]
+if sized:
+    i = (min if size == "smallest" else max)(sized, key=points)
+elif phones:
+    i = phones[0]
+else:
+    sys.exit()
+print(r["identifier"], r["version"], i, name(i).replace(" ", "_"))
 ' "$@"
 }
 
 SMALL=("iPhone SE (3rd generation)" "iPhone SE (2nd generation)" "iPhone 13 mini" "iPhone 12 mini" "iPhone 16e" "iPhone 17e")
-LARGE=("iPhone 17 Pro Max" "iPhone 16 Pro Max" "iPhone 15 Pro Max" "iPhone 16 Plus")
+LARGE=("iPhone 17 Pro Max" "iPhone 16 Pro Max" "iPhone 15 Pro Max" "iPhone 17 Plus" "iPhone 16 Plus")
 say "iOS runtimes on this machine: $(runtimes)"
 
 # The floor: iOS 18. Downloaded when this machine has no iOS 18 runtime (as install-floor.sh does 17.5).
-if [[ ",$LEGS," == *",small-oldest,"* && -z "$(pick 18 "${SMALL[@]}")" ]]; then
+if [[ ",$LEGS," == *",small-oldest,"* && -z "$(pick 18 smallest "${SMALL[@]}")" ]]; then
     for version in 18.6 18.5 18.4 18.2 18.0; do
         say "no iOS 18 runtime here: downloading iOS $version"
         if xcodebuild -downloadPlatform iOS -buildVersion "$version" >>"$OUT/runtime-download.txt" 2>&1; then break; fi
         sleep 20
     done
     say "iOS runtimes after the download: $(runtimes)"
+    [[ -n "$(pick 18 smallest "${SMALL[@]}")" ]] || say "the download: $(grep -v '^Finding' "$OUT/runtime-download.txt" | tail -3 | tr '\n' ' ')"
 fi
 
 # ---- The testbed (ios/testbed/testbed.py), as ci.sh starts it: the site, the proxies, the account
@@ -91,10 +117,10 @@ if [[ -z "$R" ]]; then sudo -n killall -HUP mDNSResponder 2>/dev/null; sleep 3; 
 say "this Mac resolves *.lumentest to: ${R:-NOTHING — the sign-in on each iPhone cannot reach the stand-in of the account server}"
 
 # ---- Each leg: a new simulator, its appearance and text size set as a person sets them in Settings.
-create() { # leg want look size names... -> sets UDID, DESC
-    local leg="$1" want="$2" look="$3" size="$4"; shift 4
+create() { # leg want smallest|largest look size names... -> sets UDID, DESC
+    local leg="$1" want="$2" screen="$3" look="$4" size="$5"; shift 5
     local rt version type name
-    read -r rt version type name <<<"$(pick "$want" "$@")"
+    read -r rt version type name <<<"$(pick "$want" "$screen" "$@")"
     UDID=""; DESC=""
     [[ -n "${type:-}" ]] || { say "NOT MEASURED $leg: no iOS $want runtime on this machine ($(runtimes))"; return 1; }
     UDID="$(xcrun simctl create "Lumen $leg" "$type" "$rt")" || { say "NOT MEASURED $leg: cannot create a ${name//_/ } on iOS $version"; return 1; }
@@ -107,7 +133,7 @@ create() { # leg want look size names... -> sets UDID, DESC
 
 COMMON=(-project "$HERE/Lumen.xcodeproj" -scheme Lumen -derivedDataPath "$OUT/dd")
 BUILT=""
-run_leg() { # leg want look size names...
+run_leg() { # leg want smallest|largest look size names...
     local leg="$1"
     [[ ",$LEGS," == *",$leg,"* ]] || return 0
     create "$@" || { STATUS=1; return 0; }
@@ -154,8 +180,8 @@ run_leg() { # leg want look size names...
     xcrun simctl shutdown "$UDID" >/dev/null 2>&1; xcrun simctl delete "$UDID" >/dev/null 2>&1
 }
 
-run_leg large-dark newest dark large "${LARGE[@]}"
-run_leg small-oldest 18 light large "${SMALL[@]}"
-run_leg small-largest newest dark accessibility-extra-extra-extra-large "${SMALL[@]}"
+run_leg large-dark newest largest dark large "${LARGE[@]}"
+run_leg small-oldest 18 smallest light large "${SMALL[@]}"
+run_leg small-largest newest smallest dark accessibility-extra-extra-extra-large "${SMALL[@]}"
 say "== status $STATUS"
 exit $STATUS
