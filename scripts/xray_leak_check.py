@@ -323,6 +323,7 @@ def main():
     parser.add_argument("--out", required=True)
     parser.add_argument("--quic-site", default="https://cloudflare-quic.com/cdn-cgi/trace")
     options = parser.parse_args()
+    options.out = os.path.abspath(options.out)
     os.makedirs(options.out, exist_ok=True)
     app = os.path.abspath(options.app)
     relay = os.path.join(app, "Contents", "MacOS", "LumenXray")

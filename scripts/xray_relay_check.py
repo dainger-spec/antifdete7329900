@@ -396,6 +396,9 @@ def main():
     parser.add_argument("--work")
     parser.add_argument("--keep", action="store_true")
     options = parser.parse_args()
+    # The relays run from "/" (as the app starts one): every path given is taken as it was meant here.
+    options.xray = os.path.abspath(options.xray)
+    options.config_tool = os.path.abspath(options.config_tool)
     work = options.work or tempfile.mkdtemp(prefix="xray-relay-check-")
     os.makedirs(work, exist_ok=True)
     processes = []

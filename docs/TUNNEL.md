@@ -723,7 +723,7 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   The proxy list's text export writes links in plaintext, as it writes passwords — what that export is
   for.
 - Formats (docs/UPDATES.md §4, R2 and R4): `config.bin` is format 2 while its proxy is a link's, a
-  profile export (`.pbprofile`) format 4, the proxy list format 4. Versions before links (0.1.18 and
+  profile export (`.pbprofile`) format 4, the proxy list format 4. Versions before links (0.1.17 and
   older) refuse them as a newer version's: such a profile does not start there, its file is not written
   over, and that version's sync stops with "a newer version" until it is updated — rather than read a
   profile without its proxy, or drop the link when it writes the list back. Every other file stays as

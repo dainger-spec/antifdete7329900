@@ -395,7 +395,8 @@ if [[ "$XRAY" == "1" ]]; then
     esac
     part="$XRAY_DIR/xray-darwin-$goarch"
     if [[ -n "${XRAY_BINARY:-}" ]]; then
-      cp "$XRAY_BINARY" "$part"
+      # (CI builds it where this would put it: then it is already there.)
+      [[ "$XRAY_BINARY" -ef "$part" ]] || cp "$XRAY_BINARY" "$part"
     else
       scripts/build-xray.sh --arch "$goarch" --out "$part"
     fi
