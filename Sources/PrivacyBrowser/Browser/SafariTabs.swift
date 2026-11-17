@@ -8,8 +8,7 @@ import WebKit
 /// window leaves its tabs for its next start (Settings → Startup → Restore tabs, `OpenTabs`), and
 /// opened again at that start; and a new tab on an address, as ⌘T and the address bar make one.
 ///
-/// Until 15 November the setting worked only in a window of ours (an iPhone view, the simplified
-/// mode): `BrowserSession` kept the tabs of its own windows and opened them again, while a profile
+/// Until 15 November the setting worked only in a window of ours (the simplified mode): `BrowserSession` kept the tabs of its own windows and opened them again, while a profile
 /// in Safari's window — every Mac profile — started on its start page whatever it had left open.
 /// Safari's own way back to a session is its saved window state, which a profile's window does not
 /// have (`SafariChrome.disableStateRestoration`: it would be written outside the profile's home),

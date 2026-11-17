@@ -2,120 +2,58 @@ import Foundation
 
 /// A target Apple OS "generation" a profile can be tagged with (the iStealth-style
 /// version-aware idea). It bundles the **self-declared** signals that a profile can actually
-/// control for a given iOS/iPadOS/macOS version: the `User-Agent` string, a suggested set of
-/// defaults, and the id of the behaviour set (injected-script bundle) to use.
+/// control for a given macOS version: the `User-Agent` string, a suggested set of defaults, and
+/// the id of the behaviour set (injected-script bundle) to use.
 ///
 /// HONEST SCOPE — read before assuming more than this does:
 ///   * Choosing a generation changes the **declared** `User-Agent` (HTTP header +
 ///     `navigator.userAgent`) and some per-profile defaults. Nothing else.
 ///   * It does NOT switch the real WebKit core. The engine is always the macOS system WebKit
-///     of the Mac the app runs on. Shipping or loading a different WebKit build (an older iOS
-///     core, say) is not possible through public API; it needs the private/internal WebKit
-///     frameworks, or bundling and running a separate engine.
-///   * Only the macOS desktop generation (`matchesEngine == true`) is actually consistent with
-///     the engine, and even then only when its version equals the host's real Safari version.
-///     An iOS/iPadOS generation is a *mobile view*: Safari on this Mac under that device's UA, in
-///     a window of its screen's size (the app's), and nothing else — every measured signal
-///     (rendering, feature set, touch, the screen, TLS) says "desktop Mac", as in Safari's own
-///     Develop › User Agent.
-///   * The macOS generation declares the host's own Safari version at runtime
-///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback. Mobile
-///     UA strings are the ones Safari sends on that OS: from iOS 26.1 on, Safari freezes the OS
-///     token at "18_7" (as macOS Safari freezes "10_15_7"; WebKit bug 298260) and only
-///     "Version/" names the release, so "iPhone OS 26_0" is a string no Safari sends. iPadOS
-///     Safari asks for desktop websites by default and then sends the Mac's UA. The Version
-///     tokens go stale as Apple ships updates: keep them current, or type a custom UA copied
-///     from the real device you want to resemble.
+///     of the Mac the app runs on. Shipping or loading a different WebKit build is not possible
+///     through public API; it needs the private/internal WebKit frameworks, or bundling and
+///     running a separate engine.
+///   * The macOS generation (`matchesEngine == true`) is consistent with the engine when its
+///     version equals the host's real Safari version, which it declares at runtime
+///     (`userAgent(hostSafariVersion:)`); its catalog string below is only the fallback.
+///
+/// The iPhone and iPad views a profile could once be are gone (the owner, 16 November): their ids
+/// are `DeviceGenerations.retiredIDs`, and a profile stored with one opens as a Mac's.
 ///
 /// The `behaviorSetID` field is the forward-looking extension point: when Apple ships a new
 /// WebKit version with behaviours worth matching, a new behaviour set can be registered and
 /// pointed at from new generations here, without touching the profile format or the rest of
 /// the app (see `BehaviorSets` in the app layer).
-/// What an iPhone shows a page of itself that the Mac's engine does not: measured on the owner's
-/// iPhone (iOS 27, Safari 27, 8 November) with scripts/phone_page.py — a 402×874 point screen at
-/// 3×, five touch points, the platform "iPhone".
-public struct PhoneDevice: Equatable, Sendable {
-    public let platform: String
-    public let screenWidth: Int
-    public let screenHeight: Int
-    public let scale: Double
-    public let maxTouchPoints: Int
-
-    public init(platform: String, screenWidth: Int, screenHeight: Int, scale: Double, maxTouchPoints: Int) {
-        self.platform = platform
-        self.screenWidth = screenWidth
-        self.screenHeight = screenHeight
-        self.scale = scale
-        self.maxTouchPoints = maxTouchPoints
-    }
-
-    public static let ownersIPhone = PhoneDevice(platform: "iPhone", screenWidth: 402, screenHeight: 874, scale: 3, maxTouchPoints: 5)
-}
-
-/// How far an iPhone view goes to look like a phone (the owner, 8 November). `full`, the default:
-/// every value of the phone a page reads — the engine's own where WebKit has a setting for it (the
-/// platform, the pixel density), a script's for the rest (the screen, touch, the pointer and hover,
-/// the orientation), which a page that looks for them can tell are a script's. `engineOnly`: only
-/// what WebKit itself answers, so nothing a page reads is a script's — and the screen, touch and
-/// the pointer stay this Mac's, which a page sees at once.
-public enum PhoneDisguise: String, Codable, Sendable, CaseIterable {
-    case full, engineOnly
-}
-
 public struct DeviceGeneration: Identifiable, Equatable, Sendable {
-    public enum Platform: String, Codable, Sendable, CaseIterable {
-        case macOS, iOS, iPadOS
-    }
-
     public let id: String
     /// Localization key for the display name (resolved by the app layer).
     public let nameKey: String
-    public let platform: Platform
     /// Marketing OS version, e.g. "26", "27".
     public let osVersionLabel: String
     public let userAgent: String
-    /// True only for the macOS desktop family — the only one consistent with the real engine.
+    /// True for the macOS desktop family — the one consistent with the real engine.
     public let matchesEngine: Bool
     /// Suggested default when a new profile picks this generation.
     public let defaultWebRTCPolicy: WebRTCPolicy
     /// Which injected-script behaviour set this generation uses (extension point).
     public let behaviorSetID: String
-    /// The processor count WebKit is given in the profile's process (`ProfileProcess`), so that
-    /// `navigator.hardwareConcurrency` is the device's in the page, its frames and every worker —
-    /// WebKit's own value, not a script's. nil: this Mac's own count.
-    ///
-    /// WebKit reports 4 for fewer than 8 cores and 8 from 8 cores up (`NavigatorBase::
-    /// hardwareConcurrency`), so most Macs say 8 and an iPhone says 4: every iPhone iOS 26 and 27
-    /// run on has a 6-core CPU (A13 to A19: two performance and four efficiency cores, Apple's
-    /// specifications), and the owner's iPhone (iOS 27.0) reports 4. The iPad view keeps the Mac's
-    /// count: it sends the Mac's User-Agent, as Safari on an iPad does by default, so a page takes
-    /// it for a Mac, and iPads themselves differ (an A-series iPad 4, an M-series iPad 8).
-    public let processorCores: Int?
-    /// The phone an iPhone view presents itself as (`PhoneDevice`); nil for the Mac and the iPad
-    /// view (an iPad sends the Mac's User-Agent).
-    public let phone: PhoneDevice?
 
-    public init(id: String, nameKey: String, platform: Platform, osVersionLabel: String,
+    public init(id: String, nameKey: String, osVersionLabel: String,
                 userAgent: String, matchesEngine: Bool,
-                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String, processorCores: Int? = nil,
-                phone: PhoneDevice? = nil) {
+                defaultWebRTCPolicy: WebRTCPolicy, behaviorSetID: String) {
         self.id = id
         self.nameKey = nameKey
-        self.platform = platform
         self.osVersionLabel = osVersionLabel
         self.userAgent = userAgent
         self.matchesEngine = matchesEngine
         self.defaultWebRTCPolicy = defaultWebRTCPolicy
         self.behaviorSetID = behaviorSetID
-        self.processorCores = processorCores
-        self.phone = phone
     }
 
     /// The User-Agent this generation declares on a Mac whose Safari is `hostSafariVersion`
     /// (e.g. "26.0.1"). The engine-matching macOS generation names that version: Safari and
     /// WKWebView render with the same system WebKit, so any other version would contradict the
     /// engine a page can measure. "Intel Mac OS X 10_15_7" is genuine — every Safari since
-    /// macOS 11 freezes the OS version at that value. Mobile generations keep their fixed UA.
+    /// macOS 11 freezes the OS version at that value.
     public func userAgent(hostSafariVersion: String?) -> String {
         guard matchesEngine, let version = hostSafariVersion, Self.isSafariVersion(version) else { return userAgent }
         return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/\(version) Safari/605.1.15"
@@ -195,7 +133,6 @@ public enum SafariVersions {
     /// `pushNotification` object), measured in a plain Safari window (scripts/window_safari_check.py,
     /// run 42471690410, 8 November): Safari 26.6.2 and 27.0.1 do, Safari 27.2 does not — nor the owner's
     /// Safari on his Mac (8 November). Safari 27.1 was not measured; it is counted with 27.0.
-    /// No iPhone or iPad Safari has it.
     public static func givesWindowSafari(_ version: String) -> Bool {
         let parts = version.split(separator: ".").compactMap { Int($0) }
         guard let major = parts.first else { return false }
@@ -212,42 +149,33 @@ public enum SafariVersions {
     }
 }
 
-/// Catalog of selectable generations. Desktop first (recommended), then mobile UA-only ones.
+/// Catalog of selectable generations: the Mac's.
 public enum DeviceGenerations {
     /// The generation picked for a new profile and used when a stored id is unknown.
     public static let defaultID = "macos-26"
 
-    /// Behaviour-set identifiers. Both currently resolve to the same WebKit shims (see the app
-    /// layer); they exist so future per-generation behaviours have a stable key to hang on.
+    /// Behaviour-set identifier (see the app layer); it exists so future per-generation
+    /// behaviours have a stable key to hang on.
     public static let desktopBehavior = "desktop"
-    public static let mobileBehavior = "mobile"
 
     public static let all: [DeviceGeneration] = [
         DeviceGeneration(
-            id: "macos-26", nameKey: "gen.macos26", platform: .macOS, osVersionLabel: "26",
+            id: "macos-26", nameKey: "gen.macos26", osVersionLabel: "26",
             userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
             matchesEngine: true, defaultWebRTCPolicy: .disabled, behaviorSetID: desktopBehavior),
-        DeviceGeneration(
-            id: "ios-27", nameKey: "gen.ios27", platform: .iOS, osVersionLabel: "27",
-            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
-            phone: .ownersIPhone),
-        DeviceGeneration(
-            id: "ios-26", nameKey: "gen.ios26", platform: .iOS, osVersionLabel: "26",
-            userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Mobile/15E148 Safari/604.1",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior, processorCores: 6,
-            phone: .ownersIPhone),
-        DeviceGeneration(
-            id: "ipados-26", nameKey: "gen.ipados26", platform: .iPadOS, osVersionLabel: "26",
-            // Safari's default on an iPad: the desktop website, with the Mac's UA.
-            userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.6 Safari/605.1.15",
-            matchesEngine: false, defaultWebRTCPolicy: .disabled, behaviorSetID: mobileBehavior),
     ]
 
-    /// What a new choice is made from: every generation but the iPad view (the owner, 13
-    /// November: taken out of the list). A profile stored with it keeps it and still resolves
-    /// (`all`); the editor shows it beside these only for such a profile.
-    public static var offered: [DeviceGeneration] { all.filter { $0.platform != .iPadOS } }
+    /// The iPhone and iPad views' ids, from before they were taken out (the owner, 16 November).
+    /// A profile stored, synced or exported with one reads as the default generation, a Mac's
+    /// (`migrated(id:)`).
+    public static let retiredIDs: Set<String> = ["ios-27", "ios-26", "ipados-26"]
+
+    /// The id a profile keeps: a retired one becomes the default generation's; any other, nil
+    /// included, is kept as it is (one a later build knows still resolves to the default).
+    public static func migrated(id: String?) -> String? {
+        guard let id, retiredIDs.contains(id) else { return id }
+        return defaultID
+    }
 
     public static func generation(id: String?) -> DeviceGeneration? {
         guard let id else { return nil }

@@ -206,7 +206,7 @@ struct StartPageView: View {
     static let tile = CGSize(width: 104, height: 84)
     static let gap: CGFloat = 16
 
-    /// Six tiles across, fewer in a narrow window (a mobile device's screen).
+    /// Six tiles across, fewer in a narrow window.
     static func columns(for width: CGFloat) -> Int {
         max(2, min(6, Int((width - 32 + gap) / (tile.width + gap))))
     }

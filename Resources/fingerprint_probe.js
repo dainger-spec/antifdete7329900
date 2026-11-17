@@ -1,7 +1,7 @@
 // Fingerprint surface probe: what fingerprinting pages (deviceinfo.me, pixelscan, CreepJS) read.
 // Run as a function body (WebDriver execute/sync, WKWebView callAsyncJavaScript); returns JSON.
 //
-// The self-test runs it in a plain WKWebView, in a macOS profile and in an iPhone profile; the
+// The self-test runs it in a plain WKWebView and in a macOS profile; the
 // CI step scripts/safari_reference.py runs the same probe in the Mac's real Safari and compares.
 // Keep it synchronous (WebDriver execute/sync).
 const result = {};

@@ -622,7 +622,10 @@ windows be merged and needs one `NSWindow` per tab.
 
 A profile targets an Apple OS generation (`DeviceGeneration` / `DeviceGenerations` in
 `BrowserCore`), stored as `ProfileConfiguration.deviceGenerationID` (tolerant decode; old
-configs read as the default generation).
+configs read as the default generation). The catalog holds the Mac's generation alone since the
+iPhone and iPad views were taken out (16 November): their ids (`DeviceGenerations.retiredIDs`)
+are read as the default generation's wherever a configuration is decoded or made
+(`DeviceGenerations.migrated(id:)`), and a stored `phoneDisguise` is ignored.
 
 - `ProfileConfiguration.effectiveUserAgent` = explicit `userAgent` override, else the
   generation's UA, else the WebKit default. `BrowserSession` applies it to every tab and

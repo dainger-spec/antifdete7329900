@@ -16,20 +16,12 @@ enum WindowProbeAction: Codable, Equatable {
     case shortcut(String)
     /// Typed into the window's address bar, then Return.
     case search(String)
-    /// A drag along the phone's bottom bar by this many points (negative: to the left), made of
-    /// the mouse events a drag sends.
-    case dragBottomBar(Double)
     /// A picture of the window's content as it is drawn now (PNG, base64), for a person to look at.
     case picture
     /// Every editing and browsing action a person takes in a browser window, done as the key
     /// presses it, and what came of it, one line each in `detail` (`WindowAudit`). `withoutMenu`:
     /// with the menu bar emptied first, as a process had none before d4cb4ed (0.1.4) — the control.
     case audit(withoutMenu: Bool)
-    /// Taps on the selected tab's page: fields and a button laid over it, each pressed with the
-    /// mouse at its middle — the events handed straight to the web view, in the window's
-    /// coordinates (a runner's process cannot be the active app, run 42429698672) — and what the
-    /// page heard, as JSON in `detail` (`TapProbe`).
-    case tap
     /// A new tab on this address, after the window's last one: in Safari's window as File › New Tab
     /// at End and the address bar make one (`SafariTabs.openTab`), in ours as ⌘T and the address do.
     case openTab(String)
@@ -45,11 +37,6 @@ enum WindowProbeAction: Codable, Equatable {
     /// The profile's name and colour taken out of Safari's windows (false) or put back (true): what
     /// a page measures is compared between the two.
     case marker(Bool)
-    /// Which of a few fonts only this Mac has, and a few an iPhone has too, the page in front finds
-    /// — by a canvas's text width, by an element's width (CSS fallback), by `FontFace` with
-    /// `local()`, and by a canvas in a worker — and whether CSS `cursive` is Snell Roundhand, as JSON
-    /// in `detail` (`PhoneFonts`).
-    case fonts
     /// Typed into the window's address bar one key press at a time, as a person types, and nothing
     /// pressed after: what the field holds then and every exception thrown meanwhile, as JSON in
     /// `detail` (`AddressBarTyping`).
@@ -62,10 +49,9 @@ struct WindowLook: Codable, Equatable {
     var found = false
     var detail = ""
     var hostsSafariChrome = false
-    /// In our window: its tabs, the selected one, and whether the tab overview is up.
+    /// In our window: its tabs and the selected one.
     var tabs = -1
     var selected = -1
-    var overviewShown = false
     var urls: [String] = []
     /// In Safari's window: how its tabs' pages were read (`SafariTabs.source`).
     var tabsSource = ""
@@ -115,24 +101,6 @@ enum WindowProbe {
                                                         isARepeat: false, keyCode: 0) {
                 look.found = NSApp.mainMenu?.performKeyEquivalent(with: event) ?? false
             }
-        case .dragBottomBar(let distance):
-            look.action = "drag \(Int(distance)) pt along the bottom bar"
-            if let window, let bar = bottomBar(in: window.contentView) {
-                let frame = bar.convert(bar.bounds, to: nil)
-                let start = NSPoint(x: distance < 0 ? frame.maxX - 6 : frame.minX + 6, y: frame.midY)
-                let end = NSPoint(x: start.x + distance, y: start.y)
-                func mouse(_ type: NSEvent.EventType, _ point: NSPoint) -> NSEvent? {
-                    NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                                       windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)
-                }
-                // Straight to the bar, as AppKit sends a drag to the view it began in.
-                if let down = mouse(.leftMouseDown, start), let drag = mouse(.leftMouseDragged, end), let up = mouse(.leftMouseUp, end) {
-                    bar.mouseDown(with: down)
-                    bar.mouseDragged(with: drag)
-                    bar.mouseUp(with: up)
-                    look.found = true
-                }
-            }
         case .picture:
             look.action = "picture"
             if let view = window?.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -153,12 +121,6 @@ enum WindowProbe {
                     look.detail += thrown.map { "\nexception during the actions: \($0.prefix(300))" }.joined()
                 }
                 look.found = true
-            }
-        case .tap:
-            look.action = "tap"
-            if let window, let webView = controller?.selectedTab?.webView {
-                look.detail = await TapProbe.run(webView, in: window)
-                look.found = !look.detail.isEmpty
             }
         case .openTab(let address):
             look.action = "open a tab"
@@ -195,17 +157,6 @@ enum WindowProbe {
                 look.detail = await measured(by: page)
                 look.found = !look.detail.hasPrefix("error")
             }
-        case .fonts:
-            look.action = "fonts"
-            if let window, let page = controller?.selectedTab?.webView
-                ?? (SafariChromeHost.isBrowserWindow(window) ? SafariChromeHost.frontPage(in: window) : nil) {
-                do {
-                    look.detail = try await page.callAsyncJavaScript(fontsScript, contentWorld: .defaultClient) as? String ?? "error: no value"
-                } catch {
-                    look.detail = "error: \(error)"
-                }
-                look.found = !look.detail.hasPrefix("error")
-            }
         case .marker(let shown):
             look.action = shown ? "the profile's marker back" : "the profile's marker out"
             if SafariChromeHost.isHosting {
@@ -237,7 +188,6 @@ enum WindowProbe {
         if let controller {
             look.tabs = controller.tabCount
             look.selected = controller.selectedTabIndex
-            look.overviewShown = controller.isShowingTabOverview
             look.urls = controller.tabs.map { $0.url?.absoluteString ?? "" }
         } else if SafariChromeHost.isHosting, let window, SafariChromeHost.isBrowserWindow(window) {
             // Safari's window: its tabs as Safari hands them out, and how their pages were read.
@@ -263,64 +213,6 @@ enum WindowProbe {
         return look
     }
 
-    /// The fonts a page finds (`WindowProbeAction.fonts`): four only this Mac has (an iPhone has
-    /// none of them: Apple's iOS font list) and four both have. A family is found when text in it,
-    /// with a generic family behind it, is not as wide as the generic family alone, for any of three.
-    /// In the page's world of the self-test's own (the page's scripts are not asked), whose fonts are
-    /// the page's. (No backslash in it: a plain string literal.)
-    static let fontsScript = """
-    const families = { mac: ['Monaco', 'Apple Chancery', 'Andale Mono', 'Lucida Grande'],
-                       ios: ['Zapfino', 'Optima', 'Snell Roundhand', 'Hoefler Text'] };
-    const seen = (ctx, families) => {
-      const width = (font) => { ctx.font = font; return ctx.measureText('mmmmmmmmmmlli WwQq 0123').width; };
-      const out = {};
-      for (const kind of ['mac', 'ios']) {
-        out[kind] = families[kind].filter((f) => ['monospace', 'serif', 'sans-serif']
-          .some((g) => width('40px "' + f + '", ' + g) !== width('40px ' + g)));
-      }
-      out.cursiveIsSnell = width('40px cursive') === width('40px "Snell Roundhand", serif');
-      return out;
-    };
-    const canvas = seen(document.createElement('canvas').getContext('2d'), families);
-    const span = document.createElement('span');
-    span.style.cssText = 'position:absolute;left:-9999px;top:0;font-size:40px;white-space:nowrap';
-    span.textContent = 'mmmmmmmmmmlli WwQq 0123';
-    (document.body || document.documentElement).appendChild(span);
-    const css = {};
-    for (const kind of ['mac', 'ios']) {
-      css[kind] = families[kind].filter((f) => ['monospace', 'serif', 'sans-serif'].some((g) => {
-        span.style.fontFamily = g;
-        const alone = span.offsetWidth;
-        span.style.fontFamily = '"' + f + '", ' + g;
-        return span.offsetWidth !== alone;
-      }));
-    }
-    span.remove();
-    const local = {};
-    for (const kind of ['mac', 'ios']) {
-      local[kind] = [];
-      for (const f of families[kind]) {
-        try {
-          await new FontFace('pb-probe-' + Math.random().toString(36).slice(2), 'local("' + f + '")').load();
-          local[kind].push(f);
-        } catch (e) {}
-      }
-    }
-    let worker = null;
-    try {
-      const source = 'const seen = ' + seen.toString() + '; postMessage(seen(new OffscreenCanvas(8, 8).getContext("2d"), '
-        + JSON.stringify(families) + '));';
-      const w = new Worker(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })));
-      worker = await new Promise((resolve) => {
-        w.onmessage = (e) => resolve(e.data);
-        w.onerror = () => resolve(null);
-        setTimeout(() => resolve(null), 4000);
-      });
-      w.terminate();
-    } catch (e) {}
-    return JSON.stringify({ canvas, css, local, worker });
-    """
-
     /// Everything a page can measure of its window and its screen, as the page in front measures
     /// it: one line, the same for the same window.
     private static func measured(by page: WKWebView) async -> String {
@@ -335,13 +227,6 @@ enum WindowProbe {
                 continuation.resume(returning: (value as? String) ?? "error: \(error.map { String(describing: $0) } ?? "no value")")
             }
         }
-    }
-
-    private static func bottomBar(in view: NSView?) -> MobileBottomBar? {
-        guard let view else { return nil }
-        if let bar = view as? MobileBottomBar { return bar }
-        for subview in view.subviews { if let bar = bottomBar(in: subview) { return bar } }
-        return nil
     }
 
     // The accessibility tree through the Objective-C runtime: AppKit's views, SwiftUI's nodes and
@@ -366,8 +251,8 @@ enum WindowProbe {
 
     /// Every control under the window's content: its views (an AppKit control's identifier is its
     /// view's), and inside a SwiftUI hosting view the accessibility nodes SwiftUI makes for its
-    /// buttons — each with whether something above it is hidden (a hidden overview's buttons are
-    /// not there for a person).
+    /// buttons — each with whether something above it is hidden (a hidden view's buttons are not
+    /// there for a person).
     private static func walk(_ root: Any, hidden: Bool = false, depth: Int = 0, _ visit: (Any, Bool) -> Bool) -> Bool {
         guard depth < 60 else { return false }
         var hidden = hidden

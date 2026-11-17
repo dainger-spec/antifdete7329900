@@ -85,7 +85,6 @@ final class ProfileCheckRun: ObservableObject {
         }
         var facts = ProfileCheck.Facts(configuration: configuration, hostSafariVersion: HostSafari.version,
                                        webRTC: Self.webRTC(configuration, guardState: NetworkGuard.shared.state))
-        facts.isMobileView = configuration.deviceGeneration.platform != .macOS
         facts.page = ProfileCheck.Page(snapshot: values)
 
         step = .exit

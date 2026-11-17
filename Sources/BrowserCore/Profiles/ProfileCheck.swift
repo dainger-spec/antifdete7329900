@@ -142,9 +142,6 @@ public enum ProfileCheck {
 
     public struct Facts: Sendable {
         public var configuration: ProfileConfiguration
-        /// An iPhone or iPad view: Safari on this Mac under another device's name. Its engine
-        /// and window are not judged against this Mac's.
-        public var isMobileView = false
         /// The Safari of the WebKit the app runs ("26.6.2").
         public var hostSafariVersion: String
         public var page: Page?
@@ -268,7 +265,6 @@ public enum ProfileCheck {
     }
 
     static func engine(_ facts: Facts) -> Finding {
-        if facts.isMobileView { return Finding(.engine, .unknown, "mobile") }
         guard let userAgent = facts.page?.userAgent else { return Finding(.engine, .unknown, "notMeasured") }
         guard let named = safariVersion(inUserAgent: userAgent) else { return Finding(.engine, .attention, "notSafari", fix: .safariOfThisMac) }
         switch SafariVersions.distance(of: named, fromHost: facts.hostSafariVersion) {
@@ -279,7 +275,6 @@ public enum ProfileCheck {
     }
 
     static func window(_ facts: Facts) -> Finding {
-        if facts.isMobileView { return Finding(.window, .unknown, "mobile") }
         guard let screen = facts.page?.screen, let window = facts.page?.window else { return Finding(.window, .unknown, "notMeasured") }
         let fix: Fix? = facts.configuration.windowSize == nil ? nil : .windowOfTheApp
         if window.width > screen.width || window.height > screen.height {

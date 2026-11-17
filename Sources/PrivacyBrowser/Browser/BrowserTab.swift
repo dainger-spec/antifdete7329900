@@ -30,10 +30,6 @@ struct BrowserTabContext {
     /// The profile has a proxy: a server's certificate is checked without this Mac fetching for
     /// it (`ServerTrust`).
     let hasProxy: Bool
-    /// An iPhone view: the phone's pixel density, which WebKit then renders and answers (`PhoneEngine`).
-    let phoneScale: Double?
-    /// An iPhone view: the platform its pages say, set on each main frame's navigation (`PhoneEngine`).
-    let phonePlatform: String?
     /// The profile proxy's user name and password, answered to the proxy's own auth challenges.
     let proxyCredential: URLCredential?
     /// The profile's pages get a drawn camera, or none ("No camera"), from its script
@@ -97,7 +93,7 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
     /// When the page's process ended lately (`processEnded`). WebKit, left to itself, reloads such a
     /// page once and then leaves it; a delegate that answers the call takes that over — this one
     /// reloaded every time, and a page whose process ends at every load was reloaded for ever, a new
-    /// process each time: on the owner's Mac an iPhone view kept the app, the window server, launchd
+    /// process each time: on the owner's Mac a profile's window kept the app, the window server, launchd
     /// and logd busy until the session was restarted (1 November). Reloaded automatically at most
     /// `automaticReloads` times within `terminationWindow`; after that the tab loads nothing — not
     /// even an error page, which needs a process too — and its window says so (`pageStopped`).
@@ -126,7 +122,6 @@ final class BrowserTab: NSObject, PasswordAutoFillHost, AnswersProfileChallenges
         webView.customUserAgent = context.userAgent
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
-        PhoneEngine.apply(to: webView, scale: context.phoneScale)
         // A link preview is fetched by Quick Look, outside the profile's store and proxy, and a
         // click on it opens the link in the default browser (`HandOffs`).
         webView.allowsLinkPreview = false
@@ -305,8 +300,6 @@ extension BrowserTab: WKNavigationDelegate {
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  preferences: WKWebpagePreferences,
                  decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
-        // An iPhone view's platform, on a main frame's navigation only (`PhoneEngine.setPlatform`).
-        PhoneEngine.setPlatform(context.phonePlatform, on: preferences, mainFrame: navigationAction.targetFrame?.isMainFrame ?? true)
         let decisionHandler: (WKNavigationActionPolicy) -> Void = { decisionHandler($0, preferences) }
         let scheme = navigationAction.request.url?.scheme?.lowercased() ?? ""
         let flags = navigationAction.modifierFlags

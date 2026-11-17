@@ -207,33 +207,31 @@ final class DeviceGenerationTests: XCTestCase {
         // The default generation is the macOS one and is the only engine-consistent family.
         let def = DeviceGenerations.resolved(id: nil)
         XCTAssertEqual(def.id, DeviceGenerations.defaultID)
-        XCTAssertEqual(def.platform, .macOS)
         XCTAssertTrue(def.matchesEngine)
         XCTAssertTrue(def.userAgent.contains("Macintosh"))
-        // iOS/iPadOS generations are honestly marked as not matching the engine.
+        // Only the Mac's: the iPhone and iPad views are taken out, and their ids resolve to it.
+        XCTAssertTrue(DeviceGenerations.all.allSatisfy { $0.matchesEngine && $0.userAgent.contains("Macintosh") })
         for id in ["ios-26", "ios-27", "ipados-26"] {
-            let gen = DeviceGenerations.generation(id: id)
-            XCTAssertNotNil(gen, id)
-            XCTAssertEqual(gen?.matchesEngine, false, id)
+            XCTAssertNil(DeviceGenerations.generation(id: id), id)
+            XCTAssertEqual(DeviceGenerations.resolved(id: id).id, DeviceGenerations.defaultID, id)
+            XCTAssertEqual(DeviceGenerations.migrated(id: id), DeviceGenerations.defaultID, id)
         }
+        XCTAssertNil(DeviceGenerations.migrated(id: nil))
+        XCTAssertEqual(DeviceGenerations.migrated(id: "macos-27"), "macos-27", "one a later build knows is kept")
         // Unknown ids fall back to the default rather than crashing.
         XCTAssertEqual(DeviceGenerations.resolved(id: "nope").id, DeviceGenerations.defaultID)
         XCTAssertNil(DeviceGenerations.generation(id: "nope"))
-        // The iPad view is no longer offered for a new choice, but a stored one still resolves.
-        XCTAssertFalse(DeviceGenerations.offered.contains { $0.platform == .iPadOS })
-        XCTAssertEqual(DeviceGenerations.offered.count, DeviceGenerations.all.count - 1)
-        XCTAssertEqual(DeviceGenerations.resolved(id: "ipados-26").platform, .iPadOS)
     }
 
     func testEffectiveUserAgentPrecedence() {
         // Generation supplies the UA when there is no explicit override.
-        let ios = ProfileConfiguration(deviceGenerationID: "ios-26")
-        XCTAssertEqual(ios.effectiveUserAgent, DeviceGenerations.generation(id: "ios-26")?.userAgent)
-        // Safari on iOS 26.1+ freezes the OS token at 18_7; only Version/ names the release.
-        XCTAssertTrue(ios.effectiveUserAgent?.contains("iPhone OS 18_7 like Mac OS X") == true)
-        XCTAssertTrue(ios.effectiveUserAgent?.contains("Version/26.") == true)
+        let mac = ProfileConfiguration(deviceGenerationID: DeviceGenerations.defaultID)
+        XCTAssertEqual(mac.effectiveUserAgent, DeviceGenerations.generation(id: DeviceGenerations.defaultID)?.userAgent)
+        // An iPhone view's id, from before it was taken out: the Mac's User-Agent.
+        let iPhone = ProfileConfiguration(deviceGenerationID: "ios-26")
+        XCTAssertEqual(iPhone.effectiveUserAgent, mac.effectiveUserAgent)
         // An explicit user agent overrides the generation.
-        let custom = ProfileConfiguration(userAgent: "Custom/1.0", deviceGenerationID: "ios-26")
+        let custom = ProfileConfiguration(userAgent: "Custom/1.0", deviceGenerationID: DeviceGenerations.defaultID)
         XCTAssertEqual(custom.effectiveUserAgent, "Custom/1.0")
         // No generation and no override → WebKit default (nil).
         XCTAssertNil(ProfileConfiguration(deviceGenerationID: nil).effectiveUserAgent)
@@ -242,11 +240,11 @@ final class DeviceGenerationTests: XCTestCase {
     }
 
     func testGenerationIDRoundTripsAndToleratesOldConfigs() throws {
-        var config = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
-        XCTAssertEqual(config.deviceGenerationID, "ios-27")
+        var config = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: nil))
+        XCTAssertEqual(config.deviceGenerationID, DeviceGenerations.defaultID)
         config.startURL = URL(string: "https://example.com")
         let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(config))
-        XCTAssertEqual(decoded.deviceGenerationID, "ios-27")
+        XCTAssertEqual(decoded.deviceGenerationID, DeviceGenerations.defaultID)
         // A config written before this field existed decodes with deviceGenerationID == nil
         // (→ default generation), without error.
         let legacy = """
@@ -255,5 +253,29 @@ final class DeviceGenerationTests: XCTestCase {
         let old = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(legacy.utf8))
         XCTAssertNil(old.deviceGenerationID)
         XCTAssertEqual(old.deviceGeneration.id, DeviceGenerations.defaultID)
+    }
+
+    /// A profile saved as an iPhone or iPad view — stored here, synced from another Mac or
+    /// imported from a .pbprofile — from before those views were taken out: it decodes, its other
+    /// settings kept, and opens as a Mac's; written again, nothing of the view is left.
+    func testAnOldIPhoneViewProfileDecodesAsAMacs() throws {
+        for (id, disguise) in [("ios-27", "full"), ("ios-26", "engineOnly"), ("ipados-26", "somethingLater")] {
+            let stored = """
+            {"ephemeral":false,"geolocation":{"deny":{}},"historyEnabled":true,"safeBrowsingEnabled":false,\
+            "webRTCPolicy":"disabled","deviceGenerationID":"\(id)","phoneDisguise":"\(disguise)",\
+            "startURL":"https://example.com","tags":["work"]}
+            """
+            let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(stored.utf8))
+            XCTAssertEqual(decoded.deviceGenerationID, DeviceGenerations.defaultID, id)
+            XCTAssertEqual(decoded.deviceGeneration.id, DeviceGenerations.defaultID, id)
+            XCTAssertEqual(decoded.userAgent(hostSafariVersion: "26.1"),
+                           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.1 Safari/605.1.15", id)
+            XCTAssertEqual(decoded.startURL?.absoluteString, "https://example.com", id)
+            XCTAssertEqual(decoded.tags, ["work"], id)
+            XCTAssertNoThrow(try decoded.validate(), id)
+            let written = String(decoding: try JSONCoding.encoder.encode(decoded), as: UTF8.self)
+            XCTAssertFalse(written.contains("phoneDisguise"), written)
+            XCTAssertFalse(written.contains(id), written)
+        }
     }
 }

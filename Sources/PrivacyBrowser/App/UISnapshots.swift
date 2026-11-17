@@ -1746,7 +1746,6 @@ enum UISnapshots {
     static func sampleRows() -> [ProfileRowItem] {
         func id(_ n: UInt8) -> UUID { UUID(uuid: (n, 0x1C, 0x5E, 0x17, 0, n, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, n)) }
         let mac = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "macos-26"), hostSafariVersion: HostSafari.version)
-        let iPhone = ProfileRowItem.appearsAs(DeviceGenerations.resolved(id: "ios-26"), hostSafariVersion: HostSafari.version)
         let now = Date()
         return [
             ProfileRowItem(id: id(1), name: "Personal", activity: .running, exit: .direct, ephemeral: false,
@@ -1760,8 +1759,8 @@ enum UISnapshots {
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-3_600)),
             ProfileRowItem(id: id(4), name: "Research", activity: .stopped,
                            exit: .proxy(endpoint: "nl.gateway.example:1080", countryCode: "NL"), ephemeral: false,
-                           appearsAs: iPhone, lastUsed: now.addingTimeInterval(-86_400),
-                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"], deviceSymbol: "iphone"),
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-86_400),
+                           tags: ["warm-up", "Q4 campaign", "NL", "mobile"]),
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
