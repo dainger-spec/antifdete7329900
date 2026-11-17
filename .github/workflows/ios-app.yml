@@ -26,11 +26,12 @@ on:
         description: iOS runtime (newest, or a version such as 17.5)
         default: newest
       suite:
-        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); "ScreenshotTests" — the App Store's screenshots (iPhone 17 Pro Max, appstore/ in the artifact); both by hand only
+        description: one suite only — "core" (the core's tests alone, a few minutes), "core,build" (and the app built), or a test class; empty runs them all. "DeviceTests" — the job "devices" alone (three iPhones in turn). "RealServerTests" — the sign-in against the real account server with the test account (secrets LUMEN_E2E_EMAIL, LUMEN_E2E_PASSWORD); "ScreenshotTests" — the App Store's screenshots (iPhone 17 Pro Max, appstore/ in the artifact); both by hand only
         default: ""
 
 jobs:
   app:
+    if: ${{ inputs.suite != 'DeviceTests' }}
     # Six jobs side by side, each with its own simulator and testbed; each keeps the order — the
     # reds of its suite first, then its green run.
     strategy:
@@ -91,4 +92,30 @@ jobs:
             build/ios-app/testbed
             build/ios-app/screens
             build/ios-app/appstore
+          if-no-files-found: warn
+
+  devices:
+    # The iPhones testers carry, beyond the jobs above (iPhone 17 Pro, newest iOS, light, default
+    # text): DeviceTests — the path from the first launch through a page, the tabs, the settings, a
+    # proxy and the account, every control on the screen and touchable, the app dark — on the 4.7-inch
+    # SE on iOS 18 (the floor), the Pro Max in dark appearance, and the smallest iPhone at the largest
+    # accessibility text (ios/scripts/devices.sh). One job, the iPhones in turn: the macOS machines
+    # are few. The app is iPhone only and portrait only, so no iPad and no landscape leg. With a suite
+    # asked for by hand it runs only for "DeviceTests".
+    if: ${{ !inputs.suite || inputs.suite == 'DeviceTests' }}
+    name: Lumen iOS — devices (SE · iOS 18, Pro Max · dark, smallest · largest text)
+    runs-on: ${{ inputs.os || 'xcode-27' }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: DeviceTests on three iPhones in turn
+        run: ios/scripts/devices.sh build/ios-devices
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-devices-${{ github.run_number }}
+          path: |
+            build/ios-devices/*.txt
+            build/ios-devices/*.log
+            build/ios-devices/screens
           if-no-files-found: warn
