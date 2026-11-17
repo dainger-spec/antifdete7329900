@@ -105,21 +105,29 @@ class LumenUITestCase: XCTestCase {
     /// the keyboard up a person drags the part of the form the keyboard leaves free, beside its rows:
     /// DeviceTests at the largest text (devices run 143) — the swipe from the screen's middle started
     /// on the field being typed in, just above the keyboard, and twelve of them never moved the form;
-    /// the tags' field stayed under the keyboard. Without a keyboard, the swipe the other tests have
-    /// always made.
+    /// the tags' field stayed under the keyboard. Back up, a shorter drag held at its end, so that a
+    /// sheet whose list has come back to its top is not pulled down and closed. Toward the end without
+    /// a keyboard, the swipe the other tests have always made.
     func scroll(towardStart: Bool) {
         let keyboard = app.keyboards.firstMatch
         let window = app.windows.firstMatch.frame
-        let swipe = { towardStart ? self.app.swipeDown(velocity: .slow) : self.app.swipeUp(velocity: .slow) }
-        guard keyboard.exists, !window.isEmpty else { swipe(); return }
+        let up = keyboard.exists
+        if !towardStart && !up || window.isEmpty {
+            towardStart ? app.swipeDown(velocity: .slow) : app.swipeUp(velocity: .slow)
+            return
+        }
         let top = window.minY + window.height * 0.15                      // below the bar
-        let bottom = min(window.maxY, keyboard.frame.minY) - 8
-        guard bottom - top > 80 else { swipe(); return }
+        // The keyboard's frame leaves out the bar above its keys (AutoFill's "Passwords", the word
+        // suggestions): devices run 147, a drag started on that bar and the sign-in form never moved.
+        let bottom = up ? min(window.maxY, keyboard.frame.minY - 56) : window.minY + window.height * 0.85
+        guard bottom - top > 80 else {
+            towardStart ? app.swipeDown(velocity: .slow) : app.swipeUp(velocity: .slow)
+            return
+        }
         let screen = app.coordinate(withNormalizedOffset: .zero)
         let x = window.minX + 12                                           // the form's margin, no field there
-        let low = screen.withOffset(CGVector(dx: x, dy: bottom - (bottom - top) * 0.1))
-        let high = screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * 0.1))
-        let (from, to) = towardStart ? (high, low) : (low, high)
+        let at = { (share: CGFloat) in screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * share)) }
+        let (from, to) = towardStart ? (at(0.1), at(up ? 0.9 : 0.5)) : (at(0.9), at(0.1))
         from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 

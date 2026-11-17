@@ -136,21 +136,9 @@ COMMON=(-project "$HERE/Lumen.xcodeproj" -scheme Lumen -derivedDataPath "$OUT/dd
 # package (../Package.swift) names no iOS minimum, and Xcode 26 builds such a package for iOS 12,
 # where CryptoKit is not (run 146 on macos-26: "'SymmetricKey' is only available in iOS 13.0").
 FLOOR="$(sed -n 's/^ *iOS: "\([0-9.]*\)".*/\1/p' "$HERE/project.yml" | head -1)"
-BUILT=""
-run_leg() { # leg want smallest|largest look size names...
+# test_leg <leg>: DeviceTests on the leg's simulator, its log in $OUT/<leg>.txt -> xcodebuild's status.
+test_leg() {
     local leg="$1"
-    [[ ",$LEGS," == *",$leg,"* ]] || return 0
-    create "$@" || { STATUS=1; return 0; }
-    say "== $leg: $DESC ($UDID)"
-    if [[ -z "$BUILT" ]]; then
-        # Built once, for the first leg's simulator; the others run the same build (iOS 18 and up).
-        if ! xcodebuild build-for-testing "${COMMON[@]}" -destination "id=$UDID" IPHONEOS_DEPLOYMENT_TARGET="${FLOOR:-18.0}" \
-                >"$OUT/build.txt" 2>&1; then
-            grep -E "error:" "$OUT/build.txt" | head -30 | tee -a "$LOG"; say "BUILD FAILED"; exit 2
-        fi
-        BUILT=1
-        say "built"
-    fi
     rm -rf "$OUT/$leg.xcresult"
     TEST_RUNNER_LUMEN_DEVICE_LEG="$leg" xcodebuild test-without-building "${COMMON[@]}" -destination "id=$UDID" \
         -only-testing:LumenUITests/DeviceTests -resultBundlePath "$OUT/$leg.xcresult" >"$OUT/$leg.txt" 2>&1 &
@@ -166,12 +154,62 @@ run_leg() { # leg want smallest|largest look size names...
             break
         fi
     done
-    wait "$pid"; local code=$?
+    wait "$pid"
+}
+
+# diagnostics <leg> <name> [runner]: what says why a run failed beyond its log — the crash reports
+# this Mac wrote since the leg began (the app's, the test runner's); for a test runner that never
+# started, also the result bundle's diagnostics and what the runner and testmanagerd logged.
+diagnostics() {
+    local leg="$1" dir="$OUT/diagnostics/$2"
+    mkdir -p "$dir"
+    find "$HOME/Library/Logs/DiagnosticReports" -type f -newer "$OUT/.start-$leg" \( -iname '*Lumen*' -o -iname '*XCT*' -o -iname '*testmanager*' \) \
+        -exec cp {} "$dir/" \; 2>/dev/null
+    if [[ "${3:-}" == runner ]]; then
+        xcrun xcresulttool export diagnostics --path "$OUT/$leg.xcresult" --output-path "$dir/result" >/dev/null 2>&1 || true
+        xcrun simctl spawn "$UDID" log show --last 30m --style compact \
+            --predicate 'process BEGINSWITH "LumenUITests" OR process == "testmanagerd" OR process == "XCTRunner"' \
+            >"$dir/runner.log" 2>&1 || true
+    fi
+    say "$leg: diagnostics in diagnostics/$2 ($(find "$dir" -type f | wc -l | tr -d ' ') files)"
+}
+
+BUILT=""
+run_leg() { # leg want smallest|largest look size names...
+    local leg="$1"
+    [[ ",$LEGS," == *",$leg,"* ]] || return 0
+    create "$@" || { STATUS=1; return 0; }
+    say "== $leg: $DESC ($UDID)"
+    if [[ -z "$BUILT" ]]; then
+        # Built once, for the first leg's simulator; the others run the same build (iOS 18 and up).
+        if ! xcodebuild build-for-testing "${COMMON[@]}" -destination "id=$UDID" IPHONEOS_DEPLOYMENT_TARGET="${FLOOR:-18.0}" \
+                >"$OUT/build.txt" 2>&1; then
+            grep -E "error:" "$OUT/build.txt" | head -30 | tee -a "$LOG"; say "BUILD FAILED"; exit 2
+        fi
+        BUILT=1
+        say "built"
+    fi
+    touch "$OUT/.start-$leg"
+    test_leg "$leg"; local code=$?
+    # A test runner that never started says nothing of the app (run 147, the SE on iOS 18.6 on
+    # macos-26: "Early unexpected exit, operation never finished bootstrapping ... Test crashed with
+    # signal abrt while preparing to run tests", eight minutes after "Running tests..."). Its crash
+    # reports and the result's diagnostics are kept, the simulator is started afresh, and the leg runs
+    # once more; a second such start fails the leg as any failure does.
+    if [[ $code -ne 0 ]] && grep -q "never finished bootstrapping" "$OUT/$leg.txt"; then
+        diagnostics "$leg" "$leg-first" runner
+        mv "$OUT/$leg.txt" "$OUT/$leg-first.txt"
+        say "again $leg: the test runner never started — $(grep -m1 -o 'Underlying Error: [^)]*' "$OUT/$leg-first.txt" | cut -c1-160)"
+        xcrun simctl shutdown "$UDID" >/dev/null 2>&1
+        xcrun simctl boot "$UDID" >/dev/null 2>&1; xcrun simctl bootstatus "$UDID" -b >/dev/null 2>&1
+        test_leg "$leg"; code=$?
+    fi
     if [[ $code -eq 0 ]]; then
         say "GREEN $leg: $(grep -E 'Executed [0-9]+ test' "$OUT/$leg.txt" | tail -1)"
     else
         grep -E "error: -\[|Test Case .* failed|stopped after" "$OUT/$leg.txt" | head -10 | tee -a "$LOG"
         say "NOT GREEN $leg ($DESC)"; STATUS=1
+        diagnostics "$leg" "$leg"
         # What the app and the system said in its last minutes (the app's own lines start "Lumen").
         xcrun simctl spawn "$UDID" log show --last 20m --style compact \
             --predicate 'process == "Lumen" AND (eventMessage CONTAINS "Lumen" OR eventMessage CONTAINS "error")' \

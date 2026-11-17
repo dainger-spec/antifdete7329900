@@ -129,4 +129,5 @@ jobs:
             build/ios-devices/*.txt
             build/ios-devices/*.log
             build/ios-devices/screens
+            build/ios-devices/diagnostics
           if-no-files-found: warn
