@@ -149,11 +149,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         failure = nil
     }
 
+    // A page that failed: the tab's own load ends (the trunk's link handoff), and the failure is noted
+    // for the proxy that does not answer (the design's p3-dead).
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
         noteFailure(error)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
         noteFailure(error)
     }
 
@@ -185,14 +189,6 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         endOwnLoad()   // the tab's own load, or a navigation that took its place
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if navigation === ownNavigation { endOwnLoad() }
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if navigation === ownNavigation { endOwnLoad() }
     }
 
     /// A session's link must not leave its proxy and its data for another app. Schemes a web view
