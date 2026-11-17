@@ -2699,6 +2699,7 @@
 "license.activate.next" = "Дальше";
 "license.activate.plans" = "Тарифы на сайте";
 "license.activate.paid" = "Я уже оплатил — обновить статус";
+"license.activate.paid.notYet" = "Оплата пока не видна. Если вы только что оплатили, подождите минуту и нажмите ещё раз — и проверьте, что этот Mac подключён к интернету.";
 "license.activate.unlink" = "Отвязать";
 "license.activate.support" = "Написать в поддержку";
 "settings.section.account" = "Аккаунт";

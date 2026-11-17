@@ -2699,6 +2699,7 @@
 "license.activate.next" = "Continue";
 "license.activate.plans" = "Plans on the Website";
 "license.activate.paid" = "I’ve Paid — Refresh the Status";
+"license.activate.paid.notYet" = "The payment isn’t showing yet. If you’ve just paid, wait a minute and try again — and check that this Mac is online.";
 "license.activate.unlink" = "Unlink";
 "license.activate.support" = "Contact Support";
 "settings.section.account" = "Account";

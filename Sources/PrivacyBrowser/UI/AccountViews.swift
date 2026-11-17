@@ -40,6 +40,10 @@ struct SignInFlow: View {
     @State private var dontRememberKey = false
     @State private var limit: AccountServerError?
     @State private var outcome: LicenseModel.ActivationOutcome?
+    /// "I've paid": the check is running, and what it found — the button said nothing before,
+    /// and the lines above it stayed those of before the payment.
+    @State private var checkingPayment = false
+    @State private var paymentNote: String?
     /// The sign-in the server holds for its letter's code (§5.2): in memory, for this screen only.
     @State private var loginCode: LoginCode?
     @State private var codeText = ""
@@ -413,6 +417,22 @@ struct SignInFlow: View {
         }
     }
 
+    /// "I've paid — refresh": the account asked again, and what it says now said under the button.
+    private func checkPayment() {
+        checkingPayment = true
+        paymentNote = nil
+        Task {
+            await license.refresh()
+            checkingPayment = false
+            if let p = license.state?.entitlement, p.status != .exportOnly {
+                paymentNote = String(format: L("contract.account.payment_received"), LicenseText.plan(p.plan),
+                                     p.periodEndsAt.map(LicenseText.date) ?? "—")
+            } else {
+                paymentNote = L("license.activate.paid.notYet")
+            }
+        }
+    }
+
     // MARK: Connected
 
     private var connected: some View {
@@ -434,8 +454,15 @@ struct SignInFlow: View {
                 if outcome.entitlement.status == .exportOnly, outcome.entitlement.isOwner {
                     Button(L("license.activate.plans")) { openSite("/pricing") }
                         .buttonStyle(.lumenSecondary)
-                    Button(L("license.activate.paid")) { Task { await license.refresh() } }
+                    Button(L(checkingPayment ? "license.account.refreshing" : "license.activate.paid"), action: checkPayment)
                         .buttonStyle(.lumenGhost)
+                        .disabled(checkingPayment)
+                    if let paymentNote {
+                        Text(paymentNote)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             LockActionButton(title: L("license.activate.next")) { onFinished() }
