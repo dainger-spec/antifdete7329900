@@ -638,6 +638,12 @@ struct VMSetupPanel: View {
         } else {
             parts.append(VMText.bytes(progress.have))
         }
+        // Nothing has come for a while: the network is gone, or Apple's server is silent. Said so —
+        // not the last speed and a time left that stand still for as long as that lasts.
+        if progress.stalled {
+            parts.append(L("vm.setup.waiting"))
+            return parts.joined(separator: " · ")
+        }
         if let speed = progress.speed, speed > 0 {
             parts.append(String(format: L("vm.setup.speed"), VMText.bytes(Int64(speed))))
         }
