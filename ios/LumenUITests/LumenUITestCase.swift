@@ -172,7 +172,12 @@ class LumenUITestCase: XCTestCase {
             // The field's one button, whatever the system calls it in the app's language ("Clear text").
             let clear = field.buttons.firstMatch
             if clear.waitForExistence(timeout: attempt == 0 ? 8 : 2), clear.isHittable {
-                clear.tap()
+                // Touched where it was seen, not looked up again for the touch: a field that loses its
+                // focus as a message comes up takes its clear button away (run 175 — the touch looked
+                // for it for a minute and failed the test); a touch on the empty place is harmless, and
+                // the next go sees what is in the field.
+                let spot = clear.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: spot.midX, dy: spot.midY)).tap()
             } else {
                 // No clear button: the cursor to the far end, then delete it all.
                 field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
