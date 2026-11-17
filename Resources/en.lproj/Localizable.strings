@@ -215,7 +215,7 @@
 "editor.cookies.note.existing" = "Read as Import Cookies reads a file, and imported when you save: at once if the profile runs, else at its next launch, before its first page loads.";
 "editor.cookies.error" = "The profile was saved, but its cookies were not imported: %@";
 "editor.locale.mismatch" = "%@ is not where the proxy was last seen to come out (%@): a page that compares the time zone with the IP address's location sees that they differ.";
-"editor.language.note" = "WebKit takes the language once per run: profiles that share the app's process all get the one of the first profile started (Settings → Behavior → each profile its own app gives each its own).";
+"editor.language.note" = "WebKit takes the language once per run: profiles that share the app’s process all get the first one’s. To give each its own, turn on Settings → Windows and Tabs → Each profile its own app in the Dock.";
 "editor.menusInAppLanguage" = "Profile menus in the app's language";
 "editor.menusInAppLanguage.detail" = "Off: Safari's menus and panel in the profile's window are in the language of the country the profile presents itself from, as a local's would be. Lumen's own windows are always in the app's language.";
 "editor.menusInAppLanguage.on" = "The menus will be in your language, but the browser will then use it in its own words to sites too — for example in messages about a wrongly filled form. A site can read them and see that they differ from the language the profile claims.";
@@ -1726,7 +1726,7 @@
 "settings.title" = "Settings";
 "settings.section.startup" = "Startup";
 "settings.section.newProfiles" = "New Profiles";
-"settings.section.behavior" = "Behavior";
+"settings.section.behavior" = "Windows and Tabs";
 "settings.section.proxies" = "Proxies";
 "settings.section.downloads" = "Downloads";
 "settings.section.updates" = "Updates";
@@ -2014,7 +2014,7 @@
 "settings.language.commandLine.detail" = "Lumen was started with -AppleLanguages: this run uses the command line’s language. The choice here applies from the next ordinary start.";
 "settings.language.sites.title" = "Language for websites";
 "settings.language.sites.detail" = "Set in the profile’s settings, under “Time zone and language”.";
-"settings.section.webRTC" = "WebRTC through the proxy";
+"settings.section.webRTC" = "WebRTC through proxies";
 "settings.section.sync" = "Sync";
 "settings.section.security" = "Security";
 "settings.section.automation" = "Automation API";
