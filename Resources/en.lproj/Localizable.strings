@@ -1366,9 +1366,10 @@
 "firstRun.touchID.title" = "Unlock with Touch ID?";
 "firstRun.touchID.subtitle" = "Open the vault with your fingerprint instead of the master password.";
 "firstRun.touchID.turnOn" = "Turn On";
+"firstRun.touchID.retry" = "Try Again";
 "firstRun.touchID.waiting" = "Touch the sensor…";
-"firstRun.touchID.on" = "Done — Touch ID is on.";
-"firstRun.touchID.notRecognised" = "The fingerprint wasn’t recognised. Try again, or turn it on later.";
+"firstRun.touchID.on" = "Touch ID is on";
+"firstRun.touchID.notRecognised" = "The fingerprint wasn’t recognised.";
 "firstRun.touchID.later" = "You can change this in Settings → Security.";
 "firstRun.notNow" = "Not Now";
 "firstRun.continue" = "Continue";

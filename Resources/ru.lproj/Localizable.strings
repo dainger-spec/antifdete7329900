@@ -1366,9 +1366,10 @@
 "firstRun.touchID.title" = "Входить по Touch ID?";
 "firstRun.touchID.subtitle" = "Хранилище будет открываться отпечатком пальца вместо мастер-пароля.";
 "firstRun.touchID.turnOn" = "Включить";
+"firstRun.touchID.retry" = "Повторить";
 "firstRun.touchID.waiting" = "Приложите палец…";
-"firstRun.touchID.on" = "Готово — Touch ID включён.";
-"firstRun.touchID.notRecognised" = "Отпечаток не распознан. Попробуйте ещё раз или включите позже.";
+"firstRun.touchID.on" = "Touch ID включён";
+"firstRun.touchID.notRecognised" = "Отпечаток не распознан.";
 "firstRun.touchID.later" = "Изменить можно в «Настройки → Безопасность».";
 "firstRun.notNow" = "Не сейчас";
 "firstRun.continue" = "Продолжить";

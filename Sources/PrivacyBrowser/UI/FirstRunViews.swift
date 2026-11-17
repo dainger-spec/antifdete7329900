@@ -30,6 +30,10 @@ struct FirstRunTouchIDView: View {
     @State private var outcome: FirstRunTouchIDOutcome?
 
     private var shown: FirstRunTouchIDOutcome? { preview ?? outcome }
+    private var failed: Bool {
+        if case .failed? = shown { return true }
+        return false
+    }
 
     var body: some View {
         LockScreen(title: L("firstRun.touchID.title"), subtitle: L("firstRun.touchID.subtitle")) {
@@ -45,7 +49,7 @@ struct FirstRunTouchIDView: View {
                         LockActionButton(title: L("firstRun.continue"), action: done)
                             .keyboardShortcut(.defaultAction)
                     } else {
-                        LockActionButton(title: L("firstRun.touchID.turnOn"), working: working,
+                        LockActionButton(title: L(failed ? "firstRun.touchID.retry" : "firstRun.touchID.turnOn"), working: working,
                                          workingTitle: L("firstRun.touchID.waiting"), action: turnOn)
                             .keyboardShortcut(.defaultAction)
                         LockLink(title: L("firstRun.notNow"), action: done)
@@ -63,34 +67,38 @@ struct FirstRunTouchIDView: View {
         }
     }
 
-    /// The fingerprint, in a ring of the horizon's light; green once it is on.
+    /// The fingerprint: the system's symbol, monochrome, in a thin quiet ring — no colour, no glow,
+    /// whatever the outcome (the owner, 17 November: the arc is the screen's only ornament).
     private var fingerprint: some View {
-        ZStack {
-            Circle()
-                .fill(Theme.raised)
-                .frame(width: 96, height: 96)
-            Circle()
-                .strokeBorder(shown == .on ? Theme.running.opacity(0.6) : Theme.edge, lineWidth: 1)
-                .frame(width: 96, height: 96)
-            Image(systemName: "touchid")
-                .font(.system(size: 46, weight: .light))
-                .foregroundStyle(shown == .on ? Theme.running : Theme.textPrimary)
-        }
-        .shadow(color: (shown == .on ? Theme.running : Theme.rim).opacity(0.25), radius: 22)
-        .animation(Theme.appearAnimation, value: shown)
-        .accessibilityHidden(true)
+        Image(systemName: "touchid")
+            .font(.system(size: 40, weight: .light))
+            .foregroundStyle(Theme.textPrimary)
+            .frame(width: 84, height: 84)
+            .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
+            .accessibilityHidden(true)
     }
 
+    /// One calm line: «Touch ID включён» with a small check, or what went wrong.
     private func outcomeLine(_ outcome: FirstRunTouchIDOutcome) -> some View {
-        let on = outcome == .on
-        let text: String
-        if case .failed(let problem) = outcome { text = problem } else { text = L("firstRun.touchID.on") }
-        return Label(text, systemImage: on ? "checkmark.circle.fill" : "info.circle")
-            .font(.system(size: 13))
-            .foregroundStyle(on ? Theme.running : Theme.textSecondary)
-            .multilineTextAlignment(.center)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityElement(children: .combine)
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if outcome == .on {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Theme.running)
+                    .accessibilityHidden(true)
+            }
+            Text(outcomeText(outcome))
+                .font(.system(size: 13))
+                .foregroundStyle(outcome == .on ? Theme.textPrimary : Theme.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func outcomeText(_ outcome: FirstRunTouchIDOutcome) -> String {
+        if case .failed(let problem) = outcome { return problem }
+        return L("firstRun.touchID.on")
     }
 
     private func turnOn() {
@@ -323,22 +331,29 @@ struct FirstRunCard<Actions: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-            .strokeBorder(status == .done ? Theme.running.opacity(0.45) : Theme.hairline, lineWidth: 1))
+            .strokeBorder(Theme.hairline, lineWidth: 1))
         .animation(Theme.appearAnimation, value: status)
         .accessibilityElement(children: .contain)
     }
 
+    /// Typographic, in the text's colours; the success colour on the small check alone.
     @ViewBuilder
     private var mark: some View {
         switch status {
         case .done:
-            Label(L("firstRun.status.done"), systemImage: "checkmark.circle.fill")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.running)
+            HStack(spacing: 4) {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Theme.running)
+                    .accessibilityHidden(true)
+                Text(L("firstRun.status.done"))
+                    .foregroundStyle(Theme.textPrimary)
+            }
+            .font(.system(size: 12, weight: .medium))
         case .waiting:
-            Label(L("firstRun.status.waiting"), systemImage: "clock")
+            Text(L("firstRun.status.waiting"))
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(Theme.warning)
+                .foregroundStyle(Theme.textSecondary)
         case .todo, .unavailable:
             EmptyView()
         }
