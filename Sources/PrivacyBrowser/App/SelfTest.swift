@@ -429,7 +429,7 @@ final class SelfTest {
     /// comma-separated), only those groups run: a measurement of one (scripts/aia_variants.py).
     private func group(_ name: String, _ body: () async throws -> Void) async {
         if let only = ProcessInfo.processInfo.environment["PB_SELFTEST_ONLY"],
-           !only.split(separator: ",").contains(where: { $0 == name }) { return }
+           only != name, !only.split(separator: ",").contains(where: { $0 == name }) { return }
         do {
             try await body()
         } catch {
