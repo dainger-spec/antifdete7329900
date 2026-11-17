@@ -316,8 +316,9 @@ enum SweepSteps {
             .sorted().joined(separator: ", ")
         var best: (String, [NSView], CGFloat)?
         // Every tab's view, or every one but the pinned ones (a pinned tab has a view of its own).
-        for (name, views) in byClass where views.count >= 2 && views.count <= max(count, 2) {
-            guard views.allSatisfy({ $0.frame.height >= 16 && $0.frame.height <= 64 && $0.frame.width >= 40 }) else { continue }
+        for (name, all) in byClass {
+            let views = all.filter { $0.frame.height >= 16 && $0.frame.height <= 64 && $0.frame.width >= 40 }
+            guard views.count >= 2, views.count <= max(count, 2) else { continue }
             let area = views.reduce(CGFloat(0)) { $0 + $1.frame.width * $1.frame.height }
             if best == nil || area > (best?.2 ?? 0) { best = (name, views, area) }
         }
@@ -526,6 +527,29 @@ enum SweepSteps {
         await SweepInput.pause(0.4)
     }
 
+    /// Whether the keyboard is the page's: the first responder is a web view or inside one.
+    static func pageHasKeyboard() -> Bool {
+        var view = NSApp.keyWindow?.firstResponder as? NSView
+        while let current = view {
+            if current is WKWebView { return true }
+            view = current.superview
+        }
+        return false
+    }
+
+    /// The page given the keyboard as a person gives it: a click into it; with a sidebar open over
+    /// it and keeping the keyboard, the sidebar closed (⇧⌘L) and a click again.
+    static func focusPage() async {
+        await S.ensurePage()
+        await clickIntoPage()
+        if !pageHasKeyboard() {
+            S.note("after a click into the page the keyboard is \(responder())'s: the sidebar closed")
+            await S.command(kVK_ANSI_L, .maskShift)
+            await SweepInput.pause(0.8)
+            await clickIntoPage()
+        }
+    }
+
     static func wheel() async {
         guard let page = await S.ensurePage(), let center = S.center(of: page) else { return }
         await clickIntoPage()
@@ -565,10 +589,14 @@ enum SweepSteps {
         let modal = NSApp.modalWindow.map { SafariMenuWalk.describe($0) }
         S.note("after ⌘P: sheet \(sheet ?? "none"), modal \(modal ?? "none"), key \(keyWindow())")
         S.expect(sheet != nil || modal != nil, "the print panel came up")
+        var asked = false
         if !NSApp.isActive {
-            // Another app came in front as the panel opened (CI run 43990525206, macOS 26: the
-            // first print on the Mac); a person clicks the panel to go on.
-            S.note("the app is not in front after ⌘P: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nothing") is")
+            // Another app came in front as the panel opened: macOS's own question "Allow Lumen to
+            // find devices on local networks?" (com.apple.UserNotificationCenter), which the print
+            // panel's look for printers brings up the first time an app prints (CI run 43999545658).
+            let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nothing"
+            asked = front == "com.apple.UserNotificationCenter"
+            S.note("the app is not in front after ⌘P: \(front) is" + (asked ? " (macOS's question about the local network)" : ""))
             if let panel = S.browserWindow()?.attachedSheet {
                 await SweepInput.click(NSPoint(x: panel.frame.midX, y: panel.frame.maxY - 8))
                 await SweepInput.pause(0.6)
@@ -576,7 +604,12 @@ enum SweepSteps {
         }
         await S.escape()
         await SweepInput.pause(1.5)
-        S.expect(S.browserWindow()?.attachedSheet == nil && NSApp.modalWindow == nil, "Escape cancelled it")
+        let cancelled = S.browserWindow()?.attachedSheet == nil && NSApp.modalWindow == nil
+        if asked && !cancelled {
+            S.note("Escape went to macOS's question, not to the panel")
+        } else {
+            S.expect(cancelled, "Escape cancelled it")
+        }
     }
 
     static func share() async {
@@ -1090,11 +1123,10 @@ enum SweepSteps {
     /// (⌃⌘2) while the page has the keyboard: WebKit sends the key to the page first and to the menu
     /// again after. Each row's view threw, and there the process ended (CI run 43990525206).
     static func readingListByKey() async {
-        await S.ensurePage()
-        await clickIntoPage()
+        await focusPage()
         await S.command(kVK_ANSI_D, .maskShift)
         await SweepInput.pause(1.5)
-        await clickIntoPage()
+        await focusPage()
         S.note("before ⌃⌘2: responder \(responder())")
         await S.command(kVK_ANSI_2, .maskControl)
         await SweepInput.pause(2)
@@ -1151,17 +1183,66 @@ enum SweepSteps {
         item.target = thrower
         menu.addItem(item)
         defer { menu.removeItem(item) }
-        await S.ensurePage()
-        await clickIntoPage()
+        await focusPage()
         S.note("before ⌘F13: responder \(responder())")
+        S.expect(pageHasKeyboard(), "the page has the keyboard, so that WebKit sends the key to the menu again")
         await S.command(kVK_F13)
         await SweepInput.pause(1.5)
         S.note("after ⌘F13: the process goes on; key \(keyWindow()), responder \(responder())")
     }
 
+    /// ⌘N with the page focused: a window of the profile, as File › New Window chosen by a click
+    /// opens one. The File menu's delegate answered for ⌘N itself, and nothing came (CI run
+    /// 43999545658: nothing sent).
+    static func newWindowByKey() async {
+        await focusPage()
+        let before = S.browserWindowCount()
+        await S.command(kVK_ANSI_N)
+        await SweepInput.pause(2.5)
+        let after = S.browserWindowCount()
+        S.expect(after == before + 1, "⌘N opened a window of the profile (\(before) → \(after))")
+    }
+
+    /// A text field's "Search with …" (WebKit's own item): the selection searched in a tab of the
+    /// profile, with its engine — not handed to the system's search service, which brought the real
+    /// Safari to the front (CI run 43999545658).
+    static func fieldSearchInProfile() async {
+        await focusPage()
+        guard let point = await S.pagePoint("#field") else {
+            S.expect(false, "the page has its field")
+            return
+        }
+        await SweepInput.click(point)
+        _ = await S.script("const f = document.getElementById('field'); f.value = 'teapot'; f.focus(); f.select(); return 0;")
+        let tabsBefore = S.tabCount()
+        let menu = await S.openMenu { await SweepInput.click(point, right: true) }
+        guard let menu else {
+            S.expect(false, "the field's menu came up")
+            await S.escape()
+            return
+        }
+        await SweepInput.pause(0.3)
+        guard let item = menu.items.first(where: { $0.identifier?.rawValue == HandOffs.webSearchItem }) else {
+            S.note("no WebKit Search with here: " + S.describeMenu(menu).joined(separator: "; "))
+            await S.escape()
+            return
+        }
+        S.note("the item: \(item.title)")
+        S.expect(item.title.contains(SafariChrome.profileSearchEngine.name), "the item names the profile's engine")
+        if let why = await S.choose(item, in: menu) {
+            S.expect(false, "chosen with the arrow keys: \(why)")
+            return
+        }
+        await SweepInput.pause(3)
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "-"
+        S.expect(NSApp.isActive, "the profile stayed in front (in front: \(front))")
+        S.expect(S.tabCount() == tabsBefore + 1 && pageAddress().contains("teapot"),
+                 "the search opened in a tab of the profile (tabs \(tabsBefore) → \(S.tabCount()), \(pageAddress()))")
+    }
+
     /// An image's "Save Image to “Downloads”": named, and saved where the settings say.
     static func saveImageToDownloads() async {
-        await S.ensurePage()
+        await focusPage()
         let before = HostedDownloads.counts.text
         guard let point = await S.pagePoint("#image") else {
             S.expect(false, "the page has its image")
@@ -1195,6 +1276,9 @@ enum SweepSteps {
         await S.ensureTabs(3)
         await S.ensurePage()
         S.note("tabs before quitting: \(S.tabCount())")
+        // The unit's record ends with the process: said now.
+        S.info("before ⌘Q: windows \(S.browserWindowCount()), tabs \(S.tabCount()), key \(keyWindow()), pages "
+               + SafariTabs.tabs().map { $0.url?.absoluteString ?? "-" }.joined(separator: " "))
         await S.command(kVK_ANSI_Q)
         await SweepInput.pause(25)
         S.expect(false, "⌘Q ended the process (it is still running; key \(keyWindow()))")

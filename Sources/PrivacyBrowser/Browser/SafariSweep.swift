@@ -259,6 +259,9 @@ enum SafariSweep {
 
     static func note(_ text: String) { SweepRecord.add("notes", text) }
 
+    /// A line for the sweep's output now, not with the unit's record (one that ends the process).
+    static func info(_ text: String) { emit(["event": "info", "text": text]) }
+
     static func expect(_ holds: Bool, _ text: String) {
         SweepRecord.add(holds ? "notes" : "failed", (holds ? "as expected: " : "") + text)
     }
@@ -592,10 +595,12 @@ enum SafariSweep {
         add("menu bar: every item, chosen by a click and the arrow keys", "menu", units: { SweepSteps.menuBarUnits() }) { unit in
             await SweepSteps.menuItem(unit)
         }
-        add("regress: a page in the Reading List, then ⌃⌘2 with the page focused", "regress") { _ in await SweepSteps.readingListByKey() }
-        add("regress: a tab group, then ⌘D", "regress") { _ in await SweepSteps.bookmarkWithTabGroup() }
         add("regress: a key equivalent that throws, with the page focused", "regress") { _ in await SweepSteps.throwingKeyEquivalent() }
         add("regress: an image's Save Image to the downloads folder", "regress") { _ in await SweepSteps.saveImageToDownloads() }
+        add("regress: a page in the Reading List, then ⌃⌘2 with the page focused", "regress") { _ in await SweepSteps.readingListByKey() }
+        add("regress: ⌘N opens a window of the profile", "regress") { _ in await SweepSteps.newWindowByKey() }
+        add("regress: a text field's Search with, in the profile", "regress") { _ in await SweepSteps.fieldSearchInProfile() }
+        add("regress: a tab group, then ⌘D", "regress") { _ in await SweepSteps.bookmarkWithTabGroup() }
         add("quit: ⌘Q", "quit", ends: true) { _ in await SweepSteps.quit() }
         add("after the relaunch: the windows, the tabs, typing", "quit") { _ in await SweepSteps.afterRelaunch() }
         return list

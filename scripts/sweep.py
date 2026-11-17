@@ -162,7 +162,8 @@ def exception_log(since, out):
     path = os.path.join(out, "exceptions-log.txt")
     with open(path, "w") as handle:
         subprocess.run(["log", "show", "--start", start, "--style", "compact", "--predicate",
-                        'subsystem == "PrivacyBrowser" AND (category == "Exception" OR category == "SafariChrome")'],
+                        'subsystem == "PrivacyBrowser" AND (category == "Exception" OR category == "SafariChrome" '
+                        'OR category == "SafariTabs" OR category == "HandOffs")'],
                        stdout=handle, stderr=subprocess.STDOUT, timeout=300)
     return path
 
@@ -189,6 +190,10 @@ def findings(unit):
         seen = set()
         for text in unit.get("thrown", []):
             head, _, frames = text.partition(" | ")
+            # Caught by one of the window's guards (SafariWindowGuard, SafariTypingGuard): the fix
+            # doing its work, which the unit's notes count.
+            if "WindowGuard" in frames or "TypingGuard" in frames:
+                continue
             if SAFARI_FRAME.search(frames) and head not in seen:
                 seen.add(head)
                 said.append(f"thrown in Safari's code, caught elsewhere: {head[:300]}")

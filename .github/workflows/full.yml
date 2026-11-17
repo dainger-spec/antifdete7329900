@@ -1055,7 +1055,8 @@ jobs:
         # while the page has the keyboard (the profile's process ended there: CI run 43990525206),
         # ⌘D in a window with a tab group (the bookmark's sheet never came), a key equivalent whose
         # action throws pressed with the page focused, an image's Save Image to the downloads folder
-        # ("(null)", and the save failed). A crash, an exception the run loop caught or one Safari's
+        # ("(null)", and the save failed), ⌘N (nothing came), a text field's Search with (the real
+        # Safari came to the front: run 43999545658). A crash, an exception the run loop caught or one Safari's
         # code threw and something else swallowed, a notice, a hang over two seconds, fails the build.
         if: always()
         timeout-minutes: 12
