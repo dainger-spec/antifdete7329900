@@ -5,6 +5,28 @@ address. Lumen takes such a file as an entry of Settings › Proxies, and a prof
 through that VPN and nothing else — without root, without a system VPN, and without changing
 anything of this Mac's network.
 
+## Status (17 November 2026): works end to end on macOS 26, and on Linux
+
+- **macOS 26.7.2, CI run 44011508202** (`scripts/openvpn_macos_e2e.sh`, the app built for release
+  with `OVPN=1`): a wrong password refused and said ("The VPN server refused the user name or
+  password"), nothing left running; a page named only by the tunnel's DNS server, and one by address,
+  loaded in a profile started as a person's is (its own process, Safari's window) and seen by the
+  server from the tunnel's address 10.8.0.2; the profile's port refused a client without credentials
+  and one with wrong ones; the server killed: nothing loaded, the profile was stopped with its
+  message, no OpenVPN or LumenTunnel left; the pktap capture of the whole run (1285 packets outside
+  loopback): none of the profile's process, of LumenTunnel or of the client's openvpn, the one DNS
+  question for the name inside the tunnel, the forwarder's 66 packets to the server. The run before it
+  (44010349410, a debug build) passed the same four steps; its capture (23295 packets, with a Safari
+  the runner already ran) showed the same.
+- **Linux** (`scripts/openvpn_linux_e2e.sh`, Ubuntu 26.04, OpenVPN 2.7.0, root for the server only):
+  all five checks, and 32 MB through the tunnel intact in 0.31 s (loopback).
+- **Sizes** (arm64, signed): `openvpn` 1.58 MB, `LumenTunnel` 0.65 MB.
+
+Not shown on a Mac yet: WebRTC through the tunnel with the network guard installed (CI cannot load
+the guard; the UDP association it uses is shown on Linux and in the unit tests), a TCP server
+through the forwarder end to end (the forwarder's TCP is unit-tested), IPv6 inside the tunnel, and a
+real provider's mobile network (loss, reconnections).
+
 ## The shape: a relay started by the app, an authenticated SOCKS5 port on 127.0.0.1
 
 At a profile's launch the app starts the profile's tunnel and gives the profile, as its proxy, the
