@@ -35,7 +35,8 @@ final class SafariStoreLayoutTests: XCTestCase {
         let report = SafariStoreLayout.prepare(home: home)
         XCTAssertTrue(report.failed.isEmpty, "\(report.failed)")
         for folder in SafariStoreLayout.folders { XCTAssertTrue(exists(folder, folder: true), folder) }
-        for path in ["Library/Safari/Favicon Cache", "Library/Safari/TabSnapshots", "Library/Safari/Metadata Cache",
+        for path in ["Library/Safari/Favicon Cache", "Library/Caches/com.apple.Safari/TabSnapshots", "Library/Safari/Metadata Cache",
+                     "Library/Containers/com.apple.Safari/Data/Library/Safari/Profiles",
                      "Library/Safari/Template Icons", "Library/Safari/Favicon Cache/favicons", "Library/Caches", "Library/Preferences"] {
             XCTAssertTrue(exists(path, folder: true), path)
         }
@@ -112,13 +113,13 @@ final class SafariStoreLayoutTests: XCTestCase {
     func testWhatTheOwnerCannotWriteIsMadeWritable() throws {
         try write("Library/Safari/History.db", sqlite)
         try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: url("Library/Safari/History.db").path)
-        try FileManager.default.createDirectory(at: url("Library/Safari/TabSnapshots"), withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: url("Library/Safari/TabSnapshots").path)
+        try FileManager.default.createDirectory(at: url("Library/Safari/Metadata Cache"), withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: url("Library/Safari/Metadata Cache").path)
         // Root may write anything: the check means nothing there.
         try XCTSkipIf(getuid() == 0, "running as root")
         let report = SafariStoreLayout.prepare(home: home)
         XCTAssertTrue(report.madeWritable.contains("Library/Safari/History.db"), "\(report.madeWritable)")
-        XCTAssertTrue(report.madeWritable.contains("Library/Safari/TabSnapshots"), "\(report.madeWritable)")
+        XCTAssertTrue(report.madeWritable.contains("Library/Safari/Metadata Cache"), "\(report.madeWritable)")
         XCTAssertTrue(FileManager.default.isWritableFile(atPath: url("Library/Safari/History.db").path))
     }
 

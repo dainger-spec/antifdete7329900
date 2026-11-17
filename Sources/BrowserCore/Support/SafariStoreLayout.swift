@@ -42,7 +42,10 @@ public enum SafariStoreLayout {
     /// The folder Safari's stores are in, relative to the home.
     public static let safariFolder = "Library/Safari"
 
-    /// Safari's stores as a complete per-profile Safari data tree holds them.
+    /// Safari's stores as a complete per-profile Safari data tree holds them, where Safari's code in a
+    /// profile's process looks for them (its getters' answers and the file trace, CI: macOS 26.7.2
+    /// and 27.0.1). The resource-load statistics another browser keeps beside them are its web views'
+    /// data store's: a profile's are in its own WebKit data store, sealed with its website data.
     public static let stores: [Store] = [
         Store("Library/Safari/Bookmarks.plist", .propertyList),
         Store("Library/Safari/History.db", .database),
@@ -53,7 +56,9 @@ public enum SafariStoreLayout {
         Store("Library/Safari/NotifyMeWhen.db", .database),
         Store("Library/Safari/UserDefinedContentBlockers.db", .database),
         Store("Library/Safari/BlockedBannerHighlights.db", .database),
-        Store("Library/Safari/TabSnapshots/Metadata.db", .database),
+        Store("Library/Safari/ContentBlockerStatistics.db", .database),
+        // Safari's caches folder (`_safari_roamingCachesDirectory`), as Safari keeps it there.
+        Store("Library/Caches/com.apple.Safari/TabSnapshots/Metadata.db", .database),
         Store("Library/Safari/Metadata Cache/LPLinkMetadata.db", .database),
         Store("Library/Safari/Favicon Cache/favicons.db", .database),
         Store("Library/Safari/Favicon Cache/favicons", .folder),
@@ -62,8 +67,6 @@ public enum SafariStoreLayout {
         Store("Library/Safari/Link Presentation Icons", .folder),
         Store("Library/Safari/LocalStorage", .folder),
         Store("Library/Safari/Databases/___IndexedDB", .folder),
-        Store("Library/Safari/ResourceLoadStatistics/pcm.db", .database),
-        Store("Library/Safari/ResourceLoadStatistics/observations.db", .database),
         // Safari's container settings folder (`containerSettingsFolder`): the iCloud tabs the
         // address bar completes from, the tab collection, Safari's profiles' folder.
         Store(containerSettingsFolder + "/CloudTabs.db", .database),

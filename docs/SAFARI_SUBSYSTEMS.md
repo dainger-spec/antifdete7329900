@@ -100,9 +100,18 @@ process Safari's container state (`NSHomeDirectory()/Library/Safari`) and its `~
 `SafariStoreLayout.stores` (BrowserCore) lists it — `Bookmarks.plist`, `History.db`, `Embeddings.db`,
 `PerSitePreferences.db`, `IgnoredSiriSuggestedSites.db`, `CloudAutoFillCorrections.db`,
 `NotifyMeWhen.db`, `UserDefinedContentBlockers.db`, `BlockedBannerHighlights.db`,
-`TabSnapshots/Metadata.db`, `Metadata Cache/LPLinkMetadata.db`, `Favicon Cache/favicons.db` and
+`ContentBlockerStatistics.db`, `Metadata Cache/LPLinkMetadata.db`, `Favicon Cache/favicons.db` and
 `favicons/`, `TopSites.plist`, `Template Icons/CacheSettings.plist`, `Link Presentation Icons/`,
-`LocalStorage/`, `Databases/___IndexedDB/`, `ResourceLoadStatistics/{pcm,observations}.db`.
+`LocalStorage/`, `Databases/___IndexedDB/`; `TabSnapshots/Metadata.db` in
+`Library/Caches/com.apple.Safari`; and Safari's container settings folder,
+`Library/Containers/com.apple.Safari/Data/Library/Safari` (`CloudTabs.db`, `SafariTabs.db`,
+`Profiles/`). Safari's getters of that last folder — `safari_containerSettingsDirectory`,
+`safari_productionSafariContainerSettingsDirectory`, `safari_profilesDirectoryURL` — answered nil in
+a profile's process (they ask for Safari's own container); they now answer the folder in the home
+(`SafariPaths.nilAnswers`), and Safari makes its tab collection there (`SafariTabs.db`, which
+"failed to instantiate" before). The extensions' folder stays nil. The resource-load statistics
+another browser keeps in its tree are its web views' data store's; a profile's are in its own WebKit
+data store.
 
 Before Safari's frameworks load, a profile's process (`SafariStores.prepare`, from
 `SafariChromeHost.prepareForChildProcess`; every check's too) makes the home's Library folders an
@@ -119,3 +128,18 @@ opening it read-only), what the launch made, every file under the home's Library
 Safari's path getters answered there (`SafariPaths.answers`); with `FS_TRACE=1` an fs_usage trace of
 the profiles' processes says where they looked and found nothing (ENOENT) and what they were refused
 (EPERM: the real Safari's places, closed by the sandbox) — scripts/safari_stores_trace.py.
+
+Measured (CI, address bar check with `FS_TRACE=1`, macOS 26.7.2 / Safari 26.6.2 and 27.0.1 / Safari
+27.0.1, runs 43999547636 and 44003739529): in a new profile Safari's code makes `PerSitePreferences.db`,
+`IgnoredSiriSuggestedSites.db`, `UserDefinedContentBlockers.db`, `BlockedBannerHighlights.db` (held with
+an exclusive lock), `ContentBlockerStatistics.db`, `LPLinkMetadata.db`, `favicons.db`, `TopSites.plist`,
+`CacheSettings.plist`, `CloudAutoFillCorrections.db` (after typing) and `TabSnapshots/Metadata.db`, all
+opening; it never makes `Bookmarks.plist` (looked for about a hundred times a run), `History.db` (the
+History service's, refused to a profile), `Embeddings.db` (none in the runner's real Safari 27.0.1
+either), `NotifyMeWhen.db` (only its existence is asked) or `CloudTabs.db` (iCloud's). What a profile's
+process is refused is `~/Library/Containers/com.apple.Safari/Data/Library/Preferences` (EPERM, the
+sandbox); it also asks the account's `~/Library/Safari/RemoteNotifications/Permissions.plist` (ENOENT on
+a runner, where nothing made it; where it exists the sandbox refuses it) and looks for Trial's
+`NamespaceDescriptor.SAFARI_SEARCH_RANKING.plist` in the profile's home. With the runner's real Safari
+used first (pages, a search, a bookmark), nothing changed in a profile: no exception, at typing or at
+Return.
