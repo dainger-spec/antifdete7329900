@@ -368,7 +368,7 @@ jobs:
         if: always()
         continue-on-error: true
         timeout-minutes: 15
-        run: TITLE="macOS 27 - typing into Safari's address bar" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/egress27/address-bar
+        run: AX_POLLER=1 TITLE="macOS 27 - typing into Safari's address bar" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/egress27/address-bar
       - name: macOS 27 - Selenium against a profile in Safari 27's window (WebDriver; reported)
         # scripts/webdriver_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -1070,10 +1070,12 @@ jobs:
         # launched twice. A customer's address bar put up "not available in a profile" at every key
         # (0.1.17 or earlier): the field must hold what was typed, no key press may raise, the run
         # loop may catch nothing and the window put up no notice. Every exception thrown on the way
-        # is printed with its frames.
+        # is printed with its frames. After each key the field's and the completion list's
+        # accessibility is read, in-process and by a client beside it (scripts/ax_poller.swift), as
+        # the apps that act on every key press (layout switchers, grammar checkers) read it.
         if: always()
         timeout-minutes: 15
-        run: scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar
+        run: AX_POLLER=1 scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar
       - uses: actions/upload-artifact@v4
         if: always()
         with:
