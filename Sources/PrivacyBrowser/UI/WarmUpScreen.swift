@@ -208,7 +208,9 @@ struct WarmUpScreen: View {
             // Again were then only on a right click).
             .overlay(alignment: .trailing) {
                 if tab == .profiles, !fits, let item = selectedItem {
+                    // Opaque over the list: the inspector's frost is drawn for a panel beside it.
                     inspector(item)
+                        .background(Theme.surface)
                         .shadow(color: .black.opacity(0.45), radius: 18, x: -6)
                 }
             }
