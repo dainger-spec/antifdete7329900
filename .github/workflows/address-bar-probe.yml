@@ -1,0 +1,64 @@
+name: Address bar probe (with the fix)
+
+# Typing into Safari's address bar in a profile's process (scripts/address_bar_check.sh), on the
+# macOS runners, in English and in a Russian locale. A scratch measurement for one branch only.
+on:
+  push:
+    branches: ['claude/addressbar-fixcheck']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Address bar (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, xcode-27]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        continue-on-error: true
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+      - name: Build the app without the App Sandbox
+        timeout-minutes: 40
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Type into the address bar (this Mac's locale)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: TITLE="address bar ${{ matrix.os }} en" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/en
+      - name: Type into the address bar (the system's typing aids all on - inline predictions, completion, correction)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          for key in NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled NSAutomaticSpellingCorrectionEnabled \
+                     NSAutomaticTextReplacementEnabled NSAutomaticCapitalizationEnabled NSAutomaticPeriodSubstitutionEnabled \
+                     NSAutomaticQuoteSubstitutionEnabled NSAutomaticDashSubstitutionEnabled WebAutomaticSpellingCorrectionEnabled \
+                     NSAllowContinuousSpellChecking; do defaults write -g $key -bool true; done
+          TITLE="address bar ${{ matrix.os }} typing aids" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/aids google
+          for key in NSAutomaticInlinePredictionEnabled NSAutomaticTextCompletionEnabled NSAutomaticSpellingCorrectionEnabled; do
+            defaults write -g $key -bool false; done
+          TITLE="address bar ${{ matrix.os }} typing aids off" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/aids-off google
+      - name: Type into the address bar (a Russian Mac)
+        continue-on-error: true
+        timeout-minutes: 15
+        run: |
+          defaults write -g AppleLocale ru_RU
+          defaults write -g AppleLanguages -array ru-RU en-US
+          PRIVACYBROWSER_LANG=ru TITLE="address bar ${{ matrix.os }} ru" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/ru google,yandex,duckDuckGo
+      - name: The profile processes' exception log
+        if: always()
+        continue-on-error: true
+        run: |
+          log show --last 40m --style compact --predicate 'subsystem == "PrivacyBrowser" AND (category == "Exception" OR category == "SafariChrome")' \
+            > build/address-bar/exception-log.txt 2>&1 || true
+          grep -E "caught by the run loop|thrown|Dropped|Safari asked" build/address-bar/exception-log.txt | head -80 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: address-bar-${{ matrix.os }}
+          path: build/address-bar
+          if-no-files-found: ignore
