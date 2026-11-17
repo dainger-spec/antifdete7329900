@@ -3096,13 +3096,8 @@ private struct EmptyProfilesView: View {
                     }
                 }
                 .padding(.top, 10)
-                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 380)
-                    .padding(.top, 14)
+                // No paragraph under the buttons (the owner, 17 November): the title, its line and
+                // the three ways in say it.
             }
         }
     }

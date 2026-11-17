@@ -140,10 +140,12 @@ struct FirstRunProtectionView: View {
     var body: some View {
         LockScreen(title: L("firstRun.protection.title"), subtitle: L("firstRun.protection.subtitle")) {
             VStack(alignment: .leading, spacing: 12) {
-                // Clear of the horizon's light, as the lock screen's field is.
-                Color.clear.frame(height: 10)
+                // Clear of the horizon's light — its line drops by the column's edges — so that no
+                // line of it crosses a card or a word (the coordinator's review of run 44124663489).
+                Color.clear.frame(height: 46)
                 if virtualMachine {
-                    LockNote(symbol: "info.circle", text: L("firstRun.protection.virtualMachine"))
+                    FirstRunCard(symbol: "info.circle", title: L("firstRun.protection.virtualMachine.title"),
+                                 detail: L("firstRun.protection.virtualMachine"), status: .unavailable) { EmptyView() }
                 } else {
                     if let guardState { guardCard(guardState) }
                     if let cameraState { cameraCard(cameraState) }

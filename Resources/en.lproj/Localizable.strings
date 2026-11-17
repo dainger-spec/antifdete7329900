@@ -875,8 +875,6 @@
 "profiles.empty.subtitle" = "Create your first isolated profile to start browsing.";
 "profiles.empty.title" = "No profiles yet";
 "profiles.empty.proxies" = "Add Proxies…";
-"profiles.empty.hint" = "A profile made on another Mac, or kept as a backup, comes in through Import. If you work through proxies, paste their list into Proxies first: each new profile then takes one from the list.";
-"profiles.empty.hint.import" = "A profile made on another Mac, or kept as a backup, comes in through Import.";
 "profiles.exit.direct" = "Direct";
 "profiles.exit.unknownCountry" = "The exit country shows after a launch that looks the proxy up (time zone from the proxy, or the exit-IP warning).";
 "profiles.exit.unknown.notChecked" = "Country unknown: this proxy has not been checked, and the profile has not launched through it looking up its location. Check it in Proxies.";
@@ -1382,15 +1380,16 @@
 "firstRun.protection.title" = "Set up protection";
 "firstRun.protection.subtitle" = "Two macOS extensions Lumen needs. Each is installed once.";
 "firstRun.protection.later" = "You can also do this later in Settings.";
-"firstRun.protection.virtualMachine" = "This is a virtual machine: macOS doesn’t install system extensions in it. The network guard and the camera can be set up on a regular Mac.";
+"firstRun.protection.virtualMachine" = "macOS doesn’t install system extensions in it. Set up the network guard and the camera on a regular Mac.";
+"firstRun.protection.virtualMachine.title" = "This is a virtual machine";
 "firstRun.guard.title" = "Network guard — WebRTC through the proxy";
 "firstRun.guard.detail" = "Without it, WebRTC is off in profiles with a proxy. macOS will ask for permission.";
-"firstRun.guard.approve" = "System Settings → General → Login Items & Extensions → Network Extensions → turn on “Lumen network guard”. Then click Allow in macOS’s window.";
+"firstRun.guard.approve" = "System Settings → Login Items & Extensions → Network Extensions → turn on “Lumen network guard”.";
 "firstRun.guard.ready" = "Installed: WebRTC goes through the proxy.";
 "firstRun.camera.title" = "Virtual camera";
 "firstRun.camera.detail" = "Websites see your picture or video instead of the Mac’s camera.";
 "firstRun.camera.installing" = "Installing…";
-"firstRun.camera.approve" = "System Settings → General → Login Items & Extensions → Camera Extensions → turn on Lumen.";
+"firstRun.camera.approve" = "System Settings → Login Items & Extensions → Camera Extensions → turn on Lumen.";
 "firstRun.camera.ready" = "Installed.";
 "firstRun.camera.restart" = "Works after the Mac restarts.";
 "firstRun.camera.failed" = "That didn’t work. Try again.";
@@ -2865,7 +2864,7 @@
 "guard.todo.proving" = "About 10 seconds.";
 "guard.todo.proofFailed" = "The check failed, so WebRTC is off in profiles with a proxy. Click Check Again.";
 "guardNotice.restartNeeded" = "The network guard starts working after you restart this Mac: macOS finishes installing it at startup. Until then WebRTC is off in profiles with a proxy.";
-"guardNotice.notInstalled" = "The network guard isn’t installed: without it, WebRTC is off in profiles with a proxy.";
+"guardNotice.notInstalled" = "The network guard isn’t installed — WebRTC is off in profiles with a proxy.";
 "guardNotice.awaitingApproval" = "The network guard is waiting for your approval in System Settings — until then WebRTC is off in profiles with a proxy.";
 "guardNotice.off" = "The network guard is turned off — WebRTC is off in profiles with a proxy.";
 "guardNotice.notAnswering" = "The network guard is not responding — WebRTC is off in profiles with a proxy.";
