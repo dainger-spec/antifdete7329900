@@ -51,6 +51,10 @@ enum CookieRecoveryNotice {
         window.addChildWindow(panel, ordered: .above)
         panel.orderFront(nil)
         shown.append(panel)
+        // Said to VoiceOver too, without moving its focus.
+        NSAccessibility.post(element: window, notification: .announcementRequested,
+                             userInfo: [.announcement: "\(words.title). \(words.detail)",
+                                        .priority: NSAccessibilityPriorityLevel.medium.rawValue])
         let seconds = Self.seconds
         Task { @MainActor [weak panel] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))

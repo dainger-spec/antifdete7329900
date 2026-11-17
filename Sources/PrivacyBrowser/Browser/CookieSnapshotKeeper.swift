@@ -162,18 +162,18 @@ final class CookieSnapshotKeeper {
         // One at a time per profile: a look and an import's copy that overlapped would both find the
         // store changed and copy it twice, the second pushing out an older snapshot for nothing.
         let previous = copies[id]
-        let copy = Task { @MainActor [weak self] () -> Bool in
+        let next = Task { @MainActor [weak self] () -> Bool in
             _ = await previous?.value
             guard let self else { return false }
-            return await self.copy(id, store: store, trigger: trigger)
+            return await self.copyStore(id, store: store, trigger: trigger)
         }
-        copies[id] = copy
-        let written = await copy.value
-        if copies[id] == copy { copies[id] = nil }
+        copies[id] = next
+        let written = await next.value
+        if copies[id] == next { copies[id] = nil }
         return written
     }
 
-    private func copy(_ id: UUID, store: WKHTTPCookieStore, trigger: CookieSnapshot.Trigger) async -> Bool {
+    private func copyStore(_ id: UUID, store: WKHTTPCookieStore, trigger: CookieSnapshot.Trigger) async -> Bool {
         let current = await CookieStoreSync.persistentCookies(in: store)
         let now = Date()
         let newest = newestSnapshot(of: id)
