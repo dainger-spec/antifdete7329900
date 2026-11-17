@@ -176,13 +176,13 @@ runs as named). Since the items whose work is done outside the profile were take
 
 **Found, open:**
 
-- **Bookmarks › Add Bookmark… (⌘D) and Add Bookmarks for Open Tabs… do not work** (**broken** in the
-  table). Each throws — a bookmark folder with no title in the sheet's location menu
-  (`-[NSMenu(WebBookmarkNSMenuExtras) safari_addMenuItemForBookmarkFolder:]` from
-  `-[BookmarkEditSheetController _populateLocationPopUp]`) — and our notice comes instead of the
-  sheet: no bookmark is added that way. So in every walk since run 468: CI's on both macOS (run 520)
-  and the owner's (1 November). Each walk makes an empty tab group before these items; in a profile
-  without tab groups it is not measured. Not fixed in the owner's week: no change to the product.
+- **Bookmarks › Add Bookmark… (⌘D) and Add Bookmarks for Open Tabs… work again** (full run
+  44013651932, macOS 26.7.2 and 27.0.1: each opens its sheet). They threw before — a bookmark
+  folder with no title in the sheet's location menu (`-[NSMenu(WebBookmarkNSMenuExtras)
+  safari_addMenuItemForBookmarkFolder:]` from `-[BookmarkEditSheetController _populateLocationPopUp]`)
+  — and our notice came instead of the sheet. Safari's container settings folder is now the
+  profile's own (`safari_containerSettingsDirectory`, the address bar fix), and a folder with no
+  title gets no menu item (the sweep's fix), so the sheet comes. Fixed in 0.1.18.
 - **Safari's browsing assistant worker** (`com.apple.parsec.SafariBrowsingAssistantWorker`, outside
   the profile) started in three of the eight walks on macOS 26 read — runs 457, 461 and 468, each
   time during another item (Hide Safari, View › Zoom Out, History › Show All History) — and in none
@@ -353,8 +353,8 @@ differ from walk to walk (the record leaves them out).
 | Bookmarks › Show Start Page | - | changes the window | changes the window | **keep** |
 | Bookmarks › Show Bookmarks | - | nothing seen | changes the window | **keep** |
 | Bookmarks › Edit Bookmarks | ⌥⌘B | changes the window | changes the window | **keep** |
-| Bookmarks › Add Bookmark… | ⌘D | exception NSInternalInconsistencyException; our notice | exception NSInternalInconsistencyException; our notice | **broken**: does not work: throws (a bookmark folder with no title in the sheet's location menu); our notice comes instead of the sheet, and no bookmark is added — in every walk, CI's and the owner's, each of which has made an empty tab group before it; without tab groups, not measured |
-| Bookmarks › Add Bookmarks for Open Tabs… | - | exception NSInternalInconsistencyException; our notice | exception NSInternalInconsistencyException; our notice | **broken**: does not work: the same as Add Bookmark… |
+| Bookmarks › Add Bookmark… | ⌘D | sheet NSWindow | sheet NSWindow | **keep**: its sheet comes (it threw before 0.1.18; see above) |
+| Bookmarks › Add Bookmarks for Open Tabs… | - | sheet NSWindow | sheet NSWindow | **keep**: as Add Bookmark… |
 | Bookmarks › Add Bookmark Folder | - | changes the window | changes the window | **keep** |
 | Bookmarks › Add to Reading List | ⇧⌘D | nothing seen | nothing seen | **keep** |
 | Bookmarks › Add Open Tabs to Reading List | - | nothing seen | nothing seen | **keep** |

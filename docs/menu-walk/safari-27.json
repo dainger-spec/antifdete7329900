@@ -49,15 +49,13 @@
  },
  "Bookmarks › Add Bookmarks for Open Tabs… | addBookmarksForTabs: | -": {
   "behaviour": [
-   "exception NSInternalInconsistencyException",
-   "our notice"
+   "sheet NSWindow"
   ],
   "xpc": []
  },
  "Bookmarks › Add Bookmark… | addBookmark: | ⌘D": {
   "behaviour": [
-   "exception NSInternalInconsistencyException",
-   "our notice"
+   "sheet NSWindow"
   ],
   "xpc": []
  },
