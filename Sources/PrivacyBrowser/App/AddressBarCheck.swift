@@ -66,10 +66,14 @@ enum AddressBarCheck {
               + "locale \(Locale.current.identifier)")
         var failed = 0
         for engine in engines {
-            let problems = await check(engine, repository: repository, port: port)
+            // Google, the default and the customer's engine, more ways: Cyrillic, an input method's
+            // composing, and the same profile launched a second time (its home no longer new).
+            let texts = engine == .google ? [text, "гугл", AddressBarTyping.composedPrefix + "гугл"] : [text]
+            let launches = engine == .google ? 2 : 1
+            let problems = await check(engine, texts: texts, launches: launches, repository: repository, port: port)
             if problems.isEmpty {
-                print("\(tag) PASS \(engine.name): \"\(text)\" typed into Safari's address bar, one key at a time, "
-                      + "with no exception and no notice")
+                print("\(tag) PASS \(engine.name): \(texts.joined(separator: ", ")) typed into Safari's address bar "
+                      + "(\(launches) launch(es)), with no exception and no notice")
             } else {
                 failed += 1
                 print("\(tag) FAIL \(engine.name): " + problems.joined(separator: "; "))
@@ -78,45 +82,52 @@ enum AddressBarCheck {
         return failed == 0 ? 0 : 1
     }
 
-    private static func check(_ engine: SearchEngine, repository: ProfileRepository, port: Int) async -> [String] {
+    private static func check(_ engine: SearchEngine, texts: [String], launches: Int,
+                              repository: ProfileRepository, port: Int) async -> [String] {
         let profile: ProfileSummary
         do {
             profile = try repository.create(name: "Address bar \(engine.name)", configuration: ProfileConfiguration(
                 startURL: URL(string: "http://proxied.selftest.invalid/one?address-bar"),
-                proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: port), ephemeral: true,
+                proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: port), ephemeral: false,
                 matchProxyLocation: false, searchEngine: engine))
         } catch {
             return ["could not make a profile: \(error)"]
         }
-        defer { try? repository.delete(profile.id) }
-        let seen = Seen()
-        let manager = ProfileManager(repository: repository)
-        manager.onProfileRunning = { _, hosts in seen.hostsChrome = hosts }
-        manager.onChildExited = { _, status in seen.exited = status }
-        manager.onWindowLook = { _, look in seen.look = look }
-        manager.onError = { message in print("\(tag) INFO the manager was told: \(message)") }
-        do {
-            try await manager.launch(profile.id)
-        } catch {
-            return ["the profile did not start: \(error)"]
-        }
-        await wait(90) { seen.hostsChrome != nil || seen.exited != nil }
-        guard seen.hostsChrome == true else {
-            return ["the profile's process does not host Safari's chrome ("
-                    + (seen.hostsChrome == nil ? "no answer, exit \(seen.exited.map { "\($0)" } ?? "none")" : "this app's own window") + ")"]
-        }
-        // The window settles (its first page, its toolbar) before a person would type.
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
         var problems: [String] = []
-        if !manager.lookAtWindow(profile.id, .typeInAddressBar(text)) {
-            problems.append("the profile's process was not asked")
-        } else {
-            await wait(60) { seen.look != nil || seen.exited != nil }
-            problems += findings(seen.look, engine: engine)
+        for launch in 1...launches {
+            let seen = Seen()
+            let manager = ProfileManager(repository: repository)
+            manager.onProfileRunning = { _, hosts in seen.hostsChrome = hosts }
+            manager.onChildExited = { _, status in seen.exited = status }
+            manager.onWindowLook = { _, look in seen.look = look }
+            manager.onError = { message in print("\(tag) INFO the manager was told: \(message)") }
+            do {
+                try await manager.launch(profile.id)
+            } catch {
+                return problems + ["launch \(launch): the profile did not start: \(error)"]
+            }
+            await wait(90) { seen.hostsChrome != nil || seen.exited != nil }
+            guard seen.hostsChrome == true else {
+                return problems + ["launch \(launch): the profile's process does not host Safari's chrome ("
+                    + (seen.hostsChrome == nil ? "no answer, exit \(seen.exited.map { "\($0)" } ?? "none")" : "this app's own window") + ")"]
+            }
+            // The window settles (its first page, its toolbar) before a person would type.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            for typed in (launch == 1 ? texts : [text]) {
+                seen.look = nil
+                print("\(tag) INFO \(engine.name), launch \(launch): typing \(typed)")
+                if !manager.lookAtWindow(profile.id, .typeInAddressBar(typed)) {
+                    problems.append("launch \(launch), \(typed): the profile's process was not asked")
+                    continue
+                }
+                await wait(60) { seen.look != nil || seen.exited != nil }
+                problems += findings(seen.look, engine: engine).map { "launch \(launch), \(typed): \($0)" }
+                if seen.exited != nil { break }
+            }
+            if let exited = seen.exited { problems.append("launch \(launch): the profile's process ended (status \(exited))") }
+            if manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
         }
-        if let exited = seen.exited { problems.append("the profile's process ended (status \(exited))") }
-        if manager.isRunning(profile.id) { try? await manager.stop(profile.id) }
-        try? await Task.sleep(nanoseconds: 1_000_000_000)
         return problems
     }
 
@@ -128,7 +139,7 @@ enum AddressBarCheck {
         }
         print("\(tag) INFO \(engine.name): field \"\(report.field)\", window key \(report.windowWasKey), "
               + "exceptions out of key presses \(report.outOfKeyPresses), caught by the run loop \(report.caughtByRunLoop), "
-              + "thrown in all \(report.thrown.count), notices \(report.notices)")
+              + "caught by the typing guard \(report.caughtByTypingGuard), thrown in all \(report.thrown.count), notices \(report.notices)")
         for line in report.providers.split(separator: "\n") { print("\(tag) INFO \(engine.name) providers: \(line.prefix(400))") }
         // Each distinct exception once, with its frames.
         var said: Set<String> = []

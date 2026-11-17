@@ -34,6 +34,9 @@ enum AddressBarTyping {
         var caughtByRunLoop = 0
         /// Every exception thrown while it typed, caught or not, by whomever.
         var thrown: [Thrown] = []
+        /// Exceptions Safari's text callbacks raised that were caught where the text system called
+        /// them, so that the key press went on (`SafariTypingGuard`).
+        var caughtByTypingGuard = 0
         /// Notices the window put up while it typed (`SafariChrome.noticesPresented`).
         var notices = 0
         /// The search providers Safari's chrome has here, as they describe themselves.
@@ -45,8 +48,14 @@ enum AddressBarTyping {
         }
     }
 
-    static func type(_ text: String, into field: NSTextField, in window: NSWindow) async -> Report {
+    /// Text that starts with this is composed as an input method composes it instead (marked text,
+    /// then the composed text inserted), in the field editor, rather than typed key by key.
+    static let composedPrefix = "ime:"
+
+    static func type(_ given: String, into field: NSTextField, in window: NSWindow) async -> Report {
         var report = Report()
+        let composing = given.hasPrefix(composedPrefix)
+        let text = composing ? String(given.dropFirst(composedPrefix.count)) : given
         report.typed = text
         window.makeFirstResponder(field)
         if let editor = field.currentEditor() as? NSTextView {
@@ -60,8 +69,26 @@ enum AddressBarTyping {
         }
         let reportedBefore = ExceptionLog.reported
         let noticesBefore = SafariChrome.noticesPresented
+        let guardBefore = SafariTypingGuard.caught
         report.windowWasKey = window.isKeyWindow
-        for character in text {
+        if composing, let editor = field.currentEditor() as? NSTextView {
+            // As an input method composes: the marked text grows a character at a time, then the
+            // whole is inserted in its place.
+            var marked = ""
+            for character in text {
+                marked.append(character)
+                let current = marked
+                let caught = PBCatchException {
+                    editor.setMarkedText(current, selectedRange: NSRange(location: (current as NSString).length, length: 0),
+                                         replacementRange: NSRange(location: NSNotFound, length: 0))
+                }
+                if caught != nil { report.outOfKeyPresses += 1 }
+                try? await Task.sleep(nanoseconds: 180_000_000)
+            }
+            let caught = PBCatchException { editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
+            if caught != nil { report.outOfKeyPresses += 1 }
+        }
+        for character in text where !composing {
             for event in keyEvents(character, in: window) {
                 let caught = PBCatchException { window.sendEvent(event) }
                 if caught != nil { report.outOfKeyPresses += 1 }
@@ -74,6 +101,7 @@ enum AddressBarTyping {
         report.thrown = thrown
         report.caughtByRunLoop = ExceptionLog.reported - reportedBefore
         report.notices = SafariChrome.noticesPresented - noticesBefore
+        report.caughtByTypingGuard = SafariTypingGuard.caught - guardBefore
         report.field = (field.currentEditor() as? NSTextView)?.string ?? field.stringValue
         report.providers = SafariChrome.searchProvidersDescription()
         // The field left as it was found: empty, and not editing.
