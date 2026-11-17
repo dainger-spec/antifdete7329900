@@ -12,7 +12,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'push' }}
 on:
   push:
-    branches: [claude/ios-app]
+    branches: [claude/ios-app, claude/ios-design-dashboard]
     paths:
       - "ios/**"
       - "!ios/scripts/install-floor.sh"
@@ -32,12 +32,14 @@ on:
 jobs:
   app:
     if: ${{ inputs.suite != 'DeviceTests' }}
-    # Six jobs side by side, each with its own simulator and testbed; each keeps the order — the
-    # reds of its suite first, then its green run.
+    # Three jobs side by side, each with its own simulator and testbed; each keeps the order — the
+    # reds of its suites first, then its green run. Three, not six (the owner, 17 November: in
+    # batches): with the two device jobs that is the five macOS machines a free account runs at once,
+    # so nothing waits in the queue, and each job builds the app once for several suites.
     strategy:
       fail-fast: false
       matrix:
-        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests,LanguageTests", "BrowserTests", "ProxyTests", "SettingsTests", "RelayTests", "AccountTests"]') }}
+        suite: ${{ fromJSON(inputs.suite && format('["{0}"]', inputs.suite) || '["core,SessionsTests,ProxyCheckTests,FreeTierTests,LanguageTests,SettingsTests", "BrowserTests,RelayTests", "ProxyTests,AccountTests,MeasureTests"]') }}
     name: Lumen iOS — ${{ matrix.suite }} (${{ inputs.os || 'xcode-27' }}, iOS ${{ inputs.ios || 'newest' }})
     runs-on: ${{ inputs.os || 'xcode-27' }}
     timeout-minutes: 180
@@ -92,6 +94,7 @@ jobs:
             build/ios-app/testbed
             build/ios-app/screens
             build/ios-app/appstore
+            build/ios-app/design
           if-no-files-found: warn
 
   devices:

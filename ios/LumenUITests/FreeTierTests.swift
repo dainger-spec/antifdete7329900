@@ -32,14 +32,20 @@ final class FreeTierTests: LumenUITestCase {
         openSession("Первый")
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
-        let berlin = app.buttons["Берлин"]
-        if berlin.exists { berlin.tap() }
+        // The proxy's row opens the chooser when the plan offers one: a free plan must not.
+        let proxyRow = app.buttons["proxyRow"]
+        if proxyRow.waitForExistence(timeout: 2) {
+            proxyRow.tap()
+            let berlin = app.buttons["choose-Берлин"]
+            if berlin.waitForExistence(timeout: 5) { berlin.tap() }
+            waitGone(app.buttons["proxySheetDone"], "the chooser closes")
+        }
         app.buttons["settingsDone"].tap()
         openPage("http://free-\(run).lumentest:28380/whoami?t=free")
         XCTAssertNotNil(webText("напрямую"), "a free profile goes without a proxy: \(oneLine(webText("via:")))")
         app.buttons["settingsButton"].tap()
         wait(app.staticTexts["proxiesNotOnPlan"], "the settings say why there is no proxy")
-        XCTAssertFalse(app.buttons["Берлин"].exists, "no proxy is offered on the free plan")
+        XCTAssertFalse(app.buttons["proxyRow"].exists, "no proxy is offered on the free plan")
         shot("61 the free plan: no proxy")
         app.buttons["settingsDone"].tap()
 

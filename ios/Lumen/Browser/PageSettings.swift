@@ -28,6 +28,8 @@ enum PageSettings {
         var timeZone: String?
         var geolocation = Geolocation()
         var webRTC: String
+        /// With "tunnel": the session's WebRTC relay (WebRTCTunnel), the pages' only ICE server.
+        var webRTCRelay: WebRTCTunnel.Relay?
         var safariObject = false
         var storageQuota: Double?
         var fingerprint: Fingerprint
@@ -62,14 +64,13 @@ enum PageSettings {
 
     /// What the shim is given; `channel` is the runtime's (`makeChannel`), empty for the comparison
     /// of what the pages were last given (`SessionRuntime.applyPageSettings`).
-    static func config(for session: Session, proxy: ProxyEntry?, channel: String = "") -> ShimConfig {
+    static func config(for session: Session, proxy: ProxyEntry?, relay: WebRTCTunnel.Relay?, channel: String = "") -> ShimConfig {
         let locale = locale(of: session, proxy: proxy)
         let settings = session.settings
         return ShimConfig(
             timeZone: Faults.isActive(.timeZoneIgnored) ? nil : locale.timeZone,
-            // With a proxy, WebRTC would go around it (measured: STUN from the real address on every
-            // iOS measured); removed by the shim, page and frames alike (measured: no STUN at all).
-            webRTC: proxy == nil ? "unrestricted" : "disabled",
+            webRTC: webRTCPolicy(proxy: proxy, relay: relay),
+            webRTCRelay: proxy == nil ? nil : relay,
             fingerprint: .init(seed: settings.noiseSeed, canvas: settings.canvas.rawValue, webgl: settings.webGL.rawValue,
                                audio: settings.audio.rawValue, language: locale.language,
                                unstable: Faults.isActive(.noiseUnstable), naive: Faults.isActive(.unmaskedReplacement),
@@ -77,8 +78,21 @@ enum PageSettings {
             channel: channel)
     }
 
-    static func script(for session: Session, proxy: ProxyEntry?, channel: String) -> WKUserScript {
-        let json = (try? String(data: JSONEncoder().encode(config(for: session, proxy: proxy, channel: channel)), encoding: .utf8)) ?? "{}"
+    /// WebRTC in a session's pages. Without a proxy, as Safari has it. With one, left to itself it
+    /// would go around the proxy (measured: STUN from the real address on every iOS measured), so it
+    /// goes through the session's relay (WebRTCTunnel: relay-only, the relay the only ICE server —
+    /// candidates at the proxy's address alone), or, when the proxy cannot carry it (HTTP, a SOCKS5
+    /// proxy without UDP, not checked yet), it is removed by the shim, page and frames alike
+    /// (measured: no STUN at all).
+    static func webRTCPolicy(proxy: ProxyEntry?, relay: WebRTCTunnel.Relay?) -> String {
+        guard proxy != nil else { return "unrestricted" }
+        guard relay != nil else { return "disabled" }
+        // The planted fault: the relay is started but the pages are left to the engine's own servers.
+        return Faults.isActive(.webRTCAroundTunnel) ? "unrestricted" : "tunnel"
+    }
+
+    static func script(for session: Session, proxy: ProxyEntry?, relay: WebRTCTunnel.Relay?, channel: String) -> WKUserScript {
+        let json = (try? String(data: JSONEncoder().encode(config(for: session, proxy: proxy, relay: relay, channel: channel)), encoding: .utf8)) ?? "{}"
         // The planted fault: the blob-worker hook on its old condition, the time zone alone — the shim as
         // it was before the mac app's fix of 8 November (a noised page, a worker with the real canvas).
         let body = Faults.isActive(.workerHookTimeZoneOnly)

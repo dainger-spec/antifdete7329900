@@ -34,7 +34,16 @@ this Mac, so a test sees on the screen what the pages say about how they were re
                    by which route ("route T: direct=1 A=0 B=2 D=0 "), and how many site connections
                    that served such a request are open now ("open T: 1")
   Site connections are kept alive between requests (60 s), as real sites keep them.
-  STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests
+  STUN      UDP 127.0.0.1:3478 (stun.lumentest through a proxy), answers Binding requests. Asked
+            through proxy C it answers with C's exit, 198.51.100.1 (the address /geo.json gives C), at
+            the association's port, as a real proxy's STUN answer does; C's relays take 198.51.100.1
+            as each other (so two associations of C reach each other at their exit address), and
+            name each other so. /__stun says how many Binding requests came through C and how many
+            came straight from this Mac (around every proxy: "stun: proxy=N direct=M")
+  /webrtc   two peer connections of one page, given stun.lumentest as their ICE server, connect with
+            a data channel: the page lists every candidate of the first ("candidates: relay
+            198.51.100.1") and says "channel: open" once a message went across, or "channel: failed"
+            (after 20 s), or "webrtc: none" when the page has no RTCPeerConnection
   account   http://127.0.0.1:28395: a stand-in for the Lumen account server (account.py — sign-in,
             activation, the signed document of rights). The site shows and changes its accounts:
             /__account?email=E[&set=S]; and has the site's robot check, <anything>/robot-check?action=A:
@@ -64,6 +73,9 @@ CACHE_COUNTER = [0]
 SERVED_COUNTER = [0]
 OPEN = {}              # Host -> site connections open now that have served a request for it
 ENV_COUNTER = [0]
+C_EXIT = "198.51.100.1"   # proxy C's exit, as /geo.json and the STUN server say it
+C_RELAYS = set()          # the ports of proxy C's UDP relays on 127.0.0.1
+STUN_SEEN = {"proxy": 0, "direct": 0}
 EXITS = {"127.0.0.2": ("A", "DE", "Europe/Berlin", "203.0.113.10"),
          "127.0.0.3": ("B", "US", "America/New_York", "203.0.113.20")}
 
@@ -98,6 +110,87 @@ def page(title, body, script=""):
             f"<body>{body}<script>{script}</script></body></html>")
 
 
+
+# A long page of numbered rows. mode=url: the page writes its place into the address as it is scrolled,
+# as many long pages do (history.replaceState); mode=ground: its ground turns dark and light by
+# sections as it is scrolled. Either changes what the browser's bars show while a finger moves the page.
+LONG_SCRIPTS = {
+    "plain": "",
+    "url": "addEventListener('scroll',()=>{const n=Math.floor(scrollY/70);"
+           "if(n!==window.lastRow){window.lastRow=n;history.replaceState(null,'','#row-'+n)}},{passive:true})",
+    "ground": "addEventListener('scroll',()=>{const dark=Math.floor(scrollY/700)%2===1;"
+              "document.documentElement.style.background=document.body.style.background=dark?'#111':'#fff';"
+              "document.body.style.color=dark?'#eee':'#111'},{passive:true})",
+}
+
+
+# /zone: the time zone (and language) the engine itself gives the page and workers loaded from a URL — dedicated,
+# shared and service — which no page script reaches (the measurement of 17 November: does WebKit on
+# the iPhone start its processes in a zone the app's environment names, as the Mac's does?).
+ZONE_WORKER = r"""
+const z = Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset() + ' ' + navigator.language;
+if (self.ServiceWorkerGlobalScope && self instanceof ServiceWorkerGlobalScope) {
+  self.addEventListener('install', () => self.skipWaiting());
+  self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
+  self.addEventListener('message', e => e.source.postMessage(z));
+} else if (self.SharedWorkerGlobalScope && self instanceof SharedWorkerGlobalScope) {
+  self.onconnect = e => e.ports[0].postMessage(z);
+} else { postMessage(z); }
+"""
+ZONE_SCRIPT = r"""
+const put = (id, text) => { document.getElementById(id).textContent = text; };
+put('pz', 'page zone: ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset() + ' ' + navigator.language);
+try { const w = new Worker('/zone-worker.js'); w.onmessage = e => put('wz', 'worker zone: ' + e.data); w.onerror = () => put('wz', 'worker zone: error'); }
+catch (e) { put('wz', 'worker zone: ' + e.name); }
+try { const s = new SharedWorker('/zone-worker.js'); s.port.onmessage = e => put('sz', 'shared zone: ' + e.data); s.port.start(); }
+catch (e) { put('sz', 'shared zone: ' + (window.SharedWorker ? e.name : 'none')); }
+if (!navigator.serviceWorker) put('vz', 'service zone: none');
+else navigator.serviceWorker.register('/zone-worker.js').then(r => {
+  navigator.serviceWorker.onmessage = e => put('vz', 'service zone: ' + e.data);
+  const ask = () => { const sw = r.active || r.waiting || r.installing; if (sw && sw.state === 'activated') sw.postMessage('zone'); else setTimeout(ask, 200); };
+  ask();
+}, e => put('vz', 'service zone: ' + e.name));
+setTimeout(() => { for (const id of ['wz', 'sz', 'vz']) { const el = document.getElementById(id); if (el.textContent.endsWith('…')) el.textContent = el.textContent.replace('…', 'timeout'); } }, 15000);
+"""
+
+
+# /webrtc: two peer connections of the page, the first offering a data channel to the second; every
+# candidate of the first is listed (type and address), and a message across says the channel works.
+WEBRTC_SCRIPT = r"""
+const cand = document.getElementById('cand'), chan = document.getElementById('chan');
+if (!window.RTCPeerConnection) { cand.textContent = 'webrtc: none'; chan.textContent = 'channel: none'; }
+else {
+  const seen = [];
+  const config = { iceServers: [{ urls: 'stun:stun.lumentest:3478' }] };
+  const a = new RTCPeerConnection(config), b = new RTCPeerConnection(config);
+  const show = () => { cand.textContent = 'candidates: ' + (seen.length ? seen.join(', ') : '(none)'); };
+  a.onicecandidate = e => {
+    if (!e.candidate) { show(); return; }
+    const parts = e.candidate.candidate.split(' ');
+    const typ = parts[parts.indexOf('typ') + 1];
+    const entry = typ + ' ' + parts[4];
+    if (!seen.includes(entry)) seen.push(entry);
+    show();
+    b.addIceCandidate(e.candidate).catch(() => {});
+  };
+  b.onicecandidate = e => { if (e.candidate) a.addIceCandidate(e.candidate).catch(() => {}); };
+  const dc = a.createDataChannel('lumen');
+  dc.onopen = () => dc.send('hello');
+  b.ondatachannel = e => { e.channel.onmessage = m => { if (m.data === 'hello') chan.textContent = 'channel: open'; }; };
+  setTimeout(() => { if (chan.textContent !== 'channel: open') chan.textContent = 'channel: failed'; }, 20000);
+  (async () => {
+    await a.setLocalDescription(await a.createOffer());
+    await b.setRemoteDescription(a.localDescription);
+    await b.setLocalDescription(await b.createAnswer());
+    await a.setRemoteDescription(b.localDescription);
+  })().catch(e => { chan.textContent = 'channel: error ' + e; });
+}
+"""
+
+
+def long_page(mode):
+    rows = "".join(f"<p style='height:70px;margin:0'>ряд {n:03d}</p>" for n in range(1, 101))
+    return page(f"long {mode}", f"<h1>Длинная страница {mode}</h1>{rows}", LONG_SCRIPTS.get(mode, ""))
 
 # The App Store's screenshots (ScreenshotTests, --demo): what a session's own page sees of it — its time
 # zone, language and local time as the page's scripts read them, and whether it came through the proxy
@@ -304,10 +397,14 @@ async def site(reader, writer, scheme="http"):
                     pass
                 break
             if host.split(":")[0] == "check.example":
+                if query.get("wait"):   # the design's k-loading: a page that takes its time to come
+                    await asyncio.sleep(min(float(query["wait"]), 30))
                 out = reply("200 OK", demo_page(query.get("l", "ru"), via), extra=["Cache-Control: no-store"])
             elif path.startswith("/page/"):
                 name = urllib.parse.unquote(path[len("/page/"):]) or "page"
                 out = reply("200 OK", page(name, f"<h1>Страница {name}</h1><p><a id=next href='/page/{name}-next'>Дальше</a></p>"))
+            elif path == "/long":   # a long page to scroll by hand (BrowserTests/testScrollingFollowsTheFinger)
+                out = reply("200 OK", long_page(query.get("mode", "plain")), extra=["Cache-Control: no-store"])
             elif path == "/state":
                 server_cookie = header(headers, "Cookie") or "none"
                 out = reply("200 OK", page("state", f"<h1>Состояние</h1><p id=cookie>cookie: …</p><p id=local>local: …</p>"
@@ -352,6 +449,21 @@ async def site(reader, writer, scheme="http"):
             elif path == "/served":
                 SERVED_COUNTER[0] += 1
                 out = reply("200 OK", page("served", f"<h1>Счётчик</h1><p id=n>served: {SERVED_COUNTER[0]}</p>"),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/zone":
+                out = reply("200 OK", page("zone", "<h1>Пояс</h1><p id=pz>page zone: …</p><p id=wz>worker zone: …</p>"
+                                                   "<p id=sz>shared zone: …</p><p id=vz>service zone: …</p>"
+                                                   f"<p>at: {html.escape(target)}</p>", ZONE_SCRIPT),
+                            extra=["Cache-Control: no-store"])
+            elif path == "/zone-worker.js":
+                out = reply("200 OK", ZONE_WORKER, "text/javascript", ["Cache-Control: no-store"])
+            elif path == "/webrtc":
+                out = reply("200 OK", page("webrtc", "<h1>WebRTC</h1><p id=cand>candidates: …</p><p id=chan>channel: …</p>"
+                                           f"<p>at: {html.escape(target)}</p>",
+                                           WEBRTC_SCRIPT), extra=["Cache-Control: no-store"])
+            elif path == "/__stun":
+                out = reply("200 OK", page("stun", f"<p>stun: proxy={STUN_SEEN['proxy']} direct={STUN_SEEN['direct']}</p>"
+                                                   f"<p>at: {html.escape(target)}</p>"),
                             extra=["Cache-Control: no-store"])
             elif path == "/hold":
                 name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
@@ -469,6 +581,12 @@ class UDPRelay(asyncio.DatagramProtocol):
 
     def connection_made(self, transport):
         self.transport = transport
+        self.port = transport.get_extra_info("sockname")[1]
+        if self.name == "C":
+            C_RELAYS.add(self.port)
+
+    def connection_lost(self, exc):
+        C_RELAYS.discard(self.port)
 
     def datagram_received(self, data, addr):
         if self.client is None or addr == self.client:
@@ -484,11 +602,13 @@ class UDPRelay(asyncio.DatagramProtocol):
             else:
                 return
             port = struct.unpack(">H", rest[:2])[0]
-            target = "127.0.0.1" if host.endswith(".lumentest") else host
+            # C's exit is another association of C on this Mac.
+            target = "127.0.0.1" if host.endswith(".lumentest") or (self.name == "C" and host == C_EXIT) else host
             event("udp", proxy=self.name, host=host, port=port)
             self.transport.sendto(rest[2:], (target, port))
         else:
-            header = b"\x00\x00\x00\x01" + socket.inet_aton(addr[0]) + struct.pack(">H", addr[1])
+            source = C_EXIT if self.name == "C" and addr[0] == "127.0.0.1" and addr[1] in C_RELAYS else addr[0]
+            header = b"\x00\x00\x00\x01" + socket.inet_aton(source) + struct.pack(">H", addr[1])
             self.transport.sendto(header + data, self.client)
 
 
@@ -557,9 +677,12 @@ class Stun(asyncio.DatagramProtocol):
     def datagram_received(self, data, addr):
         if len(data) < 20 or struct.unpack(">H", data[:2])[0] != 1:
             return
-        event("stun", src=addr[0])
+        through = addr[0] == "127.0.0.1" and addr[1] in C_RELAYS
+        STUN_SEEN["proxy" if through else "direct"] += 1
+        event("stun", src=addr[0], via="C" if through else "direct")
+        mapped = C_EXIT if through else addr[0]
         xport = addr[1] ^ 0x2112
-        xip = bytes(a ^ b for a, b in zip(socket.inet_aton(addr[0]), struct.pack(">I", 0x2112A442)))
+        xip = bytes(a ^ b for a, b in zip(socket.inet_aton(mapped), struct.pack(">I", 0x2112A442)))
         attr = struct.pack(">HHBBH", 0x0020, 8, 0, 1, xport) + xip
         self.transport.sendto(struct.pack(">HHI", 0x0101, len(attr), 0x2112A442) + data[8:20] + attr, addr)
 

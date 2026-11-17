@@ -50,6 +50,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var notSyncedHere: Set<UUID> = []
     @Published private(set) var proxies: [ProxyEntry] = []
     @Published var path: [UUID] = []
+    /// A site's light page fills the browser: the window goes light, its status bar dark on white (run 110).
+    @Published var lightPageShown = false
     /// Set once a reset launch has removed every WebKit store (the UI waits for it).
     @Published private(set) var ready = false
     /// Proxies being checked right now (their rows show it).
@@ -84,6 +86,9 @@ final class AppModel: ObservableObject {
             store.removeAll()
             ProxyPasswords.removeAll()
             AccountStore.save(nil)   // the iPhone's own identifier stays, as it does through a reinstall
+            UserDefaults.standard.removeObject(forKey: "welcome.passed")   // the first launch again
+            // The languages a measurement set (MeasureTests: LUMEN_TEST_SESSION_LANGS) go with it.
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
         }
         #if DEBUG
         if AppStoreSeed.active { AppStoreSeed.write(to: store) }   // the App Store's screenshots

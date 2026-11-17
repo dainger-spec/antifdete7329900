@@ -18,7 +18,9 @@ let package = Package(
     products: [.library(name: "LumenCore", targets: ["LumenCore"])],
     dependencies: [.package(path: "../..")],
     targets: [
-        .target(name: "LumenCore", dependencies: [.product(name: "BrowserCore", package: rootIdentity)]),
+        // TunnelCore: the Mac's TURN relay, which carries a proxied session's WebRTC through its proxy.
+        .target(name: "LumenCore", dependencies: [.product(name: "BrowserCore", package: rootIdentity),
+                                                  .product(name: "TunnelCore", package: rootIdentity)]),
         // The account server's own test vectors (its docs/entitlement-test-vectors.json), read by path.
         .testTarget(name: "LumenCoreTests", dependencies: ["LumenCore", .product(name: "BrowserCore", package: rootIdentity)],
                     exclude: ["entitlement-test-vectors.json"]),

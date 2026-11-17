@@ -1,8 +1,8 @@
 import LumenCore
 import SwiftUI
 
-/// The proxy list, as on the Mac: a proxy entered as one line, SOCKS5 or HTTP; each checked when
-/// added: alive or not, the address it exits from, its country, and whether it relays UDP.
+/// The proxy list (p8-list), as on the Mac: a proxy entered as one line, SOCKS5 or HTTP; each checked
+/// when saved and on demand: alive or not, the address and country it exits from, whether it relays UDP.
 struct ProxiesView: View {
     @EnvironmentObject var model: AppModel
     @State private var editing: ProxyEntry?
@@ -10,29 +10,46 @@ struct ProxiesView: View {
 
     var body: some View {
         List {
-            if model.proxies.isEmpty {
-                ContentUnavailableView(L("Прокси пока нет"), systemImage: "network",
-                                       description: Text(L("Добавьте прокси и назначьте его сессии в её настройках.")))
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-            }
-            ForEach(model.proxies) { entry in
-                ProxyRow(entry: entry, checking: model.checking.contains(entry.id))
-                    .contentShape(Rectangle())
-                    .onTapGesture { editing = entry }
-                    .accessibilityIdentifier("proxy-\(entry.displayName)")
-                    .padding(.horizontal, 14).padding(.vertical, 13)
-                    .glassPane(radius: 24)
-                    .listRowBackground(Color.clear).listRowSeparator(.hidden)
-                    .listRowInsets(EdgeInsets(top: 5, leading: 16, bottom: 5, trailing: 16))
-                    .swipeActions {
-                        Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
-                        Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(.gray)
+            if !model.proxies.isEmpty {
+                Section {
+                    ForEach(model.proxies) { entry in
+                        Button { editing = entry } label: {
+                            ProxyRow(entry: entry, checking: model.checking.contains(entry.id))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("proxy-\(entry.displayName)")
+                        .swipeActions {
+                            Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
+                            Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }.tint(Color(.systemGray))
+                        }
+                        .contextMenu {
+                            Button(L("Проверить"), systemImage: "arrow.clockwise") { model.check(entry.id) }
+                            Button(L("Изменить"), systemImage: "pencil") { editing = entry }
+                            Divider()
+                            Button(L("Удалить"), systemImage: "trash", role: .destructive) { model.deleteProxy(entry.id) }
+                        }
                     }
+                } footer: {
+                    Text(L("Прокси проверяется при сохранении и по нажатию."))
+                }
             }
         }
-        .listStyle(.plain)
-        .eclipseScreen()
+        .listStyle(.insetGrouped)
+        .overlay {
+            if model.proxies.isEmpty {
+                ContentUnavailableView {
+                    Label(L("Прокси пока нет"), systemImage: "globe")
+                } description: {
+                    Text(L("Добавьте HTTP или SOCKS5 — строкой, как его выдал провайдер."))
+                } actions: {
+                    Button(L("Добавить прокси")) { adding = true }
+                        .buttonStyle(.borderedProminent).tint(Theme.accentFill).controlSize(.large)
+                        .accessibilityIdentifier("newProxyEmpty")
+                }
+            }
+        }
         .navigationTitle(L("Прокси"))
+        .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { adding = true } label: { Image(systemName: "plus") }
@@ -44,62 +61,10 @@ struct ProxiesView: View {
     }
 }
 
-struct ProxyRow: View {
-    let entry: ProxyEntry
-    let checking: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(entry.displayName).font(.system(size: 17, weight: .semibold)).foregroundStyle(Theme.text)
-                Spacer()
-                Text(entry.kind == .socks5 ? "SOCKS5" : "HTTP").font(.system(size: 12.5, weight: .semibold)).foregroundStyle(Theme.secondary)
-                    .padding(.horizontal, 9).frame(height: 24)
-                    .background(Color.white.opacity(0.06), in: Capsule())
-                    .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 0.5))
-            }
-            Text("\(entry.host):\(entry.port)" + (entry.username.isEmpty ? "" : " · \(entry.username)"))
-                .font(.system(size: 14, design: .monospaced)).foregroundStyle(Theme.secondary)
-            // The state in a colour that says it: green works, red does not answer, grey is not known.
-            HStack(spacing: 8) {
-                Circle().fill(statusColor).frame(width: 7, height: 7).accessibilityHidden(true)
-                Text(status).font(.system(size: 14)).foregroundStyle(statusColor)
-            }
-            Text(udp).font(.system(size: 14)).foregroundStyle(Theme.tertiary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var statusColor: Color {
-        if checking { return Theme.secondary }
-        guard let check = entry.check else { return Theme.secondary }
-        return check.alive ? Theme.ok : Theme.bad
-    }
-
-    private var status: String {
-        if checking { return L("Проверяется…") }
-        guard let check = entry.check else { return L("Не проверен") }
-        guard check.alive else { return L("Недоступен: %@", "\(check.error ?? L("нет ответа"))") }
-        let place = [CountryLocale.flag(check.country), check.country ?? "", check.exitIP ?? ""].filter { !$0.isEmpty }.joined(separator: " ")
-        return L("Работает · %@", "\(place)")
-    }
-
-    private var udp: String {
-        if checking { return L("UDP: проверяется") }
-        switch entry.check?.udp ?? .unchecked {
-        case .supported: return L("UDP: умеет")
-        case .unsupported: return L("UDP: не умеет")
-        case .unchecked: return L("UDP: не проверен")
-        }
-    }
-}
-
-/// A proxy, entered as one line (the owner's design, 10 November 2026) — in any form providers hand
-/// them out, read by the Mac's rules (`ProxyLine`). The type is the line's scheme; a line without one
-/// leaves it to the person. The name is the proxy's own field, or what follows " #" in the line.
-/// A saved proxy's line is shown without its password, which is never shown again: a line that
-/// holds no password keeps the one the proxy has.
+/// A proxy, entered as one line (p9-new) — in any form providers hand them out, read by the Mac's rules
+/// (`ProxyLine`). The type is the line's scheme; a line without one leaves it to the person. The name
+/// is the proxy's own field, or what follows " #" in the line. A saved proxy's line is shown without
+/// its password, which is never shown again: a line that holds no password keeps the one it has.
 ///
 /// The line is a plain field, not a login and a password: iOS has nothing here to take for a
 /// sign-in and offer to keep among the person's own passwords (CI runs 12 and 13 did, with the two
@@ -111,6 +76,7 @@ struct ProxyEditor: View {
     @State private var name = ""
     @State private var kind = ProxyKind.socks5
     @State private var line = ""
+    @State private var confirmDelete = false
 
     private var read: Result<ProxyLine, ProxyLine.Problem> { ProxyLine.read(line) }
 
@@ -119,11 +85,14 @@ struct ProxyEditor: View {
         return nil
     }
 
-    /// What is wrong with the line, once something is written in it.
+    /// What is wrong with the line, once something is written in it (p9-error: one red line under it).
     private var problem: String? {
         guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, case let .failure(problem) = read else { return nil }
         return problem.text
     }
+
+    /// The type the line says itself, if it has a scheme: the choice then follows it.
+    private var lineKind: ProxyKind? { parsed?.kind }
 
     private func close() {
         line = ""   // nothing of the line stays on a screen that is leaving
@@ -152,51 +121,52 @@ struct ProxyEditor: View {
             Form {
                 Section {
                     TextField("socks5://user:pass@host:port", text: $line, axis: .vertical)
-                        .font(.system(size: 15, design: .monospaced))
+                        .font(.body.monospaced())
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                         .accessibilityIdentifier("proxyLine")
-                    PasteButton(payloadType: String.self) { strings in
-                        if let pasted = strings.first { line = pasted.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    }
-                    .accessibilityIdentifier("pasteProxy")
+                        .accessibilityLabel(L("Прокси одной строкой"))
                 } header: {
                     Text(L("Прокси одной строкой"))
                 } footer: {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if let problem {
-                            Text(problem).foregroundStyle(Theme.bad).accessibilityIdentifier("proxyLineProblem")
-                        }
-                        Text(L("Подойдёт любой привычный вид: со схемой или без, логин и пароль до адреса или после него."))
-                        if entry != nil {
-                            Text(L("Пароль не показан. Строка без пароля оставит прежний."))
+                    if let problem {
+                        Text(problem).foregroundStyle(Color(.systemRed)).accessibilityIdentifier("proxyLineProblem")
+                    } else {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(L("Подойдёт любой привычный вид: адрес:порт, логин:пароль@адрес:порт или ссылка со схемой."))
+                            if entry != nil { Text(L("Пароль не показан. Строка без пароля оставит прежний.")) }
                         }
                     }
                 }
-                .glassRow()
-                // The type, when the line does not say it.
-                if let parsed, parsed.kind == nil {
-                    Section {
-                        Picker(L("Тип"), selection: $kind) {
-                            Text("SOCKS5").tag(ProxyKind.socks5)
-                            Text("HTTP").tag(ProxyKind.http)
-                        }
-                        .pickerStyle(.segmented)
-                        .accessibilityIdentifier("proxyKind")
+                Section(L("Тип")) {
+                    Picker(L("Тип"), selection: Binding(get: { lineKind ?? kind }, set: { kind = $0 })) {
+                        Text("HTTP").tag(ProxyKind.http)
+                        Text("SOCKS5").tag(ProxyKind.socks5)
                     }
-                    .glassRow()
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .disabled(lineKind != nil)
+                    .accessibilityIdentifier("proxyKind")
                 }
                 Section {
-                    TextField(L("Название (необязательно)"), text: $name).accessibilityIdentifier("proxyName")
+                    TextField(L("Название"), text: $name).accessibilityIdentifier("proxyName")
+                } header: {
+                    Text(L("Название"))
+                } footer: {
+                    Text(L("Прокси проверим при сохранении."))
                 }
-                .glassRow()
                 if let entry {
                     Section {
-                        Button(L("Удалить прокси"), role: .destructive) { model.deleteProxy(entry.id); close() }
+                        Button(L("Удалить прокси"), role: .destructive) { confirmDelete = true }
+                            .accessibilityIdentifier("deleteProxy")
                     }
-                    .glassRow()
+                    .confirmationDialog(L("Удалить прокси «%@»?", entry.displayName), isPresented: $confirmDelete, titleVisibility: .visible) {
+                        Button(L("Удалить прокси"), role: .destructive) { model.deleteProxy(entry.id); close() }
+                        Button(L("Отмена"), role: .cancel) {}
+                    } message: {
+                        Text(L("Сессии с этим прокси останутся запертыми, пока не выберете им другой."))
+                    }
                 }
             }
-            .eclipseSheet()
             .navigationTitle(entry == nil ? L("Новый прокси") : L("Прокси"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -216,5 +186,6 @@ struct ProxyEditor: View {
                 line = ProxyLine.write(kind: entry.kind, host: entry.host, port: entry.port, username: entry.username)
             }
         }
+        .presentationDetents([.large])
     }
 }
