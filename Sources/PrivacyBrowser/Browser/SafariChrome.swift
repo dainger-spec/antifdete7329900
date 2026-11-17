@@ -331,6 +331,7 @@ enum SafariChrome {
         bridgeNibLookups()
         bridgeNibInitializers()
         stubChromeFeatures()
+        SafariTypingGuard.install()
         closeSafarisAutoFill()
         installUnavailableNotice()
     }
@@ -1037,6 +1038,8 @@ enum SafariChrome {
 
     /// Replaces the late stubs whose classes are loaded by now; called again as images load.
     static func stubLateFeatures() {
+        // Typing's guard too, on the classes of an image that came in later (SafariPlatformSupport's).
+        if isAvailable { SafariTypingGuard.install() }
         for (className, selectorName) in lateStubs where !lateStubsMade.contains(className + " " + selectorName) {
             guard NSClassFromString(className) != nil else { continue }
             replaceWithConstant(className, selectorName) { nil }
@@ -1266,12 +1269,16 @@ enum SafariChrome {
     /// The menu item whose action was last sent, and when.
     private static var lastMenuItem: (title: String, at: Date)?
     private static var isShowingUnavailable = false
+    /// When to tell the person, and when the log is enough (`UnavailableNoticePolicy`).
+    private static var noticePolicy = UnavailableNoticePolicy()
 
     /// An exception AppKit's run loop caught (and `ExceptionLog` wrote down) right after the user
-    /// chose a menu item, pressed a key or clicked is one of Safari's features failing for want of
-    /// what only the real Safari has. Instead of nothing happening, the profile's window says so,
-    /// naming the menu item when there was one. Nothing is said for an exception nobody asked for
-    /// (a timer, a page loading): the log has those. One notice at a time.
+    /// chose a menu item, pressed a key or clicked may be one of Safari's features failing for want
+    /// of what only the real Safari has. A menu item's failure is said, naming the item, once per
+    /// item; a click's once per process; never two within the policy's cooldown. Typing is never
+    /// interrupted: a customer's address bar threw at every key press, and the notice, put up over
+    /// the field at every key, took the keyboard from it — nothing could be typed (0.1.17). An
+    /// exception nobody asked for (a timer, a page loading) is in the log only.
     private static func installUnavailableNotice() {
         _ = NotificationCenter.default.addObserver(forName: NSMenu.willSendActionNotification, object: nil, queue: nil) { note in
             let title = (note.userInfo?["MenuItem"] as? NSMenuItem)?.title ?? ""
@@ -1282,14 +1289,48 @@ enum SafariChrome {
         }
     }
 
+    /// What the person was doing when the run loop caught an exception in an event of this type.
+    static func noticeCause(eventType: NSEvent.EventType?, menuItem: String?, responder: NSResponder?) -> UnavailableNoticePolicy.Cause {
+        if let menuItem { return .menuItem(menuItem) }
+        guard let eventType else { return .other }
+        switch eventType {
+        case .keyDown, .keyUp:
+            return .key(intoText: takesText(responder))
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseUp:
+            return .click
+        default:
+            return .other
+        }
+    }
+
+    /// Whether keys pressed on `responder` are typing: a field editor, a text field or view, a page.
+    private static func takesText(_ responder: NSResponder?) -> Bool {
+        guard let responder else { return false }
+        if responder is NSText || responder is NSTextField || responder is WKWebView { return true }
+        if responder is NSTextInputClient { return true }
+        // A view inside a web view (WebKit's own views take the page's keys).
+        var view = responder as? NSView
+        while let current = view {
+            if current is WKWebView { return true }
+            view = current.superview
+        }
+        return false
+    }
+
     private static func showUnavailable(eventType: NSEvent.EventType?) {
         let item = lastMenuItem.flatMap { Date().timeIntervalSince($0.at) < 3 ? $0.title : nil }
-        let byInput = eventType.map { [.keyDown, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseUp].contains($0) } ?? false
-        guard item != nil || byInput else { return }
-        lastMenuItem = nil
-        let text = item.map { $0.isEmpty ? L("safari.unavailable.action") : String(format: L("safari.unavailable.item"), $0) }
-            ?? L("safari.unavailable.action")
-        presentNotice(L("safari.unavailable.title"), text)
+        let responder = (NSApp.keyWindow ?? NSApp.mainWindow)?.firstResponder
+        let cause = noticeCause(eventType: eventType, menuItem: item, responder: responder)
+        let decision = noticePolicy.decide(cause)
+        switch decision {
+        case .logOnly(let reason):
+            log.notice("A caught exception was not announced: \(reason.rawValue, privacy: .public)")
+        case .show(let menuItem):
+            lastMenuItem = nil
+            let text = menuItem.map { $0.isEmpty ? L("safari.unavailable.action") : String(format: L("safari.unavailable.item"), $0) }
+                ?? L("safari.unavailable.action")
+            presentNotice(L("safari.unavailable.title"), text)
+        }
     }
 
     /// Shows a notice in the profile's window: a sheet on it, one at a time. `--exception-check`
