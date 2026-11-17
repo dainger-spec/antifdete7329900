@@ -149,7 +149,7 @@ final class BrowserWindowController: NSWindowController, NSWindowDelegate, NSTex
         badge.setContentCompressionResistancePriority(.required, for: .horizontal)
         // This window is not Safari's: said where the person looks, with why (SimplifiedModeNotice).
         // In the toolbar, whose height a page measures and which this leaves as it is.
-        let simplified = NSHostingView(rootView: SimplifiedModeChip(reason: ownWindowReason) { [weak self] in self?.showSimplifiedMode() })
+        let simplified: NSView = NSHostingView(rootView: SimplifiedModeChip(reason: ownWindowReason) { [weak self] in self?.showSimplifiedMode() })
         simplified.setContentCompressionResistancePriority(.required, for: .horizontal)
         simplifiedChip = simplified
         // The app's mark, where Safari has its sidebar button.
