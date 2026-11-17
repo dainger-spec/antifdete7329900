@@ -1007,6 +1007,9 @@ struct ProxyEditView: View {
                 if let url = OpenVPNFile.choose() { onOpenVPN?(url) }
             }
             .buttonStyle(.lumenSecondary)
+            // Its whole name; the sentence beside it wraps instead.
+            .fixedSize()
+            .layoutPriority(1)
         }
         .padding(10)
         .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Theme.raisedInset))

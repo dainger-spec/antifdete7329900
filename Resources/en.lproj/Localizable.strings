@@ -1611,7 +1611,7 @@
 "editor.proxy.mode.saved" = "From the List";
 "editor.proxy.mode.new" = "New";
 "editor.proxy.none.note" = "The profile goes online directly, from this Mac's address.";
-"editor.proxy.new.note" = "Every page of this profile goes through the proxy — never around it. A vless://, vmess://, trojan:// or ss:// link is pasted here too. Without a scheme the proxy's type comes from a check: Save runs one if Check has not. The proxy stays the profile's own; it is not added to the list. OpenVPN, and anything wanted in the list: Add to List….";
+"editor.proxy.new.note" = "Every page of this profile goes through the proxy — never around it. Without a scheme the proxy's type comes from a check: Save runs one if Check has not. The proxy stays the profile's own; it is not added to the list. OpenVPN: Add to List….";
 "editor.proxy.saved.empty" = "The proxy list is empty. Add a proxy, a VLESS, VMess, Trojan or Shadowsocks link or an OpenVPN connection with Add to List… — or paste a proxy or a link under New.";
 "editor.proxy.saved.noneKnown" = "No proxy of the list has a known type yet: check them under ⋯ → Proxies… first, or paste one under New.";
 "editor.proxy.saved.search" = "Search proxies";
@@ -1628,7 +1628,7 @@
 "proxies.add" = "Add";
 "proxies.add.help" = "Add a proxy (HTTP, SOCKS5), a link (VLESS, VMess, Trojan, Shadowsocks), an OpenVPN connection (.ovpn) or a list of proxies.";
 "proxies.add.title" = "Add a Proxy or a Link";
-"proxies.add.explanation" = "Paste the proxy as the provider gave it (IP:port:user:password, user:password@IP:port, socks5://…, http://…), or a vless://, vmess://, trojan:// or ss:// link. What it was recognised as shows under the field at once; Check asks the proxy before it goes into the list.";
+"proxies.add.explanation" = "Paste the proxy or the link as the provider gave it. What it was recognised as shows under the field at once; Check asks the proxy before it goes into the list.";
 "proxies.add.action" = "Add";
 "proxies.add.full" = "The list already holds %ld proxies, its limit: delete some first.";
 "proxies.addChoice.title" = "What to add";

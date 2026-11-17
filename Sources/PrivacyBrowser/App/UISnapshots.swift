@@ -1228,7 +1228,7 @@ enum UISnapshots {
                                                                                 "Amsterdam", [138, 142, 160]))
             }
             let addLine = added
-            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 560), titled: false) {
+            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 680), titled: false) {
                 ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine, onOpenVPN: { _ in })
             }.capture(into: folder)
             problems += await proxyAdding(into: folder, proxies: proxies, rows: rows)
@@ -1267,7 +1267,7 @@ enum UISnapshots {
             ProxyAddChoicesView(choose: { _ in }, importList: {})
                 .background(Theme.raised)
         }.capture(into: folder)
-        problems += await Shot(name: "sheet-proxy-add-empty", size: CGSize(width: 560, height: 560), titled: false) {
+        problems += await Shot(name: "sheet-proxy-add-empty", size: CGSize(width: 560, height: 680), titled: false) {
             ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, onOpenVPN: { _ in })
         }.capture(into: folder)
         let link = "vless://b831381d-6324-4d53-ad4f-8cda48b30811@nl1.example.com:443?encryption=none&flow=xtls-rprx-vision" // l10n: not text
