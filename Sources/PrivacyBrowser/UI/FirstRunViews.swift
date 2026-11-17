@@ -35,7 +35,7 @@ struct FirstRunTouchIDView: View {
         LockScreen(title: L("firstRun.touchID.title"), subtitle: L("firstRun.touchID.subtitle")) {
             VStack(spacing: 0) {
                 fingerprint
-                    .padding(.top, 8)
+                    .padding(.top, 22)
                 if let shown, shown != .cancelled {
                     outcomeLine(shown)
                         .padding(.top, 18)
@@ -140,6 +140,8 @@ struct FirstRunProtectionView: View {
     var body: some View {
         LockScreen(title: L("firstRun.protection.title"), subtitle: L("firstRun.protection.subtitle")) {
             VStack(alignment: .leading, spacing: 12) {
+                // Clear of the horizon's light, as the lock screen's field is.
+                Color.clear.frame(height: 10)
                 if virtualMachine {
                     LockNote(symbol: "info.circle", text: L("firstRun.protection.virtualMachine"))
                 } else {
@@ -185,12 +187,10 @@ struct FirstRunProtectionView: View {
                     .buttonStyle(.lumenPrimary)
                     .disabled(networkGuard.checking)
             case .awaitingApproval:
-                HStack(spacing: 8) {
-                    Button(L("firstRun.openSystemSettings")) { networkGuard.openSystemSettings() }
-                        .buttonStyle(.lumenPrimary)
-                    Button(L("guard.refresh")) { networkGuard.checkAgain() }
-                        .buttonStyle(.lumenGhost)
-                        .disabled(networkGuard.checking)
+                // Side by side where they fit in the card's width, else one under the other.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) { approvalButtons }
+                    VStack(alignment: .leading, spacing: 6) { approvalButtons }
                 }
             case .notAnswering:
                 Button(L("guard.refresh")) { networkGuard.checkAgain() }
@@ -200,6 +200,15 @@ struct FirstRunProtectionView: View {
                 EmptyView()
             }
         }
+    }
+
+    @ViewBuilder
+    private var approvalButtons: some View {
+        Button(L("firstRun.openSystemSettings")) { networkGuard.openSystemSettings() }
+            .buttonStyle(.lumenPrimary)
+        Button(L("guard.refresh")) { networkGuard.checkAgain() }
+            .buttonStyle(.lumenGhost)
+            .disabled(networkGuard.checking)
     }
 
     private func guardDetail(_ state: NetworkGuardState) -> String {
@@ -310,7 +319,7 @@ struct FirstRunCard<Actions: View>: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised.opacity(0.85)))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Theme.raised))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
             .strokeBorder(status == .done ? Theme.running.opacity(0.45) : Theme.hairline, lineWidth: 1))
         .animation(Theme.appearAnimation, value: status)
