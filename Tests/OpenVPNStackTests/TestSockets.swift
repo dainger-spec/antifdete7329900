@@ -155,9 +155,16 @@ enum TestSockets {
 @inline(__always) func Glibc_connect(_ socket: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
     Darwin.connect(socket, address, length)
 }
+/// The system's `bind`: inside an XCTestCase on macOS a bare `bind` is NSObject's (Cocoa bindings).
+@inline(__always) func systemBind(_ socket: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+    Darwin.bind(socket, address, length)
+}
 #else
 @inline(__always) func Glibc_connect(_ socket: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
     Glibc.connect(socket, address, length)
+}
+@inline(__always) func systemBind(_ socket: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+    Glibc.bind(socket, address, length)
 }
 #endif
 

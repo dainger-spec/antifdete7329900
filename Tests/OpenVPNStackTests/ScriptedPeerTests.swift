@@ -385,7 +385,7 @@ extension ScriptedPeerTests {
         for descriptor in [socketDescriptor, intruder] {
             var storage = sockaddr_storage()
             let length = TunnelSystem.fill(&storage, address: TunnelAddress("127.0.0.1")!, port: 0)
-            _ = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, length) } }
+            _ = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { systemBind(descriptor, $0, length) } }
             TestSockets.setTimeout(descriptor, seconds: 2)
         }
         let ownPort = TunnelSystem.localAddress(socketDescriptor)!.port

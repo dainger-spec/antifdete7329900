@@ -14,7 +14,7 @@ final class LoopbackForwardersTests: XCTestCase {
         let descriptor = socket(AF_INET, TestSockets.datagram, 0)
         var storage = sockaddr_storage()
         let length = TunnelSystem.fill(&storage, address: TunnelAddress("127.0.0.1")!, port: port)
-        _ = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, length) } }
+        _ = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { systemBind(descriptor, $0, length) } }
         TestSockets.setTimeout(descriptor, seconds: 3)
         return (descriptor, TunnelSystem.localAddress(descriptor)!.port)
     }
