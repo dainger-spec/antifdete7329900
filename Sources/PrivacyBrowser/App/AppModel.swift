@@ -1235,6 +1235,9 @@ final class AppModel: ObservableObject {
 
     /// Profiles whose proxy is getting a new IP before they start (the row says so).
     @Published private(set) var changingIPBeforeLaunch: Set<UUID> = []
+    /// Profiles of a selection's Launch waiting for their turn (`launchProfiles`, four start at a
+    /// time): their rows say so, instead of looking as if the click did nothing to them.
+    @Published var launchQueued: Set<UUID> = []
 
     /// A profile on a proxy that changes its IP at each launch (`ProxyListEntry.changesIPOnLaunch`)
     /// gets a new one first — unless another running profile is on that proxy, whose pages would
@@ -1512,7 +1515,7 @@ final class AppModel: ObservableObject {
             // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
             refresh()
         } catch {
-            showError(error.localizedDescription)
+            showError(errorText(error))
         }
     }
 

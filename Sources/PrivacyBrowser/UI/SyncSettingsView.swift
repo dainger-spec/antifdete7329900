@@ -30,6 +30,9 @@ struct SyncSettingsView: View {
     @State private var token = ""
     @State private var loaded = false
     @State private var confirmingOff = false
+    /// What is wrong with the server's address, and the address it was found in: said under the
+    /// field while that is what the field holds (`addressProblem`).
+    @State private var serverProblem: (address: String, text: String)?
 
     var body: some View {
         if embedded {
@@ -49,7 +52,10 @@ struct SyncSettingsView: View {
                 SheetFooter {
                     Button(L("common.done")) {
                         // A server typed and not saved is saved: Return closed the sheet without it.
-                        if mode == .server, serverChanged, !serverURL.isEmpty { saveServer() }
+                        // One that cannot be saved keeps the sheet open, with why under it.
+                        if mode == .server, serverChanged, !serverURL.isEmpty {
+                            guard saveServer() else { return }
+                        }
                         dismiss()
                     }
                         .buttonStyle(.lumenPrimary)
@@ -137,13 +143,20 @@ struct SyncSettingsView: View {
                     TextField(L("sync.server.url"), text: $serverURL, prompt: Text(verbatim: ""))
                         .lumenField("https://sync.example.com", isEmpty: serverURL.isEmpty) // l10n: not text
                         .frame(width: 280)
-                        .onSubmit(saveServer)
+                        .onSubmit { saveServer() }
                 }
                 SettingRow(L("sync.server.token"), detail: nil, effect: nil) {
                     SecureField(L("sync.server.token"), text: $token, prompt: Text(verbatim: ""))
                         .lumenField()
                         .frame(width: 280)
-                        .onSubmit(saveServer)
+                        .onSubmit { saveServer() }
+                }
+                if let serverProblem, serverProblem.address == serverURL {
+                    Label(serverProblem.text, systemImage: "exclamationmark.triangle.fill")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.danger)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 6)
                 }
                 HStack(alignment: .top, spacing: 16) {
                     Text(L("sync.server.note"))
@@ -156,7 +169,7 @@ struct SyncSettingsView: View {
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.running)
                     }
-                    Button(L("sync.server.save"), action: saveServer)
+                    Button(L("sync.server.save")) { saveServer() }
                         .buttonStyle(.lumenSecondary)
                         .disabled(serverURL.isEmpty || !serverChanged)
                 }
@@ -253,6 +266,8 @@ struct SyncSettingsView: View {
 
     /// The last sync as the row's title, as the sidebar says it ("Synced 4 minutes ago").
     private var statusTitle: String {
+        // Sync Now pressed: said while it runs, not the last result under a spinner.
+        if model.isSyncInProgress { return L("profiles.sync.syncing") }
         guard let status = model.lastSyncStatus else { return L("profiles.sync.notYet") }
         if status.error != nil { return L("profiles.sync.failed") }
         return String(format: L("profiles.sync.synced"), status.date.shownRelative)
@@ -305,9 +320,35 @@ struct SyncSettingsView: View {
         return url.absoluteString != serverURL.trimmingCharacters(in: .whitespaces) || savedToken != token
     }
 
-    private func saveServer() {
-        guard !serverURL.isEmpty else { return }
-        model.setSyncServer(baseURL: serverURL, token: token)
+    /// Saves the server as typed; false when its address cannot be one, said under the field. A
+    /// bare host ("sync.example.com") is taken as https, the only scheme allowed.
+    @discardableResult
+    private func saveServer() -> Bool {
+        var address = serverURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !address.isEmpty else { return false }
+        if !address.contains("://") {
+            address = "https://" + address
+            serverURL = address
+        }
+        if let problem = Self.addressProblem(address) {
+            serverProblem = (address, problem)
+            return false
+        }
+        serverProblem = nil
+        model.setSyncServer(baseURL: address, token: token)
+        return true
+    }
+
+    /// What `HTTPSyncTransport.validate` would refuse in the address, in the interface's language:
+    /// its own reasons are English («Недопустимые настройки (sync server URL must use https).»), and
+    /// they went to the Profiles window's alert, behind this sheet, where nobody saw them.
+    static func addressProblem(_ address: String) -> String? {
+        guard let url = URL(string: address), let scheme = url.scheme?.lowercased(), let host = url.host, !host.isEmpty else {
+            return L("sync.server.error.address")
+        }
+        guard scheme == "https" else { return L("sync.server.error.https") }
+        guard url.query == nil, url.fragment == nil, url.user == nil else { return L("sync.server.error.extra") }
+        return nil
     }
 
     private func chooseFolder() {

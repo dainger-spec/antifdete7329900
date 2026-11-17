@@ -96,7 +96,12 @@ extension AppModel {
     /// most for one that does not), so that a large selection does not run the Mac's processors and
     /// window server out (docs/SCALE.md).
     func launchProfiles(_ ids: [UUID]) async {
+        // Thirty selected and Launch: four start, and the other rows said nothing until their turn.
+        let waiting = ids.filter { !isRunning($0) && !isBusy($0) }
+        launchQueued.formUnion(waiting)
+        defer { launchQueued.subtract(waiting) }
         await LaunchQueue.run(ids, goesOn: { [weak self] in self?.phase == .unlocked }, start: { [weak self] id in
+            self?.launchQueued.remove(id)
             guard let self, !self.isRunning(id), !self.isBusy(id) else { return }
             await self.launch(id)
         }, windowUp: { [weak self] id in

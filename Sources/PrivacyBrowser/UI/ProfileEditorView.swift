@@ -446,7 +446,8 @@ struct ProfileDraft {
         if !trimmedURL.isEmpty {
             // "example.com", as a person types an address: https, as the address bar would.
             if !trimmedURL.contains("://"), !trimmedURL.lowercased().hasPrefix("about:") { trimmedURL = "https://" + trimmedURL }
-            guard let url = URL(string: trimmedURL) else { throw CoreError.invalidConfiguration(L("editor.error.startURL")) }
+            // Said as it is: wrapped as a core error it read "Invalid settings (Start URL is not a valid URL)".
+            guard let url = URL(string: trimmedURL) else { throw DraftProblem(L("editor.error.startURL")) }
             configuration.startURL = url
         }
         configuration.deviceGenerationID = deviceGenerationID
@@ -459,7 +460,7 @@ struct ProfileDraft {
             // only; the accuracy held to what the picker shows (5–500 m), so the map and the page agree.
             guard let lat = GeolocationSetting.number(fromField: latitude), let lon = GeolocationSetting.number(fromField: longitude),
                   let acc = GeolocationSetting.accuracy(fromField: accuracy) else {
-                throw CoreError.invalidConfiguration(L("editor.error.coords"))
+                throw DraftProblem(L("editor.error.coords"))
             }
             configuration.geolocation = .fixed(latitude: lat, longitude: lon, accuracyMeters: acc)
         }
@@ -502,8 +503,8 @@ struct ProfileDraft {
         configuration.notes = String(notes.trimmingCharacters(in: .whitespacesAndNewlines).prefix(ProfileConfiguration.maximumNotesLength))
         configuration.avatar = avatarStyle
         if windowChoice == .custom && windowSize == nil {
-            throw CoreError.invalidConfiguration(String(format: L("editor.window.error"), WindowSize.minimumWidth,
-                                                        WindowSize.maximumWidth, WindowSize.minimumHeight, WindowSize.maximumHeight))
+            throw DraftProblem(String(format: L("editor.window.error"), WindowSize.minimumWidth,
+                                      WindowSize.maximumWidth, WindowSize.minimumHeight, WindowSize.maximumHeight))
         }
         configuration.windowSize = windowSize
         configuration.safariVersion = safariVersion
@@ -518,6 +519,36 @@ struct DraftProblem: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+extension ProfileDraft {
+    /// What stops Save, in the person's words, and the part of the editor where it is mended. The
+    /// core's checks (`ProfileConfiguration.validate`) say what is wrong in English, for logs and
+    /// tests: shown as they were, a Russian editor said «Недопустимые настройки (geolocation out of
+    /// range).». Those a person can reach from the form are said here; any other keeps the core's
+    /// detail behind a sentence of the interface's language.
+    static func saveProblem(_ error: Error) -> (text: String, topic: ProfileEditorForm.Topic?) {
+        guard case let .invalidConfiguration(detail)? = error as? CoreError else { return (errorText(error), nil) }
+        let known: [(prefix: String, topic: ProfileEditorForm.Topic, text: () -> String)] = [
+            ("start URL must be", .profile, { L("editor.error.startURL.scheme") }),
+            ("user agent must be", .identity, { L("editor.error.userAgent") }),
+            ("geolocation out of range", .location, { L("editor.error.coords.range") }),
+            ("camera resolution must be", .camera, {
+                String(format: L("editor.camera.error.size"), CameraSubstitution.minDimension, CameraSubstitution.maxDimension)
+            }),
+            ("camera frame rate must be", .camera, {
+                String(format: L("editor.camera.error.frameRate"), CameraSubstitution.minFrameRate, CameraSubstitution.maxFrameRate)
+            }),
+            ("the camera is set to an image", .camera, { L("editor.camera.error.noImage") }),
+            ("the camera is set to a video", .camera, { L("editor.camera.error.noVideo") }),
+            ("the camera playback is out of range", .camera, { L("editor.camera.error.playback") }),
+            ("proxy port out of range", .connection, { L("editor.proxy.error.port") }),
+            ("proxy username and password", .connection, { L("editor.proxy.error.credentials") }),
+            ("proxy host must be", .connection, { L("editor.proxy.error.host") }),
+        ]
+        if let match = known.first(where: { detail.hasPrefix($0.prefix) }) { return (match.text(), match.topic) }
+        return (String(format: L("editor.error.invalid"), detail), nil)
+    }
 }
 
 struct ProfileEditorView: View {
@@ -535,6 +566,7 @@ struct ProfileEditorView: View {
     let target: Target
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
     @State private var draft = ProfileDraft()
     /// The draft as it was loaded, in words (it is not Equatable): what Cancel compares it with.
     @State private var loadedDraft: String?
@@ -682,6 +714,10 @@ struct ProfileEditorView: View {
                           onChooseCameraVideo: { choosingCameraVideo = true },
                           onOpenCameraPreview: openCameraPreview,
                           cameraAllowed: model.allowsCamera,
+                          onOpenAccount: {
+                              model.settingsSection = .account
+                              openSettings()
+                          },
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })
@@ -711,7 +747,7 @@ struct ProfileEditorView: View {
                 keptVersions = model.keptSettings(for: summary.id)
             } catch {
                 settingsUnreadable = true
-                self.error = String(format: L("editor.error.decrypt"), error.localizedDescription)
+                self.error = String(format: L("editor.error.decrypt"), errorText(error))
             }
         } else {
             draft.name = String(format: L("editor.defaultName"), model.profiles.count + 1)
@@ -888,7 +924,7 @@ struct ProfileEditorView: View {
                     do {
                         _ = try await model.importCookies(cookies, into: id)
                     } catch {
-                        model.showError(String(format: L("editor.cookies.error"), error.localizedDescription))
+                        model.showError(String(format: L("editor.cookies.error"), errorText(error)))
                     }
                     dismiss()
                 }
@@ -896,7 +932,10 @@ struct ProfileEditorView: View {
             }
             dismiss()
         } catch {
-            self.error = errorText(error)
+            // Said in the person's words, with the part of the form where it is mended in view.
+            let problem = ProfileDraft.saveProblem(error)
+            self.error = problem.text
+            if let part = problem.topic { topic = part }
         }
     }
 }

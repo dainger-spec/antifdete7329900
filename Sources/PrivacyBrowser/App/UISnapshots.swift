@@ -711,6 +711,27 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-profile-import", size: CGSize(width: 480, height: 300), titled: false) {
                 ProfileImportView().environmentObject(model)
             }.capture(into: folder)
+            // A profile's cookie snapshots, one of them all expired (its Restore greyed, with why),
+            // and the notice a launch shows in the profile's window after putting cookies back.
+            let jar = CookieImporter.read(Data(#"[{"domain":".example.org","name":"session","value":"a1","path":"/","secure":true,"expirationDate":4102444800},{"domain":".shop.example","name":"cart","value":"b2","path":"/","expirationDate":4102444800}]"#.utf8)).cookies
+            let stale = CookieImporter.read(Data(#"[{"domain":".example.org","name":"old","value":"c3","path":"/","expirationDate":1700000000}]"#.utf8)).cookies
+            let snapshotsNow = Date()
+            let snapshots = [CookieSnapshot(takenAt: snapshotsNow.addingTimeInterval(-600), trigger: .periodic, cookies: jar),
+                             CookieSnapshot(takenAt: snapshotsNow.addingTimeInterval(-26 * 3_600), trigger: .close, cookies: jar),
+                             CookieSnapshot(takenAt: Date(timeIntervalSince1970: 1_699_000_000), trigger: .close, cookies: stale)]
+            problems += await Shot(name: "sheet-cookie-snapshots", size: CGSize(width: 560, height: 480), titled: false) {
+                CookieSnapshotsView(profile: northwind, sample: snapshots).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "cookie-recovery-notice", size: CGSize(width: 420, height: 110), titled: false) {
+                CookieRecoveryNotice.preview(CookieSnapshotKeeper.Report(restored: 41, refused: 0,
+                                                                         snapshotTakenAt: snapshotsNow.addingTimeInterval(-3_600),
+                                                                         cause: .uncleanEnd))
+                    .padding(16)
+            }.capture(into: folder)
+            // Copies of a profile: how many, typed or stepped, and where their proxies come from.
+            problems += await Shot(name: "sheet-duplicate", size: CGSize(width: 520, height: 520), titled: false) {
+                DuplicateProfileView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
         } else {
             print("FAIL could not make a sample profile summary")
             problems += 1
@@ -2009,8 +2030,9 @@ enum UISnapshots {
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
+            // Waiting for its turn in a selection's Launch, while "Launch Review" starts.
             ProfileRowItem(id: id(6), name: "Shopping", activity: .stopped, exit: .direct, ephemeral: true,
-                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400)),
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400), launchQueued: true),
             // At its last launch no geolocation service answered through its proxy.
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,

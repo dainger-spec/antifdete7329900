@@ -19,8 +19,8 @@ enum CookieRecoveryNotice {
 
     /// The notice's words.
     static func text(_ report: CookieSnapshotKeeper.Report) -> (title: String, detail: String) {
-        (String(format: L("cookieRecovery.notice"), report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened)),
-         String(format: L("cookieRecovery.notice.detail"), report.restored))
+        (String(format: L("cookieRecovery.notice"), report.restored),
+         String(format: L("cookieRecovery.notice.detail"), report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened)))
     }
 
     /// Shows the notice over `session`'s window — Safari's when its chrome is hosted, else ours.
@@ -80,6 +80,12 @@ enum CookieRecoveryNotice {
         }
         let windows = session.windowControllers.filter { !$0.isForWarmUp }.compactMap(\.window).filter(\.isVisible)
         return windows.first { $0.isKeyWindow } ?? windows.first
+    }
+
+    /// The notice as it is drawn, alone (the UI snapshots).
+    static func preview(_ report: CookieSnapshotKeeper.Report) -> some View {
+        let words = text(report)
+        return NoticeView(title: words.title, detail: words.detail) {}
     }
 
     /// Whether a notice is on screen now (the self-test's).

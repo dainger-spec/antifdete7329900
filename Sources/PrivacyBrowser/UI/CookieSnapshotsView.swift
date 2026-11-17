@@ -8,6 +8,8 @@ import SwiftUI
 /// when the profile runs, else at its next launch, before its first page loads.
 struct CookieSnapshotsView: View {
     let profile: ProfileSummary
+    /// The snapshots to show instead of the profile's (the UI snapshots: no vault there).
+    var sample: [CookieSnapshot]?
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
@@ -24,7 +26,8 @@ struct CookieSnapshotsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("cookieSnapshots.title"), profile.name), subtitle: L("cookieSnapshots.explanation"))
-            ScrollView {
+            // At most three snapshots are kept: content-sized, no scroll area standing half empty.
+            VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
                     if ephemeral {
                         note(L("cookieSnapshots.ephemeral"), symbol: "info.circle")
@@ -46,7 +49,7 @@ struct CookieSnapshotsView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 18)
             }
-            .frame(minHeight: 220, maxHeight: 420)
+            .fixedSize(horizontal: false, vertical: true)
             SheetFooter(leading: {
                 if working { ProgressView().controlSize(.small) }
             }, buttons: {
@@ -95,6 +98,8 @@ struct CookieSnapshotsView: View {
                         Button(L("cookieSnapshots.restore")) { restoring = snapshot }
                             .buttonStyle(.lumenGhost)
                             .disabled(working || valid == 0 || ephemeral || model.isBusy(profile.id))
+                            // A greyed Restore says why.
+                            .help(valid == 0 ? L("cookieSnapshots.restore.allExpired") : "")
                     }
                     .padding(.vertical, 4)
                 }
@@ -127,6 +132,11 @@ struct CookieSnapshotsView: View {
     // MARK: Actions
 
     private func reload() {
+        if let sample {
+            snapshots = sample
+            unreadable = false
+            return
+        }
         if let read = model.cookieSnapshots(for: profile.id) {
             snapshots = read
             unreadable = false

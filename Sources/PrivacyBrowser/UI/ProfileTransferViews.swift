@@ -8,6 +8,33 @@ extension UTType {
     static let privacyBrowserProfile = UTType(filenameExtension: ProfileTransfer.fileExtension, conformingTo: .data) ?? .data
 }
 
+/// A spinner and what is being done meanwhile, at the left of a sheet's footer: a spinner alone said
+/// nothing of a wait that can take a minute (a whole profile's website data, a profile started to be read).
+struct SheetWorking: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView().controlSize(.small)
+            Text(text)
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textSecondary)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// "Show in Finder" for a file a sheet has just written.
+struct RevealSavedFile: View {
+    let url: URL
+
+    var body: some View {
+        Button(L("transfer.reveal")) { SystemOpen.revealInFinder([url]) }
+            .buttonStyle(.lumenGhost)
+    }
+}
+
 /// What a profile export's error means to the person who typed the password.
 private func transferErrorText(_ error: Error) -> String {
     switch error as? CoreError {
@@ -31,6 +58,8 @@ struct ProfileExportView: View {
     @State private var working = false
     @State private var saved: URL?
     @State private var error: String?
+    /// It ran when Export was pressed: it is stopped first, and the wait says so.
+    @State private var stoppingFirst = false
 
     static let minimumPasswordLength = 8
 
@@ -82,8 +111,10 @@ struct ProfileExportView: View {
             .padding(.bottom, 18)
             SheetFooter(leading: {
                 if working {
-                    ProgressView().controlSize(.small)
-                } else if saved == nil, !canExport {
+                    SheetWorking(text: L(stoppingFirst ? "transfer.export.working.stopping" : "transfer.export.working"))
+                } else if let saved {
+                    RevealSavedFile(url: saved)
+                } else if !canExport {
                     // Why Export is off.
                     SheetWhy(text: L(password.count < Self.minimumPasswordLength ? "transfer.why.short" : "transfer.why.mismatch"))
                 }
@@ -110,6 +141,7 @@ struct ProfileExportView: View {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         working = true
+        stoppingFirst = isRunning
         error = nil
         Task {
             do {
@@ -178,7 +210,7 @@ struct ProfileImportView: View {
             }
             .lumenForm()
             SheetFooter(leading: {
-                if working { ProgressView().controlSize(.small) }
+                if working { SheetWorking(text: L(manifest == nil ? "transfer.import.working.open" : "transfer.import.working")) }
             }, buttons: {
                 Button(L(imported == nil ? "common.cancel" : "common.done")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
@@ -207,7 +239,7 @@ struct ProfileImportView: View {
                 manifest = nil
                 error = nil
             case let .failure(failure):
-                error = failure.localizedDescription
+                error = errorText(failure)
             }
         }
     }
@@ -316,7 +348,10 @@ struct CookieExportView: View {
                     .font(.lumenSecondary)
                     .foregroundStyle(Theme.textSecondary)
                 if !model.isRunning(profile.id) && saved == nil {
-                    Text(L("cookieExport.stopped")).font(.caption).foregroundStyle(.secondary)
+                    Text(L("cookieExport.stopped"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if let saved {
                     Label(String(format: L("cookieExport.done"), saved.count, saved.url.lastPathComponent), systemImage: "checkmark.circle")
@@ -328,7 +363,11 @@ struct CookieExportView: View {
             }
             .lumenForm()
             SheetFooter(leading: {
-                if working { ProgressView().controlSize(.small) }
+                if working {
+                    SheetWorking(text: L("cookieExport.working"))
+                } else if let saved {
+                    RevealSavedFile(url: saved.url)
+                }
             }, buttons: {
                 Button(L(saved == nil ? "common.cancel" : "common.done")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
@@ -360,7 +399,7 @@ struct CookieExportView: View {
                 try CookieExport.data(cookies, format: format).write(to: url, options: .atomic)
                 saved = (url, CookieExport.count(cookies, format: format))
             } catch {
-                self.error = String(format: L("cookieExport.failed"), error.localizedDescription)
+                self.error = String(format: L("cookieExport.failed"), errorText(error))
             }
             working = false
         }
