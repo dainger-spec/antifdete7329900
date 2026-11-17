@@ -86,7 +86,7 @@ enum ProfileSessionHost {
         }
         // Safari's services are refused to this process (ProfileNetworkGuard), and a view of
         // theirs that WebKit brings in (SafariPlatformSupport's completion list) asked for itself
-        // again each time its service ended: in our own window, an iPhone view's, for ever. Its
+        // again each time its service ended: in our own window, for ever. Its
         // stub is made here for every profile, not only where Safari's chrome is hosted.
         SafariChrome.stopRefusedServiceLoops()
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
@@ -160,7 +160,7 @@ enum ProfileSessionHost {
             // A process without Safari's chrome has its default store closed here, before the
             // launch builds anything (with the chrome, that happened before its menu came up).
             ProfileNetworkGuard.takeOverDefaultStore()
-            // Our own window (an iPhone view, the simplified mode): no Safari menu bar comes with it,
+            // Our own window (the simplified mode): no Safari menu bar comes with it,
             // so it gets ours — New Tab, Close Tab, Open Location… (OwnWindowMenu).
             if !SafariChromeHost.isHosting { OwnWindowMenu.install() }
             // What Safari's chrome needs and this macOS does not have is said where the user is

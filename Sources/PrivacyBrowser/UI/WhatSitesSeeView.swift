@@ -2,9 +2,7 @@ import BrowserCore
 import SwiftUI
 
 /// "What sites see" (a profile's ⋯ menu, the command palette): the profile's snapshot — and, only
-/// on "Compare with Safari", next to this Mac's own Safari's, signal by signal (`WhatSitesSee`). For an
-/// iPhone or iPad view this Mac's Safari is the wrong reference, and the panel says so, with what
-/// it cannot see of the real device, rather than "the same" (the owner's decision).
+/// on "Compare with Safari", next to this Mac's own Safari's, signal by signal (`WhatSitesSee`).
 ///
 /// With a check (`ProfileCheckRun`) the panel opens on it and is titled as the profile's check:
 /// one button, a verdict — "All in order" or "Things to look at (N)" — and a sentence a topic,
@@ -14,8 +12,6 @@ struct WhatSitesSeeView: View {
     enum Tab: Hashable { case check, signals }
 
     let name: String
-    /// The profile is an iPhone or iPad view: Safari on this Mac under another device's name.
-    let mobileView: Bool
     @StateObject private var snapshot: WhatSitesSee
     @StateObject private var check: ProfileCheckRun
     private let hasCheck: Bool
@@ -30,9 +26,8 @@ struct WhatSitesSeeView: View {
     /// `check`: the profile's check, sharing `snapshot` (nil: the signals alone, as the snapshots
     /// of the list show them).
     init(name: String, snapshot: @autoclosure @escaping () -> WhatSitesSee, check: ((WhatSitesSee) -> ProfileCheckRun)? = nil,
-         tab: Tab? = nil, onlyDifferences: Bool = true, mobileView: Bool = false, showProxy: (() -> Void)? = nil) {
+         tab: Tab? = nil, onlyDifferences: Bool = true, showProxy: (() -> Void)? = nil) {
         self.name = name
-        self.mobileView = mobileView
         self.showProxy = showProxy
         let taken = snapshot()
         _snapshot = StateObject(wrappedValue: taken)
@@ -107,7 +102,7 @@ struct WhatSitesSeeView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 12)
             // This Mac's own Safari only on the person's word, with what it means said first.
-            if snapshot.takenAt != nil, !snapshot.isTaking, !mobileView {
+            if snapshot.takenAt != nil, !snapshot.isTaking {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Button(L("whatSites.compare")) { Task { await snapshot.compareWithSafari() } }
                         .buttonStyle(.lumenSecondary)
@@ -118,14 +113,6 @@ struct WhatSitesSeeView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 12)
-            }
-            if mobileView {
-                Text(L("whatSites.mobileView"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.warning)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal, 24)
-                    .padding(.bottom, 12)
             }
             Rectangle().fill(Theme.divider).frame(height: 1)
             if snapshot.signals.isEmpty {
@@ -175,7 +162,7 @@ struct WhatSitesSeeView: View {
                             }
                             ForEach(shown) { signal in SignalRow(signal: signal, comparedWithSafari: snapshot.comparedWithSafari) }
                             if shown.isEmpty {
-                                Text(mobileView ? L("whatSites.allSame.mobile") : L("whatSites.allSame"))
+                                Text(L("whatSites.allSame"))
                                     .font(.lumenSecondary)
                                     .foregroundStyle(Theme.running)
                             }

@@ -409,9 +409,8 @@ final class SelfTest {
                 check(result.name, result.passed, result.detail)
             }
         }
-        await group("a mobile view in its own process") { try await mobileViewInItsOwnProcess(repository) }
-        await group("processor count") { try await processorCountInOwnProcess(repository) }
-        await group("a phone's window") { try await phoneWindowAndSearch(repository) }
+        await group("our window in its own process") { try await ownWindowInItsOwnProcess(repository) }
+        await group("our window") { try await ownWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
         await group("Safari's window, every day") { try await safarisWindowEveryDay(repository) }
         await group("a profile's process leaves nothing open") { try await profileProcessLeavesNothingOpen(repository) }
@@ -1577,9 +1576,6 @@ final class SelfTest {
         let wantedAgent = ProfileConfiguration(proxy: proxy).userAgent(hostSafariVersion: HostSafari.version)
         check("Safari chrome: the start page goes out with the profile's User-Agent",
               startAgent == wantedAgent, "sent \(startAgent), wanted \(wantedAgent)")
-        check("Safari chrome: an iPhone or iPad view gets our own window, of that device's size, not Safari's desktop chrome",
-              !SafariChromeHost.canHost(ProfileConfiguration(deviceGenerationID: "ios-26"))
-                && SafariChromeHost.canHost(ProfileConfiguration()))
         let page = log.reports.first(where: isPage) ?? [:]
         let frame = log.reports.first { $0["frame"] != nil } ?? [:]
         check("Safari chrome: the leak page ran and reported", !page.isEmpty, "no report from the page")
@@ -2793,16 +2789,17 @@ final class SelfTest {
             return try await js(tab.webView, "return navigator.userAgent;") as? String
         }
 
-        let iosUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: "ios-26")))
-        check("generation: iOS 26 UA reaches navigator.userAgent",
-              iosUA?.contains("iPhone OS 18_7") == true && iosUA?.contains("Version/26.") == true, iosUA ?? "nil")
-
         let macUA = try await userAgent(for: .forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID)))
         check("generation: macOS UA names this Mac's Safari (\(HostSafari.version))",
               macUA?.contains("Macintosh; Intel Mac OS X 10_15_7") == true
                   && macUA?.hasSuffix("Version/\(HostSafari.version) Safari/605.1.15") == true, macUA ?? "nil")
 
-        var override = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: "ios-27"))
+        // A profile stored as an iPhone view, from before the view was taken out: a Mac's.
+        let retiredUA = try await userAgent(for: ProfileConfiguration(deviceGenerationID: "ios-27"))
+        check("generation: a profile stored as an iPhone view opens as a Mac's (its User-Agent this Mac's Safari)",
+              retiredUA == macUA, retiredUA ?? "nil")
+
+        var override = ProfileConfiguration.forGeneration(DeviceGenerations.resolved(id: DeviceGenerations.defaultID))
         override.userAgent = "PrivacyBrowserSelfTest/UA-Override"
         let overrideUA = try await userAgent(for: override)
         check("generation: explicit user agent overrides the generation",
@@ -2812,8 +2809,7 @@ final class SelfTest {
     // MARK: Fingerprint surface (what deviceinfo.me-style pages test)
 
     /// Every profile must look exactly like a plain WKWebView of this Mac (no own properties,
-    /// native navigator and screen values, untouched rendering) — an iPhone view too, which differs
-    /// in its User-Agent only — and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
+    /// native navigator and screen values, untouched rendering), and none may add noise or Chromium-only properties. Compared against a web view without any profile script. The probe is
     /// Resources/fingerprint_probe.js, the one scripts/safari_reference.py runs in real Safari;
     /// with PB_SELFTEST_SURFACE_OUT set, every result is written there as JSON for that comparison.
     /// window.browser as Safari 27.0.1 and 27.2 give it, the probe's "browserShape" (claude/measure-canvas-browser).
@@ -2863,12 +2859,12 @@ final class SelfTest {
                 // window.safari is added on purpose (macOS); window.browser too, as Safari has it (below)
                 || (key.hasPrefix("features.") && key != "features.safari" && key != "features.browser")
         }.sorted()
-        // An iPhone view twice: with the full disguise (the default) and leaving no script's trace.
-        for (generationID, disguise) in [(DeviceGenerations.defaultID, PhoneDisguise.full), ("ios-26", .full), ("ios-26", .engineOnly)] {
+        do {
+            let generationID = DeviceGenerations.defaultID
             // WebRTC left as the engine has it: its removal (the default policy) is checked by the
             // shim checks and would otherwise be the one deliberate difference here.
             let profile = try repository.create(name: "Surface \(generationID)", configuration: ProfileConfiguration(
-                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID, phoneDisguise: disguise))
+                webRTCPolicy: .unrestricted, ephemeral: true, deviceGenerationID: generationID))
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let tabConfiguration = session.makeWebViewConfiguration()
             check("surface (\(generationID)): user-installed fonts hidden from pages, as in Safari",
@@ -2896,21 +2892,6 @@ final class SelfTest {
             let safariQuota = PrivacyScripts.safariStorageQuota.rounded(.up)
             check("surface (\(generationID)): storage quota is Safari's",
                   quota?.doubleValue == safariQuota, "\(quota?.stringValue ?? "nil") vs \(String(format: "%.0f", safariQuota))")
-            // A frame loaded by a navigation of its own (run 42479119796: an iPhone view's platform on
-            // every navigation, a frame's included, made WebKit raise and ended the profile's process
-            // on the first page with an iframe): the page lives, and the frame answers as the page.
-            let framePlatform = try await js(tab.webView, """
-                return await new Promise((done) => {
-                  const f = document.createElement('iframe'); f.srcdoc = '<p>frame</p>';
-                  f.onload = () => { try { done(String(f.contentWindow.navigator.platform)); } catch (e) { done('error'); } };
-                  document.body.appendChild(f); setTimeout(() => done('timeout'), 5000); });
-                """) as? String ?? "nil"
-            // A worker made from a blob, as pages make them: what its navigator says.
-            let workerPlatform = try await js(tab.webView, """
-                return await new Promise((done) => {
-                  const w = new Worker(URL.createObjectURL(new Blob(['postMessage(navigator.platform)'], { type: 'text/javascript' })));
-                  w.onmessage = (e) => done(String(e.data)); w.onerror = () => done('error'); setTimeout(() => done('timeout'), 5000); });
-                """) as? String ?? "nil"
             // What the page's substitutions say there and in a worker made from a blob (the lead, 8
             // November: a worker that answers unsubstituted beside a substituted page is a sign we
             // make ourselves). The storage quota is substituted in every profile; the time zone only
@@ -2927,58 +2908,19 @@ final class SelfTest {
             session.shutDown()
             try repository.delete(profile.id)
 
-            let isPhone = generationID != DeviceGenerations.defaultID
-            let fullPhone = isPhone && disguise == .full
-            let name = !isPhone ? "macOS" : fullPhone ? "iPhone view" : "iPhone view, no script's trace"
-            writeSurface(probed, name: !isPhone ? "macos" : fullPhone ? "iphone" : "iphone-engine")
+            let name = "macOS"
+            writeSurface(probed, name: "macos")
             // Every profile turns on what Safari has and a plain web view lacks (Apple Pay, WebKit's
-            // own switch), and an iPhone view off what an iPhone's Safari has not (Notification,
-            // `PhoneEngine`): those are checked below, not against the plain web view. The full
-            // disguise's own (touch, orientation) are checked below as an iPhone's.
+            // own switch): checked below, not against the plain web view.
             let safariKeys: (String) -> Bool = { key in
-                ["ApplePay", "Payment", "MerchantValidation"].contains { key.contains($0) } || (isPhone && key.contains("Notification"))
-                    || (fullPhone && ["touch", "Touch", "orientation"].contains { key.contains($0) })
+                ["ApplePay", "Payment", "MerchantValidation"].contains { key.contains($0) }
             }
             let compared = engineKeys.filter { !safariKeys($0) }
             let differing = compared.filter { string(probed, $0) != string(reference, $0) }
             check("surface (\(name)): engine and hardware signals as in a plain web view (\(compared.count) keys)",
                   differing.isEmpty, differing.map { "\($0): \(string(probed, $0)) vs \(string(reference, $0))" }.joined(separator: "; "))
-            check("surface (\(name)): ApplePaySession is there, as in Safari (\(isPhone ? "an iPhone's" : "Safari's window on the Mac"))",
+            check("surface (\(name)): ApplePaySession is there, as in Safari (Safari's window on the Mac)",
                   string(probed, "features.ApplePaySession") == "function", string(probed, "features.ApplePaySession"))
-            if isPhone {
-                // What WebKit answers as an iPhone (the owner's iPhone, 8 November), not a script:
-                // in both disguises.
-                check("surface (\(name)): navigator.platform is an iPhone's, the engine's own getter",
-                      // The getter as a plain web view prints its own (the probe's "native-text" is built from
-                      // the function's name, which for a getter is "get platform": never a getter's text).
-                      string(probed, "platform") == "iPhone"
-                        && string(probed, "natives.Navigator.platform getter") == string(reference, "natives.Navigator.platform getter"),
-                      "\(string(probed, "platform")); getter \(string(probed, "natives.Navigator.platform getter")) vs "
-                        + string(reference, "natives.Navigator.platform getter"))
-                check("surface (\(name)): a frame loaded by its own navigation says the iPhone's platform, and the page lives",
-                      framePlatform == "iPhone", framePlatform)
-                check("surface (\(name)): devicePixelRatio is an iPhone's 3",
-                      string(probed, "screen").hasSuffix("x3"), string(probed, "screen"))
-                check("surface (\(name)): no Notification, as in an iPhone's Safari outside a home-screen web app",
-                      string(probed, "features.Notification") == "undefined", string(probed, "features.Notification"))
-            }
-            if fullPhone {
-                // The full disguise's script: the owner's iPhone's screen (402×874, the window as
-                // large), five touch points, touch events, a coarse pointer without hover — each
-                // accessor printed as the engine prints its own.
-                let phoneValues: [(String, String)] = [("maxTouchPoints", "5"), ("screen", "402x874x402x874x3"),
-                                                        ("pointer", "false,false,true"), ("touch", "true,function,function"),
-                                                        ("orientation", "portrait-primary")]
-                for (key, wanted) in phoneValues {
-                    check("surface (\(name)): \(key) is the iPhone's", string(probed, key) == wanted, "\(string(probed, key)), wanted \(wanted)")
-                }
-                check("surface (\(name)): a blob worker's navigator.platform is the iPhone's too", workerPlatform == "iPhone", workerPlatform)
-                for native in ["Navigator.maxTouchPoints getter", "Screen.width getter", "window.outerWidth getter"] {
-                    check("surface (\(name)): \(native) reads as the engine's own (as a plain web view prints it)",
-                          string(probed, "natives.\(native)") == string(reference, "natives.\(native)"),
-                          "\(string(probed, "natives.\(native)")) vs \(string(reference, "natives.\(native)"))")
-                }
-            }
             // The shim adds no noise and no visible wrappers: toString, length and own properties
             // of the rendering functions are the engine's own.
             let renderingNatives = probed.filter { $0.key.hasPrefix("natives.") && ($0.key.contains("Canvas") || $0.key.contains("WebGL")
@@ -2987,7 +2929,7 @@ final class SelfTest {
                   !renderingNatives.isEmpty && renderingNatives.values.allSatisfy { $0.hasPrefix("native-text") || $0 == "absent" },
                   renderingNatives.map { "\($0.key)=\($0.value)" }.joined(separator: "; "))
             check("surface (\(name)): one language, as WebKit exposes", string(probed, "languages") == string(probed, "language"))
-            if generationID == DeviceGenerations.defaultID {
+            do {
                 // The Safari it names is the Safari of the engine it runs: this Mac's Safari when that
                 // runs this app's WebKit, never a Safari whose engine it does not have (CI run 718:
                 // "Safari 27.2" on WebKit 21624.5.1.11.3).
@@ -3009,43 +2951,25 @@ final class SelfTest {
                 check("surface (\(name)): a blob worker answers the storage quota and the time zone as the page does (no substitution left behind in workers)",
                       halves.count == 2 && halves[0] == halves[1], "page / worker: \(pageAndWorker)")
             }
-            // window.browser: WebKit's own WebPageNamespace, as Safari gives every page on the Mac and
-            // on an iPhone (the lead, 8 November: the one difference between an iPhone view's 949 names
-            // and the owner's iPhone's 950); in both iPhone disguises — the engine's, not a script's.
+            // window.browser: WebKit's own WebPageNamespace, as Safari gives every page on the Mac
+            // (the lead, 8 November) — the engine's, not a script's.
             check("surface (\(name)): window.browser is WebKit's own, as in Safari (WebPageNamespace: runtime.connect, runtime.sendMessage)",
                   string(probed, "browserShape") == Self.safariBrowserShape, string(probed, "browserShape"))
             // window.safari: a macOS profile has it exactly when the Safari it names gives pages one
-            // (up to 27.1); an iPhone view never — no iPhone has it, and there it was a mark of
-            // ours alone (the owner's iPhone and Mac, 8 November).
-            let wantsSafari = generationID == DeviceGenerations.defaultID && SafariVersions.givesWindowSafari(HostSafari.version)
-            check("surface (\(name)): window.safari \(wantsSafari ? "present" : "absent"), as in "
-                    + (generationID == DeviceGenerations.defaultID ? "Safari \(HostSafari.version) on the Mac" : "Safari on an iPhone"),
+            // (up to 27.1; the owner's Mac, 8 November).
+            let wantsSafari = SafariVersions.givesWindowSafari(HostSafari.version)
+            check("surface (\(name)): window.safari \(wantsSafari ? "present" : "absent"), as in Safari \(HostSafari.version) on the Mac",
                   string(probed, "features.safari") == (wantsSafari ? "object" : "undefined"),
                   "features.safari \(string(probed, "features.safari")), \(string(probed, "safariShape"))")
-            // The rest of what a page measures of this Mac: an iPhone view's platform and pixel
-            // density are the phone's (above) in both disguises; its screen, touch, pointer and
-            // orientation with the full disguise's script only — without it they are this Mac's,
-            // and so is a worker's platform (no script's trace).
-            if isPhone && !fullPhone {
-                check("surface (\(name)): a blob worker's navigator.platform stays this Mac's (WebKit's setting does not reach workers)",
-                      workerPlatform == "MacIntel", workerPlatform)
-            }
-            let phoneOwn = fullPhone ? ["platform", "screen", "maxTouchPoints", "pointer", "touch", "orientation"]
-                : isPhone ? ["platform", "screen"] : []
+            // The rest of what a page measures of this Mac.
             let nativeKeys = ["platform", "maxTouchPoints", "hardwareConcurrency", "screen", "standalone", "pointer", "touch",
                               "orientation", "timeZone", "tzOffset", "dateString"]
-                .filter { !phoneOwn.contains($0) }
             for key in nativeKeys {
                 check("surface (\(name)): native \(key)", string(probed, key) == string(reference, key),
                       "\(string(probed, key)) vs \(string(reference, key))")
             }
-            if name == "macOS" {
-                check("surface (macOS): the UA is this Mac's Safari",
-                      string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
-            } else {
-                check("surface (iPhone view): the UA is an iPhone's Safari, the one thing that says iPhone",
-                      string(probed, "ua") == DeviceGenerations.resolved(id: generationID).userAgent, string(probed, "ua"))
-            }
+            check("surface (macOS): the UA is this Mac's Safari",
+                  string(probed, "ua").hasSuffix("Version/\(HostSafari.version) Safari/605.1.15"), string(probed, "ua"))
         }
 
         // Which of WebKit's behaviors that follow an app's SDK this run has (SDKBehaviors).
@@ -5536,21 +5460,17 @@ final class SelfTest {
     // MARK: Simplified mode (a profile's window that is not Safari's)
 
     /// A profile whose window is the app's own and not Safari's runs in a simplified mode, and that
-    /// window says so with why (`SimplifiedModeNotice`) — an iPhone or iPad view's, ours by design,
-    /// does not (the owner, 9 November): its toolbar has the chip, in the toolbar —
+    /// window says so with why (`SimplifiedModeNotice`): its toolbar has the chip, in the toolbar —
     /// whose height a page measures — and no taller than what is already there; its reason is the
     /// one the window was opened for; and the chip's popover opens and closes. Every session here
-    /// is in this process: a Mac profile's window is ours because the App Sandbox is on (the
-    /// sandboxed build) or profiles are not in processes of their own (this run), an iPhone's always.
+    /// is in this process: a profile's window is ours because the App Sandbox is on (the sandboxed
+    /// build) or profiles are not in processes of their own (this run).
     /// Nothing opens by itself here (`presentsAutomatically`): a page of the self-test keeps its focus.
     private func simplifiedMode(_ repository: ProfileRepository) async throws {
         check("simplified mode: nothing opens by itself in the self-test, whose pages keep their focus",
               !SimplifiedModeNotice.presentsAutomatically)
         let macReason: SafariChromeHost.OwnWindowReason = AppEnvironment.isSandboxed ? .sandboxed : .notInProfileProcess
-        for (name, configuration, expected) in [
-            ("Mac", ProfileConfiguration(ephemeral: true), macReason),
-            ("iPhone", ProfileConfiguration(ephemeral: true, deviceGenerationID: "ios-26"), SafariChromeHost.OwnWindowReason.deviceProfile),
-        ] {
+        for (name, configuration, expected) in [("Mac", ProfileConfiguration(ephemeral: true), macReason)] {
             let profile = try repository.create(name: "Simplified \(name)", configuration: configuration)
             let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
             let controller = session.openWindow(url: nil)
@@ -5558,20 +5478,6 @@ final class SelfTest {
                 controller.close()
                 session.shutDown()
                 try? repository.delete(profile.id)
-            }
-            if expected == .deviceProfile {
-                // An iPhone or iPad view's window is ours by design, not a fallback: no chip (the
-                // owner, 9 November). Asked once the toolbar has its profile chip, so not too early.
-                let ready = await waitUntil(timeout: 5) {
-                    controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "profile" } == true
-                }
-                let chipless = controller.simplifiedChip == nil
-                    && controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" } != true
-                check("simplified mode: a \(name) profile's window, ours by design, has no simplified-mode chip",
-                      ready && chipless, "toolbar ready \(ready), chip \(controller.simplifiedChip == nil ? "none" : "there")")
-                check("simplified mode: a \(name) profile's window gives the reason it is not Safari's (\(expected))",
-                      controller.ownWindowReason == expected, "\(controller.ownWindowReason)")
-                continue
             }
             let shown = await waitUntil(timeout: 5) {
                 controller.window?.toolbar?.items.contains { $0.itemIdentifier.rawValue == "simplified" && $0.view === controller.simplifiedChip } == true
@@ -5595,25 +5501,24 @@ final class SelfTest {
             }
         }
         // Every reason says something of its own, and the missing pieces by name.
-        let reasons: [SafariChromeHost.OwnWindowReason] = [.deviceProfile, .sandboxed, .turnedOff, .notInProfileProcess,
+        let reasons: [SafariChromeHost.OwnWindowReason] = [.sandboxed, .turnedOff, .notInProfileProcess,
                                                            .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
                                                            .notSafarisApplication, .windowDidNotOpen]
         let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
-        check("simplified mode: each of the eight reasons is said in words of its own, the missing pieces by name",
+        check("simplified mode: each of the seven reasons is said in words of its own, the missing pieces by name",
               texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
-                && texts[5].contains("BrowserWindowController"), texts.joined(separator: " | "))
+                && texts[4].contains("BrowserWindowController"), texts.joined(separator: " | "))
     }
 
     // MARK: A page whose process keeps ending
 
-    /// The owner, 1 November: an iPhone view kept the app, the window server, launchd and logd
-    /// busy until the session was restarted. Our window reloaded a page every time its process
-    /// ended — a page that ends it at every load was reloaded for ever, a new process each time.
-    /// Here, in an iPhone view's window of ours: the page's process is ended from outside, as a
-    /// crash ends it, four times. Reloaded twice, then left: no new process, the window says so
-    /// over the tab, and Reload asks for the page again. Before that, the same window, idle, with
-    /// its page: how busy this process and the window server are (an iPhone view's window is
-    /// narrower than its toolbar asks for), against a control that keeps this process busy.
+    /// The owner, 1 November: a profile's window of ours kept the app, the window server, launchd
+    /// and logd busy until the session was restarted. Our window reloaded a page every time its
+    /// process ended — a page that ends it at every load was reloaded for ever, a new process each
+    /// time. Here, in a window of ours: the page's process is ended from outside, as a crash ends
+    /// it, four times. Reloaded twice, then left: no new process, the window says so over the tab,
+    /// and Reload asks for the page again. Before that, the same window, idle, with its page: how
+    /// busy this process and the window server are, against a control that keeps this process busy.
     private func endedPageProcess(_ repository: ProfileRepository) async throws {
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
             skip("ended page: a page whose process keeps ending is reloaded twice, then left",
@@ -5621,7 +5526,7 @@ final class SelfTest {
             return
         }
         let profile = try repository.create(name: "Ended page", configuration: ProfileConfiguration(
-            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true, deviceGenerationID: "ios-26"))
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), ephemeral: true))
         let session = try makeSession(repository, profile.id, key: repository.profileKey(for: profile.id))
         let page = URL(string: "http://proxied.selftest.invalid/one")!
         let controller = session.openWindow(url: page)
@@ -5631,13 +5536,13 @@ final class SelfTest {
             try? repository.delete(profile.id)
         }
         guard let tab = controller.selectedTab else {
-            check("ended page: the iPhone view's window has a tab", false, "no tab")
+            check("ended page: our window has a tab", false, "no tab")
             return
         }
         func pid() -> pid_t { (tab.webView.value(forKey: "_webProcessIdentifier") as? NSNumber)?.int32Value ?? 0 }
         let loaded = await waitUntil(timeout: 20) { !tab.isLoading && tab.webView.title?.hasPrefix("PB proxied") == true && pid() > 0 }
         guard loaded else {
-            check("ended page: the iPhone view's page loads", false, "title \(tab.webView.title ?? "nil"), process \(pid())")
+            check("ended page: the page loads", false, "title \(tab.webView.title ?? "nil"), process \(pid())")
             return
         }
 
@@ -5660,22 +5565,22 @@ final class SelfTest {
         let idle = (cpuSeconds() - idleCPU) / Date().timeIntervalSince(idleStart)
         let serverAfter = await windowServerCPUSeconds()
         let server = zip2(serverBefore, serverAfter).map { ($0.1 - $0.0) / 4 }
-        info("ended page: an iPhone view's window, idle: this process \(Int(idle * 100)) %, the window server "
+        info("ended page: our window, idle: this process \(Int(idle * 100)) %, the window server "
              + "\(server.map { "\(Int($0 * 100)) %" } ?? "not measured"); the control (this process kept busy) \(Int(control * 100)) % (\(spin > 0 ? "+" : "-"))")
         if controller.window?.isVisible != true {
-            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+            skip("ended page: our window, idle, does not keep this process busy",
                  "the window is not on screen here, so its toolbar is not laid out")
         } else if control < 0.5 {
-            skip("ended page: an iPhone view's window, idle, does not keep this process busy",
+            skip("ended page: our window, idle, does not keep this process busy",
                  "the control, this process kept busy for 0.6 s, read \(Int(control * 100)) %: the measure cannot be trusted")
         } else {
-            check("ended page: an iPhone view's window, idle, does not keep this process busy",
+            check("ended page: our window, idle, does not keep this process busy",
                   idle < 0.4, "\(Int(idle * 100)) % of a core over 4 s (the control read \(Int(control * 100)) %)")
         }
 
-        // A click on the page, as a person makes one (the owner, 2 November: in a mobile view a tap
-        // on many sites is not taken).
-        await clickReachesPage(controller, tab, "ended page: an iPhone view's page, loaded")
+        // A click on the page, as a person makes one (the owner, 2 November: in our window a click
+        // on many sites was not taken).
+        await clickReachesPage(controller, tab, "ended page: the page, loaded")
 
         // The page's process ended from outside, as a crash ends it, four times at most. A
         // sandboxed build may not signal another process: there WebKit's own call ends it
@@ -5719,7 +5624,7 @@ final class SelfTest {
 
     /// A click at the middle of `tab`'s page in our window: AppKit must give it to the page's web
     /// view, not to a view laid over it, and — where this window can be key — the page must get it.
-    /// Run 690 (claude/measure-touch, macOS 26.6.2 and 27.0.1): in a mobile view every click's point
+    /// Run 690 (claude/measure-touch, macOS 26.6.2 and 27.0.1): in our window every click's point
     /// went to NSHostingView<StoppedPageView>, the cover for a page whose process keeps ending, laid
     /// over the web view and hidden; not one event reached the page.
     private func clickReachesPage(_ controller: BrowserWindowController, _ tab: BrowserTab, _ name: String) async {
@@ -5767,14 +5672,6 @@ final class SelfTest {
               "the page counted \(clicks) click(s); AppKit gave it to \(said)")
     }
 
-    /// The owner, 1 November, a sample of the process: an iPhone view, in its own process as the
-    /// app starts one, spun in -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] under
-    /// -[NSRemoteView invalidate] — Safari's completion list, which WebKit brings in, asking for its
-    /// view again each time the service refused to the profile's process ended it — and the window
-    /// server with it, until the session was restarted. The stub that stops it was made only where
-    /// Safari's chrome is hosted. Here an iPhone view runs in its own process, its page loaded; once
-    /// it settles, its processor time over eight seconds, against a control that keeps this process
-    /// busy, read the same way.
     /// Safari's app-link banner tracker in a profile's own process, in Safari's window. The banner
     /// ("Open in …", shown for a page an app or a web app of this Mac opens) asks the tracker
     /// whether it is blocked; the tracker first reads its file (-load), whose path (-_filePath) is
@@ -6232,8 +6129,15 @@ final class SelfTest {
         check(name, failure == nil && killed == 0 && grew < 3, failure ?? "descriptors after each run \(counts), killed \(killed)")
     }
 
-    private func mobileViewInItsOwnProcess(_ repository: ProfileRepository) async throws {
-        let name = "mobile view process: an iPhone view in its own process, idle, does not keep it busy"
+    /// The owner, 1 November, a sample of the process: a profile in our own window, in its own
+    /// process as the app starts one, spun in -[SPSafariPlatformSupport viewServiceDidTerminateWithError:]
+    /// under -[NSRemoteView invalidate] — Safari's completion list, which WebKit brings in, asking for
+    /// its view again each time the service refused to the profile's process ended it — and the
+    /// window server with it. Here a profile runs in our window (Safari's chrome turned off,
+    /// `PB_SAFARI_CHROME=0`) in its own process, its page loaded; once it settles, its processor time
+    /// over eight seconds, against a control that keeps this process busy, read the same way.
+    private func ownWindowInItsOwnProcess(_ repository: ProfileRepository) async throws {
+        let name = "own window process: a profile in our window, in its own process, idle, does not keep it busy"
         guard !AppEnvironment.isSandboxed else {
             skip(name, "the sandboxed build runs no process per profile", .build)
             return
@@ -6242,16 +6146,19 @@ final class SelfTest {
             skip(name, "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
             return
         }
-        let profile = try repository.create(name: "Mobile view process", configuration: ProfileConfiguration(
+        let profile = try repository.create(name: "Own window process", configuration: ProfileConfiguration(
             startURL: URL(string: "http://proxied.selftest.invalid/one"),
-            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort),
-            deviceGenerationID: "ios-26", matchProxyLocation: false))
+            proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort), matchProxyLocation: false))
         let manager = ProfileManager(repository: repository)
         var hostsChrome: Bool?
         manager.onProfileRunning = { _, hosts in hostsChrome = hosts }
         var exited: Int32?
         manager.onChildExited = { _, status in exited = status }
         defer { try? repository.delete(profile.id) }
+        // Safari's chrome turned off for the profile's process, which takes the setting from here.
+        let givenChrome = ProcessInfo.processInfo.environment["PB_SAFARI_CHROME"]
+        defer { if let givenChrome { setenv("PB_SAFARI_CHROME", givenChrome, 1) } else { unsetenv("PB_SAFARI_CHROME") } }
+        setenv("PB_SAFARI_CHROME", "0", 1)
         setenv("PB_PROFILE_PROCESS", "1", 1)
         do {
             try await manager.launch(profile.id)
@@ -6267,7 +6174,7 @@ final class SelfTest {
         }
         info("egress-pid \(pid)")
         let up = await waitUntil(timeout: 90) { hostsChrome != nil || exited != nil }
-        check("mobile view process: it opens our own window, not Safari's", up && hostsChrome == false,
+        check("own window process: it opens our own window, not Safari's", up && hostsChrome == false,
               "running \(hostsChrome.map { $0 ? "in Safari's window" : "in our window" } ?? "not reported"), exited \(exited.map(String.init) ?? "no")")
         if up && exited == nil {
             // Its page loads, and the loop came within seconds of the start.
@@ -6291,7 +6198,7 @@ final class SelfTest {
             let start = Date(), before = cpuSeconds(pid)
             try? await Task.sleep(nanoseconds: 8_000_000_000)
             let busy = zip2(before, cpuSeconds(pid)).map { ($0.1 - $0.0) / Date().timeIntervalSince(start) }
-            info("mobile view process: idle, its process \(busy.map { "\(Int($0 * 100)) %" } ?? "not read") over 8 s; "
+            info("own window process: idle, its process \(busy.map { "\(Int($0 * 100)) %" } ?? "not read") over 8 s; "
                  + "the control (this process kept busy) \(control.map { "\(Int($0 * 100)) %" } ?? "not read") (\(spin > 0 ? "+" : "-"))")
             if let control, control >= 0.5, let busy {
                 check(name, busy < 0.3, "\(Int(busy * 100)) % of a core over 8 s (the control read \(Int(control * 100)) %)")
@@ -6299,100 +6206,27 @@ final class SelfTest {
                 skip(name, "the processor time could not be read, or the control read \(control.map { "\(Int($0 * 100)) %" } ?? "nothing"): the measure cannot be trusted")
             }
         } else {
-            skip(name, "the iPhone view's process did not come up")
+            skip(name, "the profile's process did not come up")
         }
         try? await manager.stop(profile.id)
     }
 
-    /// What a page is told of the processor count (`navigator.hardwareConcurrency`), everywhere it
-    /// can ask — the page, a dedicated worker made from a blob, one loaded from a URL and one inside
-    /// another, a shared worker, a service worker, a frame of the same origin, one of another
-    /// origin and an empty one — in a profile's own process, started as the app starts one, on a
-    /// Mac with ten cores: CI's runners have three, where WebKit says 4 whatever it is told, so this
-    /// process stands in for the Mac (`ProfileProcess.machineProcessorCoresStandIn`), as the real
-    /// count would reach WebKit. A Mac profile must then see 8 everywhere — the control: the stand-in
-    /// reached WebKit — and an iPhone view 4 everywhere, an iPhone's (the owner, 7 November: the
-    /// iPhone says 4, a Mac with eight cores or more 8). WebKit's own value in each, so the getter
-    /// stays the engine's (native text, nothing on `navigator` itself); scripts/cores_page.py is
-    /// the page (served by scripts/selftest_proxy.py at /pb-cores).
-    private func processorCountInOwnProcess(_ repository: ProfileRepository) async throws {
-        let prefix = "processor count"
+    /// A profile's window of ours used as a person uses a browser (the owner, 8 November: no way to
+    /// open a second tab, the search engine of the profile's settings not used, text that would not
+    /// paste), in the profile's own process with Safari's chrome turned off (`PB_SAFARI_CHROME=0`):
+    /// every action a person takes, pressed as the key presses it (`WindowAudit`); ⌘T from the menu
+    /// bar opens a tab. A search typed into the address bar goes to the engine of the profile's
+    /// settings — chosen while the profile runs — as the proxy sees it; and in a profile in Safari's
+    /// window, to the engine chosen there (it was Google for every profile).
+    private func ownWindowAndSearch(_ repository: ProfileRepository) async throws {
+        let prefix = "our window"
         guard !AppEnvironment.isSandboxed else {
-            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
+            skip("\(prefix): its actions, and the search engine of the profile",
                  "the sandboxed build runs no process per profile", .build)
             return
         }
         guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            skip("\(prefix): an iPhone view says an iPhone's in its pages, frames and workers",
-                 "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running (it serves the page)")
-            return
-        }
-        let proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: httpPort)
-        let givenProcess = ProcessInfo.processInfo.environment["PB_PROFILE_PROCESS"]
-        ProfileProcess.machineProcessorCoresStandIn = 10
-        defer {
-            ProfileProcess.machineProcessorCoresStandIn = nil
-            if let givenProcess { setenv("PB_PROFILE_PROCESS", givenProcess, 1) } else { unsetenv("PB_PROFILE_PROCESS") }
-        }
-        setenv("PB_PROFILE_PROCESS", "1", 1)
-        let places = ["page", "blobWorker", "urlWorker", "nestedWorker", "sharedWorker", "serviceWorker",
-                      "sameOriginFrame", "otherOriginFrame", "blankFrame"]
-        for (generationID, expected, what) in [("macos-26", 8, "a Mac profile (the control: the stand-in reached WebKit)"),
-                                                ("ios-27", 4, "an iPhone view (iOS 27)"), ("ios-26", 4, "an iPhone view (iOS 26)")] {
-            let run = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12)).lowercased()
-            // No proxy: the page is on this Mac, which a profile reaches directly.
-            let profile = try repository.create(name: "Processor count \(generationID)", configuration: ProfileConfiguration(
-                startURL: URL(string: "http://127.0.0.1:\(httpPort)/pb-cores?run=\(run)"), ephemeral: true,
-                deviceGenerationID: generationID, matchProxyLocation: false))
-            defer { try? repository.delete(profile.id) }
-            let manager = ProfileManager(repository: repository)
-            var launchError = ""
-            do { try await manager.launch(profile.id) } catch { launchError = String(describing: error) }
-            let ownProcess = manager.processIdentifier(of: profile.id) != nil
-            var report: [String: Any] = [:]
-            if launchError.isEmpty {
-                for _ in 0..<30 where report.isEmpty {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    let url = URL(string: "http://proxied.selftest.invalid/pb-leak/log.json?run=\(run)")!
-                    if let text = try? await loadThroughProxy(repository, proxy, url: url),
-                       let object = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] {
-                        report = (object["reports"] as? [[String: Any]] ?? []).first { $0["page"] != nil } ?? [:]
-                    }
-                }
-            }
-            // A number, or "<number> <getter native>" from a worker that also reports its getter.
-            func count(_ place: String) -> String { String(describing: report[place] ?? "nil").components(separatedBy: " ").first ?? "nil" }
-            let seen = places.map { "\($0) \(String(describing: report[$0] ?? "nil"))" }.joined(separator: ", ")
-            info("\(prefix): \(what): \(seen); getter native \(report["getterNative"] ?? "nil"), own properties on navigator \(report["navigatorOwn"] ?? "nil")")
-            check("\(prefix): \(what) says \(expected) in the page, every worker and every frame",
-                  ownProcess && !report.isEmpty && places.allSatisfy { count($0) == String(expected) },
-                  report.isEmpty ? "no report (own process \(ownProcess)\(launchError.isEmpty ? "" : ", launch \(launchError)"))" : seen)
-            check("\(prefix): \(what) — the getter is the engine's (native text in the page and in workers, nothing on navigator)",
-                  report["getterNative"] as? Bool == true && (report["navigatorOwn"] as? NSNumber)?.intValue == 0
-                    && ["blobWorker", "urlWorker"].allSatisfy { String(describing: report[$0] ?? "").hasSuffix(" true") },
-                  report.isEmpty ? "no report" : "page \(report["getterNative"] ?? "nil"), navigator's own \(report["navigatorOwn"] ?? "nil"), "
-                    + "workers \(report["blobWorker"] ?? "nil") / \(report["urlWorker"] ?? "nil")")
-            try? await manager.stop(profile.id)
-        }
-    }
-
-    /// An iPhone view's window used as a person uses a phone's Safari (the owner, 8 November: no way
-    /// to open a second tab, no list of tabs, the search engine of the profile's settings not used),
-    /// in the profile's own process, its controls pressed as VoiceOver presses them (`WindowProbe`):
-    /// the bottom bar's tabs button opens the overview, + there opens a second tab, the overview then
-    /// lists two, the first one's × closes it; ⌘T from the menu bar opens a tab; a drag along the
-    /// bottom bar goes to the next tab and back. A search typed into the address bar goes to the
-    /// engine of the profile's settings — chosen while the profile runs — as the proxy sees it; and
-    /// in a profile in Safari's window, to the engine chosen there (it was Google for every profile).
-    private func phoneWindowAndSearch(_ repository: ProfileRepository) async throws {
-        let prefix = "phone window"
-        guard !AppEnvironment.isSandboxed else {
-            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
-                 "the sandboxed build runs no process per profile", .build)
-            return
-        }
-        guard let httpPort = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            skip("\(prefix): tabs as on an iPhone, and the search engine of the profile",
+            skip("\(prefix): its actions, and the search engine of the profile",
                  "PB_SELFTEST_HTTP_PROXY_PORT not set: scripts/selftest_proxy.py is not running")
             return
         }
@@ -6414,33 +6248,8 @@ final class SelfTest {
             }
             let seen = look ?? WindowLook(action: "\(action)", detail: "no answer")
             info("\(prefix): \(seen.action) → found \(seen.found), tabs \(seen.tabs), selected \(seen.selected), "
-                 + "overview \(seen.overviewShown), controls \(seen.controls.filter { $0.hasPrefix("mobile") }.joined(separator: " ")), "
                  + "menu \(seen.menuItems.prefix(6).joined(separator: ", "))\(seen.detail.isEmpty ? "" : ", \(seen.detail)")")
             return seen
-        }
-        // What fonts the page in front finds (`WindowProbe.fontsScript`): an iPhone view only an
-        // iPhone's, by every way a page has — the engine's own list (`PhoneEngine.engageFonts`) —
-        // and CSS cursive as an iPhone's; a Mac profile this Mac's (the control).
-        func fontChecks(_ look: WindowLook, prefix: String, iPhone: Bool) {
-            let found = (try? JSONSerialization.jsonObject(with: Data(look.detail.utf8))) as? [String: Any] ?? [:]
-            func names(_ way: String, _ kind: String) -> [String]? { (found[way] as? [String: Any])?[kind] as? [String] }
-            let workerAnswered = found["worker"] is [String: Any]
-            let ways = ["canvas", "css", "local"] + (workerAnswered ? ["worker"] : [])
-            let summary = ways.map { way in
-                "\(way): Mac's [\((names(way, "mac") ?? ["?"]).joined(separator: ", "))], iPhone's [\((names(way, "ios") ?? ["?"]).joined(separator: ", "))]"
-            }.joined(separator: "; ") + (workerAnswered ? "" : "; the worker did not answer")
-            let detail = look.found ? summary : look.detail
-            let cursive = (found["canvas"] as? [String: Any])?["cursiveIsSnell"] as? Bool
-            if iPhone {
-                check("\(prefix): fonts only this Mac has are not installed for the page — by a canvas, by CSS fallback, by FontFace local(), by a worker's canvas",
-                      look.found && ways.allSatisfy { names($0, "mac") == [] }, detail)
-                check("\(prefix): an iPhone's fonts are found (a canvas, CSS fallback), and CSS cursive is an iPhone's (Snell Roundhand)",
-                      look.found && ["canvas", "css"].allSatisfy { names($0, "ios")?.count == 4 } && cursive == true,
-                      detail + ", cursive Snell Roundhand: \(cursive.map { "\($0)" } ?? "?")")
-            } else {
-                check("\(prefix): a Mac profile's pages find this Mac's fonts (the control: the probe sees a font only the Mac has)",
-                      look.found && names("canvas", "mac")?.count == 4 && names("canvas", "ios")?.count == 4, detail)
-            }
         }
         func targets(since: Int) async -> (count: Int, hosts: [String]) {
             let url = URL(string: "http://proxied.selftest.invalid/pb-targets.json?since=\(since)")!
@@ -6459,20 +6268,35 @@ final class SelfTest {
             return (manager, profile.id, hostsChrome)
         }
 
-        // An iPhone view.
-        let (phone, phoneID, _) = try await launch(ProfileConfiguration(
-            startURL: URL(string: "http://proxied.selftest.invalid/one?phone=\(run)"), proxy: proxy, ephemeral: true,
-            deviceGenerationID: "ios-27", matchProxyLocation: false, searchEngine: .duckDuckGo), "Phone window")
-        defer { try? repository.delete(phoneID) }
-        let start = await act(phone, phoneID, .describe)
+        // A profile in our window: Safari's chrome turned off for its process, which takes the
+        // setting from here.
+        let givenChrome = ProcessInfo.processInfo.environment["PB_SAFARI_CHROME"]
+        func restoreChrome() {
+            if let givenChrome { setenv("PB_SAFARI_CHROME", givenChrome, 1) } else { unsetenv("PB_SAFARI_CHROME") }
+        }
+        setenv("PB_SAFARI_CHROME", "0", 1)
+        let launched: (ProfileManager, UUID, Bool?)
+        do {
+            launched = try await launch(ProfileConfiguration(
+                startURL: URL(string: "http://proxied.selftest.invalid/one?own=\(run)"), proxy: proxy, ephemeral: true,
+                matchProxyLocation: false, searchEngine: .duckDuckGo), "Our window")
+        } catch {
+            restoreChrome()
+            throw error
+        }
+        restoreChrome()
+        let (own, ownID, ownHostsChrome) = launched
+        check("\(prefix): with Safari's chrome turned off, the profile's process opens our window",
+              ownHostsChrome == false, ownHostsChrome.map { $0 ? "Safari's window" : "our window" } ?? "not reported")
+        defer { try? repository.delete(ownID) }
         // Every action a person takes in the window (the owner, 8 November: text would not paste in
-        // an iPhone view). The control first: the same keys with the menu bar emptied, as 0.1.4's
+        // our window). The control first: the same keys with the menu bar emptied, as 0.1.4's
         // process had none — paste must not work there, or the check sees nothing.
-        let bare = await act(phone, phoneID, .audit(withoutMenu: true), timeout: 150)
+        let bare = await act(own, ownID, .audit(withoutMenu: true), timeout: 150)
         let barePaste = bare.detail.split(separator: "\n").first { $0.hasPrefix("address bar ⌘V") }.map(String.init) ?? "no answer"
         check("\(prefix) actions: the control — without a menu bar (0.1.4), ⌘V does not paste into the address bar",
               barePaste.hasSuffix("DOES NOT WORK"), barePaste)
-        let audit = await act(phone, phoneID, .audit(withoutMenu: false), timeout: 150)
+        let audit = await act(own, ownID, .audit(withoutMenu: false), timeout: 150)
         let auditLines = audit.detail.split(separator: "\n").map(String.init)
         let judged = auditLines.filter { $0.hasSuffix("— WORKS") || $0.hasSuffix("— DOES NOT WORK") }
         for line in auditLines where !judged.contains(line) { info("\(prefix) actions: \(line)") }
@@ -6481,83 +6305,29 @@ final class SelfTest {
             check("\(prefix) actions: \(String(line.prefix { $0 != ":" }))", line.hasSuffix("— WORKS"), line)
         }
         check("\(prefix) actions: the window's actions were all pressed (at least 24 answered)", verdicts >= 24, "\(verdicts) answered")
-        // A press with the mouse is a phone's tap (the full disguise, on by default): a field takes
-        // it, a page that cancels touchstart gets no mouse events, click or focus from it.
-        let taps = tapsHeard(await act(phone, phoneID, .tap))
-        tapChecks(taps, prefix: prefix, disguised: true)
-        fontChecks(await act(phone, phoneID, .fonts), prefix: prefix, iPhone: true)
-        let firstPicture = await act(phone, phoneID, .picture)
-        if let base64 = firstPicture.picture, let data = Data(base64Encoded: base64),
-           let folder = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"] {
-            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-            try? data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("phone-page.png"))
-        }
-        check("\(prefix): the bottom bar has the tabs button, as Safari on an iPhone (Back, the address, Tabs)",
-              ["mobile-back", "mobile-address", "mobile-tabs"].allSatisfy(start.controls.contains),
-              "controls: \(start.controls.joined(separator: " "))")
-        let overview = await act(phone, phoneID, .press("mobile-tabs"))
-        check("\(prefix): the tabs button opens the tab overview", overview.found && overview.overviewShown, overview.detail)
-        let added = await act(phone, phoneID, .press("mobile-new-tab"))
-        check("\(prefix): + in the overview opens a new tab — two tabs, the overview closed",
-              added.found && added.tabs == 2 && !added.overviewShown, "tabs \(added.tabs), overview \(added.overviewShown)")
-        let listed = await act(phone, phoneID, .press("mobile-tabs"))
-        check("\(prefix): the overview then lists both tabs, a card each",
-              listed.overviewShown && listed.controls.contains("mobile-tab-card-0") && listed.controls.contains("mobile-tab-card-1"),
-              listed.controls.filter { $0.hasPrefix("mobile-tab") }.joined(separator: " "))
-        // What the overview looks like, kept for a person to compare with an iPhone's (PB_SELFTEST_SHOTS).
-        let shots = ProcessInfo.processInfo.environment["PB_SELFTEST_SHOTS"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("pb-phone-\(run)")
-        func keep(_ name: String) async {
-            let look = await act(phone, phoneID, .picture)
-            guard let base64 = look.picture, let data = Data(base64Encoded: base64) else { return }
-            try? FileManager.default.createDirectory(at: shots, withIntermediateDirectories: true)
-            try? data.write(to: shots.appendingPathComponent("phone-\(name).png"))
-            info("\(prefix): picture of the \(name) kept in \(shots.path)")
-        }
-        await keep("overview")
-        let closed = await act(phone, phoneID, .press("mobile-tab-close-0"))
-        check("\(prefix): a card's × closes that tab — one left", closed.found && closed.tabs == 1, "tabs \(closed.tabs)")
-        _ = await act(phone, phoneID, .press("mobile-tabs-done"))
-        let menu = await act(phone, phoneID, .shortcut("t"))
+        let menu = await act(own, ownID, .shortcut("t"))
         check("\(prefix): the menu bar has New Tab (⌘T), and ⌘T opens a tab",
               menu.menuItems.contains { $0.hasPrefix("⌘T ") } && menu.found && menu.tabs == 2,
               "tabs \(menu.tabs), menu \(menu.menuItems.joined(separator: ", "))")
-        let swiped = await act(phone, phoneID, .dragBottomBar(-160))
-        let back = await act(phone, phoneID, .dragBottomBar(160))
-        check("\(prefix): a drag along the bottom bar goes to the other tab, and back",
-              swiped.found && swiped.tabs == 2 && back.tabs == 2 && swiped.selected != menu.selected && back.selected == menu.selected,
-              "selected \(menu.selected) → \(swiped.selected) → \(back.selected)")
         // The engine changed in the profile's settings while it runs, as the editor saves it.
-        var changed = try repository.loadConfiguration(phoneID)
+        var changed = try repository.loadConfiguration(ownID)
         changed.searchEngine = .bing
-        try repository.saveConfiguration(changed, for: phoneID)
+        try repository.saveConfiguration(changed, for: ownID)
         let before = await targets(since: 0)
-        let searched = await act(phone, phoneID, .search("pbq\(run) weather"))
+        let searched = await act(own, ownID, .search("pbq\(run) weather"))
         try? await Task.sleep(nanoseconds: 4_000_000_000)
         let after = await targets(since: before.count)
         check("\(prefix): a search from the address bar goes to the engine of the profile's settings (Bing, chosen while it ran)",
               searched.found && after.hosts.contains { $0.hasPrefix("www.bing.com") }
                 && !after.hosts.contains { $0.hasPrefix("duckduckgo.com") || $0.hasPrefix("www.google.com") },
               "requests after the search: \(after.hosts.joined(separator: " ")), tabs \(searched.urls.joined(separator: " "))")
-        try? await phone.stop(phoneID)
-
-        // The control: an iPhone view without the full disguise hears a press as a Mac's click —
-        // the tap check above would see nothing if the press never reached the page.
-        let (plain, plainID, _) = try await launch(ProfileConfiguration(
-            startURL: URL(string: "http://proxied.selftest.invalid/one?plain=\(run)"), proxy: proxy, ephemeral: true,
-            deviceGenerationID: "ios-27", matchProxyLocation: false, phoneDisguise: .engineOnly), "Phone window, no script's trace")
-        defer { try? repository.delete(plainID) }
-        tapChecks(tapsHeard(await act(plain, plainID, .tap)), prefix: "\(prefix), no script's trace", disguised: false)
-        // The fonts are the engine's in both disguises.
-        fontChecks(await act(plain, plainID, .fonts), prefix: "\(prefix), no script's trace", iPhone: true)
-        try? await plain.stop(plainID)
+        try? await own.stop(ownID)
 
         // A profile in Safari's window: Safari's address bar, the profile's engine.
         let (desk, deskID, hosts) = try await launch(ProfileConfiguration(
             startURL: URL(string: "http://proxied.selftest.invalid/one?desk=\(run)"), proxy: proxy, ephemeral: true,
             matchProxyLocation: false, searchEngine: .bing), "Search in Safari's window")
         defer { try? repository.delete(deskID) }
-        fontChecks(await act(desk, deskID, .fonts), prefix: "\(prefix), Mac profile", iPhone: false)
         if hosts == true {
             let deskBefore = await targets(since: 0)
             let deskSearch = await act(desk, deskID, .search("pbq\(run) news"))
@@ -6605,68 +6375,6 @@ final class SelfTest {
             }
             return Array(frames.suffix(40))
         }.value
-    }
-
-    /// What `WindowProbeAction.tap` brought back: for each thing pressed, the events in the order
-    /// the page heard them and what had the focus.
-    private struct TapsHeard {
-        var events: [String: [[String: Any]]] = [:]
-        var focused: [String: String] = [:]
-        var pressed: [String: [Int]] = [:]
-        var raw = ""
-        func types(_ name: String) -> [String] { (events[name] ?? []).compactMap { $0["type"] as? String } }
-        func count(_ name: String, _ type: String) -> Int { types(name).filter { $0 == type }.count }
-    }
-
-    private func tapsHeard(_ look: WindowLook) -> TapsHeard {
-        var heard = TapsHeard()
-        heard.raw = look.detail
-        guard let object = (try? JSONSerialization.jsonObject(with: Data(look.detail.utf8))) as? [String: Any] else { return heard }
-        for (name, value) in object {
-            guard let entry = value as? [String: Any] else { continue }
-            heard.pressed[name] = entry["pressed"] as? [Int]
-            let page = entry["heard"] as? [String: Any]
-            heard.events[name] = page?["taps"] as? [[String: Any]] ?? []
-            heard.focused[name] = page?["focused"] as? String ?? ""
-        }
-        return heard
-    }
-
-    private func tapChecks(_ taps: TapsHeard, prefix: String, disguised: Bool) {
-        let field = taps.types("field")
-        info("\(prefix) tap: a field heard \(field.joined(separator: ", ")); focus \(taps.focused["field"] ?? "?")")
-        info("\(prefix) tap: touchstart cancelled — a button heard \(taps.types("cancel").joined(separator: ", ")), "
-             + "a field heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
-        let pointerTypes = Set((taps.events["field"] ?? []).filter { ($0["type"] as? String)?.hasPrefix("pointer") == true }
-            .compactMap { $0["pointerType"] as? String })
-        guard disguised else {
-            check("\(prefix) tap: the control — a press is a Mac's click: no touch events, the click and the focus",
-                  taps.count("field", "touchstart") == 0 && taps.count("field", "touchend") == 0 && taps.count("field", "click") == 1
-                    && taps.focused["field"] == "pb-tap-field" && pointerTypes == ["mouse"],
-                  "heard \(field.joined(separator: ", ")); pointer \(pointerTypes.sorted().joined(separator: ",")); "
-                    + "focus \(taps.focused["field"] ?? "?"); \(taps.raw.prefix(300))")
-            return
-        }
-        let start = (taps.events["field"] ?? []).first { $0["type"] as? String == "touchstart" }
-        let at = start?["at"] as? [Int] ?? []
-        let pressed = taps.pressed["field"] ?? []
-        let near = at.count == 2 && pressed.count == 2 && abs(at[0] - pressed[0]) <= 3 && abs(at[1] - pressed[1]) <= 3
-        check("\(prefix) tap: a press on a field is a phone's tap — touchstart and touchend once, where it was pressed, one touch",
-              taps.count("field", "touchstart") == 1 && taps.count("field", "touchend") == 1 && near
-                && start?["touches"] as? Int == 1 && start?["cancelable"] as? Bool == true,
-              "heard \(field.joined(separator: ", ")); touch at \(at), pressed at \(pressed)")
-        check("\(prefix) tap: then the click, once, and the field takes the focus (a search box can be typed into)",
-              taps.count("field", "click") == 1 && taps.focused["field"] == "pb-tap-field",
-              "clicks \(taps.count("field", "click")), focus \(taps.focused["field"] ?? "?")")
-        check("\(prefix) tap: the pointer events say touch", pointerTypes == ["touch"], pointerTypes.sorted().joined(separator: ","))
-        let cancelled = taps.types("cancel")
-        check("\(prefix) tap: a cancelled touchstart takes the mouse events and the click away, as on a phone",
-              taps.count("cancel", "touchstart") == 1 && !cancelled.contains("mousedown") && !cancelled.contains("mouseup")
-                && !cancelled.contains("click"),
-              "heard \(cancelled.joined(separator: ", "))")
-        check("\(prefix) tap: a field whose touchstart is cancelled does not take the focus",
-              taps.count("guarded", "touchstart") == 1 && taps.focused["guarded"] != "pb-tap-guarded",
-              "heard \(taps.types("guarded").joined(separator: ", ")); focus \(taps.focused["guarded"] ?? "?")")
     }
 
     /// The interface's language and the language websites see are apart, both ways (the owner, 1
@@ -9135,8 +8843,7 @@ private final class PageLoader: NSObject, WKNavigationDelegate {
     }
 
     /// The tab's own delegate (a `BrowserTab`), which decides each navigation as it does for a
-    /// person — an iPhone view's platform is set there (CI 764: with this loader in its place the
-    /// page said MacIntel) — and gets the web view back once the page has loaded.
+    /// person, and gets the web view back once the page has loaded.
     private weak var tabDelegate: WKNavigationDelegate?
 
     private func run(_ webView: WKWebView, start: (WKWebView) -> Void) async throws {

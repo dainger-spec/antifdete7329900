@@ -73,11 +73,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// Target Apple OS generation (`DeviceGenerations`). Supplies the self-declared User-Agent
     /// and the behaviour set, unless `userAgent` overrides the UA. `nil` → the default generation.
+    /// An iPhone or iPad view's id (`DeviceGenerations.retiredIDs`) is read as the default
+    /// generation's: such a profile opens as a Mac's.
     public var deviceGenerationID: String?
-
-    /// An iPhone view: the whole phone, or only what the engine answers (`PhoneDisguise`). Default
-    /// `full`; older configurations decode as `full`.
-    public var phoneDisguise: PhoneDisguise
 
     /// APPROXIMATION: what a page's `getUserMedia` is handed instead of the real camera (and, with
     /// it, the microphone). A JavaScript shim over the media capture APIs (`PrivacyScripts`), in a
@@ -141,7 +139,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// The Safari version a macOS profile names in its User-Agent ("26.0"); nil: this Mac's own
     /// (`userAgent(hostSafariVersion:)`). Only the name changes, never the engine
-    /// (`SafariVersions`); a mobile generation and a typed User-Agent ignore it.
+    /// (`SafariVersions`); a typed User-Agent ignores it.
     public var safariVersion: String?
 
     /// Whether the profile's pages may reach this Mac and the local network (`LocalRequests`);
@@ -209,7 +207,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 languageOverride: String? = nil,
                 localeSource: LocaleSource? = nil,
                 menusInAppLanguage: Bool = false,
-                phoneDisguise: PhoneDisguise = .full,
                 cameraSubstitution: CameraSubstitution = .off) {
         self.startURL = startURL
         self.userAgent = userAgent
@@ -222,7 +219,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.safeBrowsingEnabled = safeBrowsingEnabled
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
-        self.deviceGenerationID = deviceGenerationID
+        self.deviceGenerationID = DeviceGenerations.migrated(id: deviceGenerationID)
         self.matchProxyLocation = matchProxyLocation
         self.lastProxyLocation = lastProxyLocation
         self.warnOnProxyIPChange = warnOnProxyIPChange
@@ -240,7 +237,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.languageOverride = languageOverride
         self.localeSource = localeSource
         self.menusInAppLanguage = menusInAppLanguage
-        self.phoneDisguise = phoneDisguise
         self.cameraSubstitution = cameraSubstitution
     }
 
@@ -403,7 +399,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
-             localRequests, languageOverride, localeSource, menusInAppLanguage, phoneDisguise,
+             localRequests, languageOverride, localeSource, menusInAppLanguage,
              cameraSubstitution
     }
 
@@ -425,7 +421,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         historyRetentionDays = c.contains(.historyRetentionDays)
             ? try c.decodeIfPresent(Int.self, forKey: .historyRetentionDays)
             : defaults.historyRetentionDays
-        deviceGenerationID = try c.decodeIfPresent(String.self, forKey: .deviceGenerationID)
+        // An iPhone or iPad view's, from before they were taken out, is a Mac's; the
+        // "phoneDisguise" such a profile may carry is not read.
+        deviceGenerationID = DeviceGenerations.migrated(id: try c.decodeIfPresent(String.self, forKey: .deviceGenerationID))
         matchProxyLocation = try c.decodeIfPresent(Bool.self, forKey: .matchProxyLocation) ?? defaults.matchProxyLocation
         // A cache: one that no longer decodes is dropped, never a reason to fail the profile.
         lastProxyLocation = (try? c.decodeIfPresent(ProxyLocation.self, forKey: .lastProxyLocation)) ?? nil
@@ -453,8 +451,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
             .flatMap { LocalePlaces.isLanguageTag($0) ? $0 : nil }
         localeSource = try? c.decodeIfPresent(LocaleSource.self, forKey: .localeSource)
         menusInAppLanguage = (try? c.decodeIfPresent(Bool.self, forKey: .menusInAppLanguage)) ?? false
-        // One a later build knows and this one does not is the full disguise here.
-        phoneDisguise = (try? c.decodeIfPresent(PhoneDisguise.self, forKey: .phoneDisguise)) ?? .full
         // One a later build wrote that this one cannot read is dropped (the camera as before),
         // never a reason to fail the profile.
         cameraSubstitution = (try? c.decodeIfPresent(CameraSubstitution.self, forKey: .cameraSubstitution)) ?? .off
@@ -495,8 +491,6 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encodeIfPresent(languageOverride, forKey: .languageOverride)
         try c.encodeIfPresent(localeSource, forKey: .localeSource)
         try c.encode(menusInAppLanguage, forKey: .menusInAppLanguage)
-        // Written only when it is not the default: a profile with the full disguise is written as before.
-        if phoneDisguise != .full { try c.encode(phoneDisguise, forKey: .phoneDisguise) }
         // Written only when it is on: a profile that never substituted the camera is written as before.
         if cameraSubstitution.isActive { try c.encode(cameraSubstitution, forKey: .cameraSubstitution) }
     }

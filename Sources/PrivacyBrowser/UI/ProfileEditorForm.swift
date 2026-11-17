@@ -400,29 +400,12 @@ struct ProfileEditorForm: View {
         let generation = DeviceGenerations.resolved(id: draft.deviceGenerationID)
         return VStack(alignment: .leading, spacing: 14) {
             EditorRow(L("editor.generation")) {
-                Picker(L("editor.generation"), selection: $draft.deviceGenerationID) {
-                    // The Mac's generation is this Mac's Safari, by its version (its catalog name
-                    // said "macOS 26" on a Mac with Safari 27).
-                    // The iPad view is no longer offered; a profile that has it still shows it.
-                    ForEach(DeviceGenerations.offered + (generation.platform == .iPadOS ? [generation] : [])) { generation in
-                        Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
-                            .tag(generation.id)
-                    }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-            // An iPad's own note stays; an iPhone's warning went (the owner, 9 November).
-            if !generation.matchesEngine && generation.platform == .iPadOS {
-                EditorNote(L("editor.generation.ipad"), tone: .warning)
-            }
-            // An iPhone's full disguise (the owner, 8 November: on by default; off is "leave no
-            // traces of the substitution" — only what WebKit itself answers as a phone).
-            if let phone = generation.phone {
-                EditorToggle(L("editor.phoneDisguise"),
-                             detail: String(format: L("editor.phoneDisguise.detail"), phone.screenWidth, phone.screenHeight,
-                                            Int(phone.scale), phone.maxTouchPoints),
-                             isOn: $draft.phoneFullDisguise)
+                // This Mac's Safari, by its version (the catalog name said "macOS 26" on a Mac with
+                // Safari 27). The iPhone and iPad views are gone (the owner, 16 November): there is
+                // nothing else to choose.
+                Text(generation.matchesEngine ? String(format: L("gen.macos.host"), HostSafari.version) : L(generation.nameKey))
+                    .foregroundStyle(Theme.textSecondary)
+                    .fixedSize()
             }
             if generation.matchesEngine && !draft.customUserAgent {
                 safariVersionChoice
@@ -1164,34 +1147,18 @@ struct ProfileEditorForm: View {
         }
     }
 
-    /// The "match" button's title, following the profile's device: this Mac for a Mac profile, an
-    /// iPhone/iPad for a mobile one.
-    private var matchDeviceTitle: String {
-        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
-        case .macOS: return L("editor.camera.matchMac")
-        case .iOS, .iPadOS: return L("editor.camera.matchMobile")
-        }
-    }
+    /// The "match" button's title: this Mac.
+    private var matchDeviceTitle: String { L("editor.camera.matchMac") }
 
-    /// Fills the camera's name, resolution and facing to match the profile's device. A Mac profile
-    /// takes this Mac's real resolution (`HostCamera`); an iOS/iPadOS profile cannot read an iPhone's
-    /// camera from the build machine, so it uses a believable default (front camera, 1280×720, user).
-    /// The name follows the profile's own language, never this Mac's — so a profile that claims, say,
-    /// the US does not get this Mac's Russian camera name (the owner, 11 November).
+    /// Fills the camera's name and resolution to match this Mac's (`HostCamera`). The name follows
+    /// the profile's own language, never this Mac's — so a profile that claims, say, the US does not
+    /// get this Mac's Russian camera name (the owner, 11 November).
     private func matchDeviceCamera() {
-        switch DeviceGenerations.resolved(id: draft.deviceGenerationID).platform {
-        case .macOS:
-            if let builtin = HostCamera.builtin() {
-                draft.cameraWidth = String(builtin.width)
-                draft.cameraHeight = String(builtin.height)
-            }
-            draft.camera.deviceLabel = Self.macCameraName(forLanguage: draft.language)
-        case .iOS, .iPadOS:
-            draft.camera.deviceLabel = Self.mobileCameraName(forLanguage: draft.language)
-            draft.cameraWidth = "1280"
-            draft.cameraHeight = "720"
-            draft.camera.facing = .user
+        if let builtin = HostCamera.builtin() {
+            draft.cameraWidth = String(builtin.width)
+            draft.cameraHeight = String(builtin.height)
         }
+        draft.camera.deviceLabel = Self.macCameraName(forLanguage: draft.language)
     }
 
     /// A believable built-in-camera name in the profile's own language. "FaceTime HD Camera" is a
@@ -1200,11 +1167,6 @@ struct ProfileEditorForm: View {
     /// profile's override ("" means this Mac's language — then the neutral name, which never misleads).
     static func macCameraName(forLanguage language: String) -> String {
         language.lowercased().hasPrefix("ru") ? "Камера (MacBook Air)" : "FaceTime HD Camera"
-    }
-
-    /// The same for a mobile profile's front camera.
-    static func mobileCameraName(forLanguage language: String) -> String {
-        language.lowercased().hasPrefix("ru") ? "Фронтальная камера" : "Front Camera"
     }
 
     /// The substituted camera's colour as a SwiftUI `Color`, kept in the draft as "#RRGGBB".

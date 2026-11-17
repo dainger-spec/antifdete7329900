@@ -133,10 +133,7 @@
 "editor.error.startURL" = "Start URL is not a valid URL";
 "editor.footer.note" = "Changes apply at the next launch.";
 "editor.generation" = "View for websites";
-"editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes what the profile calls itself to websites (the User-Agent) and the size of its window; an iPhone view also answers as an iPhone where WebKit itself can (the platform, the screen's density, the fonts: a page finds only an iPhone's) and, with the full disguise, in the screen, touch and pointer. The engine and hardware stay this Mac's. The canvas is drawn as it is, without noise: iPhones of one model draw a canvas alike, so noise that differs from profile to profile would itself set a profile apart; a canvas with text still differs from a real iPhone's, because this Mac draws the letters — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.ipad" = "An iPad view in a window on a Mac is Safari on the Mac in an iPad-sized window (an iPad calls itself a Mac anyway): there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
-"editor.phoneDisguise" = "Full iPhone disguise";
-"editor.phoneDisguise.detail" = "On: a page sees an iPhone's screen (%ld×%ld at %ldx), %ld touch points, touch events from a press, a coarse pointer without hover, portrait. Part of it is a script, and a careful site can find the script's traces. Off: no traces of a substitution — only what WebKit itself answers as an iPhone (the platform, the density, the fonts); the screen, touch and pointer stay this Mac's.";
+"editor.generation.footer" = "Safari on this Mac as it is: the engine and hardware are this Mac's, as a page measures them. The canvas is drawn as it is, without noise — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";
@@ -286,9 +283,8 @@
 "editor.camera.error.read" = "Could not read %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Set this to match a real camera so a page cannot tell them apart — the match button fills a device’s exact name and resolution (this Mac’s own camera, or a typical iPhone front camera for a mobile profile).";
+"editor.camera.label.note" = "Set this to match a real camera so a page cannot tell them apart — the match button fills this Mac’s own camera’s exact name and resolution.";
 "editor.camera.matchMac" = "Match this Mac";
-"editor.camera.matchMobile" = "Match an iPhone";
 "editor.camera.preview.note" = "Live preview of what a page gets — it updates as you change the source, crop and adjustments. A video plays and loops here.";
 "editor.camera.preview.open" = "Open preview";
 "editor.camera.preview.window" = "Camera preview";
@@ -442,9 +438,6 @@
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "errorpage.title" = "Page could not be loaded";
-"gen.ios26" = "Mobile view: iPhone, Safari 26 (User-Agent only)";
-"gen.ios27" = "Mobile view: iPhone, Safari 27 (User-Agent only)";
-"gen.ipados26" = "iPad view: Safari 26, an iPad-sized window";
 "gen.macos26" = "Safari on macOS 26 (matches this engine)";
 "gen.macos.host" = "This Mac’s Safari, %@ (matches the engine)";
 "history.clear" = "Clear";
@@ -567,8 +560,6 @@
 "whatSites.compare" = "Compare with Safari…";
 "whatSites.onlyDifferences" = "Only differences";
 "whatSites.allSame" = "Everything here is the same as in Safari.";
-"whatSites.allSame.mobile" = "The same as Safari on this Mac — there is nothing to compare with a real iPhone.";
-"whatSites.mobileView" = "There is no reference here: the panel compares the profile with Safari on this Mac, and the profile calls itself an iPhone or an iPad. It also differs from the real device in what this panel cannot see: touch, fonts, graphics (WebGL), audio, motion sensors, the screen.";
 "whatSites.summary" = "%ld same · %ld differ · %ld each window's own";
 "whatSites.same" = "same";
 "whatSites.differs" = "differs";
@@ -674,12 +665,10 @@
 "check.engine.close" = "The User-Agent names Safari %1$@, the engine is Safari %2$@: neighbouring releases, a small difference to a site.";
 "check.engine.far" = "The User-Agent names Safari %1$@, and the page is drawn by the engine of Safari %2$@. A site measures the engine and sees that the version named is another.";
 "check.engine.notSafari" = "The User-Agent does not name Safari, and the page is drawn by Safari's engine. Any site can see that.";
-"check.engine.mobile" = "An iPhone or iPad view: this Mac's Safari under another device's name. Not compared with the Mac's engine.";
 "check.engine.notMeasured" = "The page did not say its User-Agent.";
 "check.window.fits" = "A window of %1$@ on a screen of %2$@.";
 "check.window.larger" = "The window (%1$@) is larger than the screen (%2$@): no real user has that.";
 "check.window.cut" = "The settings ask for a window of %1$@, and this Mac's screen is %2$@: the window opens smaller than asked.";
-"check.window.mobile" = "An iPhone or iPad view: the window is the device's screen in size, not compared with the Mac's screen.";
 "check.window.notMeasured" = "The page did not say the sizes of its window and screen.";
 "check.intro.title" = "No result yet";
 "check.progress.page" = "The measuring page in a window of the profile";
@@ -713,7 +702,6 @@
 "menu.copy" = "Copy";
 "menu.paste" = "Paste";
 "menu.selectAll" = "Select All";
-"menu.showAllTabs" = "Show All Tabs";
 "menu.window" = "Window";
 "menu.minimize" = "Minimize";
 "menu.findOnPage" = "Find…";
@@ -735,14 +723,6 @@
 "menu.copyLink" = "Copy Link";
 "menu.history" = "History";
 "menu.showDownloads" = "Show Downloads";
-"mobile.tabs.one" = "%ld tab";
-"mobile.tabs.few" = "%ld tabs";
-"mobile.tabs.many" = "%ld tabs";
-"mobile.tabs.close" = "Close %@";
-"mobile.tabs.new" = "New Tab";
-"mobile.tabs.done" = "Done";
-"mobile.tabs.show" = "Tabs";
-"mobile.address.placeholder" = "Search or enter website";
 "passwords.add" = "Add Password";
 "passwords.addTitle" = "New password";
 "passwords.conflict.badgeNumbered" = "Other version %ld";
@@ -833,8 +813,6 @@
 "profiles.kept.removeMessage" = "This profile's settings, passwords, bookmarks, history and website data are deleted from this Mac. They cannot be brought back.";
 "profiles.kept.removeTitle.broughtBack" = "Remove the old folder of the profile “%@”?";
 "profiles.kept.removeMessage.broughtBack" = "The new profile brought back from this folder stays. The old folder is deleted from this Mac, and with it what was not carried over to the new profile: open tabs, the warm-up schedule, kept versions of the settings. They cannot be brought back.";
-"profiles.device.ipad" = "iPad view";
-"profiles.device.iphone" = "Mobile view";
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Create your first isolated profile to start browsing.";
 "profiles.empty.title" = "No profiles yet";
@@ -1488,7 +1466,6 @@
 "simplified.title" = "This profile runs in a simplified mode";
 "simplified.body" = "Its window is the app's own, not Safari's. The profile goes through its proxy and keeps its data as always, but it does not match Safari: without Safari's window this is plain WebKit, and sites can tell.";
 "simplified.why" = "Why: %@";
-"simplified.reason.device" = "the profile presents an iPhone or an iPad, and Safari's window is a Mac's: such a profile always opens in the app's window.";
 "simplified.reason.sandboxed" = "this build of Lumen runs in the App Sandbox, where Safari's window cannot be hosted. The build without the App Sandbox hosts it.";
 "simplified.reason.turnedOff" = "Safari's window is turned off for profiles (PB_SAFARI_CHROME=0).";
 "simplified.reason.noProfileProcess" = "profiles run inside the app's own process (PB_PROFILE_PROCESS or the PBProfileProcess setting), and Safari's window is hosted only in a profile's own process.";

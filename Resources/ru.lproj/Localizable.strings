@@ -133,10 +133,7 @@
 "editor.error.startURL" = "Начальный адрес не является корректным URL";
 "editor.footer.note" = "Изменения вступят в силу при следующем запуске.";
 "editor.generation" = "Вид для сайтов";
-"editor.generation.footer" = "Mac — это Safari на этом Mac как есть. Мобильный вид меняет то, как профиль называет себя сайтам (User-Agent), и размер его окна; вид iPhone ещё и отвечает как iPhone там, где это умеет сам WebKit (платформа, плотность экрана, шрифты: страница находит только шрифты iPhone), а с полной маскировкой — экраном, касаниями и указателем. Движок и железо остаются этого Mac. Канвас рисуется как есть, без шума: iPhone одной модели рисуют канвас одинаково, и шум, у каждого профиля свой, сам выделял бы профиль; канвас с текстом всё равно отличается от настоящего iPhone, потому что буквы рисует этот Mac — см. docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.ipad" = "Вид iPad в окне на Маке — это Safari на Маке в окне размером с iPad (iPad и сам называет себя Mac): касаний нет, шрифты, видеокарта и звук — этого Мака; сайт, который проверяет касание, это увидит.";
-"editor.phoneDisguise" = "Полная маскировка под iPhone";
-"editor.phoneDisguise.detail" = "Включено: страница видит экран iPhone (%ld×%ld, %ldx), %ld точек касания, события касания от нажатия, грубый указатель без наведения, портретную ориентацию. Часть этого делает скрипт, и внимательный сайт может найти его следы. Выключено: никаких следов подмены — только то, что сам WebKit отвечает как iPhone (платформа, плотность, шрифты); экран, касания и указатель остаются этого Мака.";
+"editor.generation.footer" = "Safari на этом Mac как есть: движок и железо — этого Mac, как их измеряет страница. Канвас рисуется как есть, без шума — см. docs/ISOLATION_AND_LIMITATIONS.md §2.";
 "editor.geo" = "Геолокация";
 "editor.geo.accuracy" = "Точность (м)";
 "editor.geo.deny" = "Запретить";
@@ -286,9 +283,8 @@
 "editor.camera.error.read" = "Не удалось прочитать %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — кнопка подстановки впишет точное имя и разрешение устройства (собственной камеры этого Mac или типичной фронтальной камеры iPhone для мобильного профиля).";
+"editor.camera.label.note" = "Поставь как у реальной камеры, чтобы страница не отличила — кнопка подстановки впишет точное имя и разрешение собственной камеры этого Mac.";
 "editor.camera.matchMac" = "Как у этого Mac";
-"editor.camera.matchMobile" = "Как у iPhone";
 "editor.camera.preview.note" = "Живое превью того, что получит страница — обновляется при смене источника, обрезки и коррекции. Видео здесь проигрывается по кругу.";
 "editor.camera.preview.open" = "Открыть превью";
 "editor.camera.preview.window" = "Превью камеры";
@@ -442,9 +438,6 @@
 "errorpage.proxy.noCredentials" = "Прокси этого профиля требует имя пользователя и пароль. Укажите их в настройках профиля.";
 "errorpage.proxy.rejected" = "Прокси отклонил имя пользователя и пароль профиля.";
 "errorpage.title" = "Не удалось загрузить страницу";
-"gen.ios26" = "Мобильный вид: iPhone, Safari 26 (только User-Agent)";
-"gen.ios27" = "Мобильный вид: iPhone, Safari 27 (только User-Agent)";
-"gen.ipados26" = "Вид iPad: Safari 26, окно размером с iPad";
 "gen.macos26" = "Safari на macOS 26 (соответствует движку)";
 "gen.macos.host" = "Safari этого Mac, %@ (соответствует движку)";
 "history.clear" = "Очистить";
@@ -567,8 +560,6 @@
 "whatSites.compare" = "Сравнить с Safari…";
 "whatSites.onlyDifferences" = "Только различия";
 "whatSites.allSame" = "Здесь всё совпадает с Safari.";
-"whatSites.allSame.mobile" = "Совпадает с Safari на этом Mac — с настоящим iPhone сравнить не с чем.";
-"whatSites.mobileView" = "Эталона здесь нет: панель сравнивает профиль с Safari на этом Mac, а профиль называет себя iPhone или iPad. От настоящего устройства он отличается и тем, чего здесь не видно: касание, шрифты, видеокарта (WebGL), звук, датчики движения, экран.";
 "whatSites.summary" = "совпадает: %ld · отличается: %ld · у каждого окна своё: %ld";
 "whatSites.same" = "совпадает";
 "whatSites.differs" = "отличается";
@@ -674,12 +665,10 @@
 "check.engine.close" = "User-Agent называет Safari %1$@, движок — Safari %2$@: соседние выпуски, разница для сайта мала.";
 "check.engine.far" = "User-Agent называет Safari %1$@, а страницу рисует движок Safari %2$@. Сайт измеряет движок и видит, что названа не та версия.";
 "check.engine.notSafari" = "User-Agent называет не Safari, а страницу рисует движок Safari. Это расхождение видно любому сайту.";
-"check.engine.mobile" = "Вид iPhone или iPad: Safari этого Mac под именем другого устройства. С движком Mac не сравнивается.";
 "check.engine.notMeasured" = "Страница не сообщила User-Agent.";
 "check.window.fits" = "Окно %1$@ на экране %2$@.";
 "check.window.larger" = "Окно (%1$@) больше экрана (%2$@): у настоящего пользователя так не бывает.";
 "check.window.cut" = "В настройках задано окно %1$@, а экран этого Mac — %2$@: окно открывается меньше заданного.";
-"check.window.mobile" = "Вид iPhone или iPad: окно размером с экран устройства, с экраном Mac не сравнивается.";
 "check.window.notMeasured" = "Страница не сообщила размеры окна и экрана.";
 "check.intro.title" = "Результата пока нет";
 "check.progress.page" = "Проверочная страница в окне профиля";
@@ -713,7 +702,6 @@
 "menu.copy" = "Скопировать";
 "menu.paste" = "Вставить";
 "menu.selectAll" = "Выбрать все";
-"menu.showAllTabs" = "Показать все вкладки";
 "menu.window" = "Окно";
 "menu.minimize" = "Свернуть";
 "menu.findOnPage" = "Найти…";
@@ -735,14 +723,6 @@
 "menu.copyLink" = "Скопировать ссылку";
 "menu.history" = "История";
 "menu.showDownloads" = "Показать загрузки";
-"mobile.tabs.one" = "%ld вкладка";
-"mobile.tabs.few" = "%ld вкладки";
-"mobile.tabs.many" = "%ld вкладок";
-"mobile.tabs.close" = "Закрыть «%@»";
-"mobile.tabs.new" = "Новая вкладка";
-"mobile.tabs.done" = "Готово";
-"mobile.tabs.show" = "Вкладки";
-"mobile.address.placeholder" = "Запрос или сайт";
 "passwords.add" = "Добавить пароль";
 "passwords.addTitle" = "Новый пароль";
 "passwords.conflict.badgeNumbered" = "Другая версия %ld";
@@ -833,8 +813,6 @@
 "profiles.kept.removeMessage" = "Настройки, пароли, закладки, история и данные сайтов этого профиля будут удалены с этого Mac. Вернуть их будет нельзя.";
 "profiles.kept.removeTitle.broughtBack" = "Удалить старую папку профиля «%@»?";
 "profiles.kept.removeMessage.broughtBack" = "Новый профиль, возвращённый из этой папки, останется. С этого Mac удаляется старая папка, а с ней то, что в новый профиль не перенесено: открытые вкладки, расписание прогрева, сохранённые версии настроек. Вернуть их будет нельзя.";
-"profiles.device.ipad" = "Вид iPad";
-"profiles.device.iphone" = "Мобильный вид";
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Создайте первый изолированный профиль, чтобы начать работу.";
 "profiles.empty.title" = "Пока нет профилей";
@@ -1488,7 +1466,6 @@
 "simplified.title" = "Профиль работает в упрощённом режиме";
 "simplified.body" = "Его окно — окно приложения, а не Safari. Профиль, как всегда, ходит через свой прокси и хранит свои данные, но с Safari не совпадает: без окна Safari это обычный WebKit, и сайты могут это заметить.";
 "simplified.why" = "Почему: %@";
-"simplified.reason.device" = "профиль представляется iPhone или iPad, а окно Safari — окно Mac: такой профиль всегда открывается в окне приложения.";
 "simplified.reason.sandboxed" = "эта сборка Lumen работает в песочнице приложений (App Sandbox), а в ней окно Safari не поднимается. Его поднимает сборка без песочницы.";
 "simplified.reason.turnedOff" = "окно Safari для профилей выключено (PB_SAFARI_CHROME=0).";
 "simplified.reason.noProfileProcess" = "профили работают в процессе самого приложения (PB_PROFILE_PROCESS или настройка PBProfileProcess), а окно Safari поднимается только в собственном процессе профиля.";

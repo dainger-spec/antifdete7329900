@@ -138,12 +138,6 @@ final class ProfileCheckTests: XCTestCase {
         let fixed = ProfileCheck.applying(.safariOfThisMac, to: configuration)
         XCTAssertNil(fixed.userAgent)
         XCTAssertNil(fixed.safariVersion)
-
-        // An iPhone view is Safari of another device by design: not judged against this Mac's.
-        var phone = facts()
-        phone.isMobileView = true
-        XCTAssertEqual(finding(.engine, phone).level, .unknown)
-        XCTAssertEqual(finding(.window, phone).level, .unknown)
     }
 
     func testAWindowTheScreenCannotHold() {

@@ -966,7 +966,7 @@ enum SafariChrome {
 
     /// The late stubs, now and as their images load — in every profile's process, whichever
     /// window it shows. SafariPlatformSupport comes in with WebKit too, not only with Safari's
-    /// chrome: an iPhone view, in our own window, never had the stub, and its process and the
+    /// chrome: a profile in our own window never had the stub, and its process and the
     /// window server spun until the session was restarted (the owner's Mac, 1 November: a sample
     /// of the process showed -[SPSafariPlatformSupport viewServiceDidTerminateWithError:] under
     /// -[NSRemoteView invalidate], over and over). Once per process.

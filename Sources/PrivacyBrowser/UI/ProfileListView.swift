@@ -233,7 +233,6 @@ struct ProfileListView: View {
                                                                             launch: { await model.launch($0) }),
                                  // The profile's check, on the same snapshot: the panel opens on it.
                                  check: { taken in ProfileCheckRun(profileID: profile.id, snapshot: taken, model: { [weak model] in model }) },
-                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS,
                                  showProxy: model.details[profile.id]?.proxyIdentity == nil ? nil : {
                                      let identity = model.details[profile.id]?.proxyIdentity
                                      let entry = identity.flatMap { identity in
@@ -590,7 +589,6 @@ struct ProfileListView: View {
                     String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
                            $0.proxy.displayAddress)
                 },
-                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
                 exportOnly: exportOnly(profile.id),
                 directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil,
                 proxyFailed: proxyFailed)
@@ -739,8 +737,6 @@ struct ProfileRowItem: Identifiable {
     /// Why it did not start, when its last launch failed (a proxy that did not answer): the row is
     /// among "Need attention" and says so.
     var problem: String?
-    /// The device it presents as, by its symbol, when not a Mac ("iphone", "ipad").
-    var deviceSymbol: String?
     /// The license lets it open only for export (CONTRACT §8.4, the owner's decision of 1 November):
     /// the row says "Export only" where a stopped profile's state is; an open one keeps working.
     var exportOnly = false
@@ -790,16 +786,6 @@ struct ProfileRowItem: Identifiable {
         return (parts + tags).joined(separator: " · ")
     }
 
-    /// The symbol of the device the profile presents as, when not a Mac.
-    static func deviceSymbol(_ generation: DeviceGeneration) -> String? {
-        switch generation.platform {
-        case .macOS: return nil
-        case .iOS: return "iphone"
-        case .iPadOS: return "ipad"
-        }
-    }
-
-    /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
     /// Why a proxy's country is not known: the lookup at its last launch got no answer, the proxy
     /// was never checked (and no launch looked it up), its last check failed, or the check that
     /// passed got no country for its address.
@@ -813,14 +799,8 @@ struct ProfileRowItem: Identifiable {
     /// settings pin, else this Mac's own Safari — what its User-Agent declares
     /// (`DeviceGeneration.userAgent(hostSafariVersion:)`); the catalog's "26" went stale on a Mac
     /// whose Safari is 27 (the owner, 1 November: "Mac · Safari 26" beside a page measuring 27.0.1).
-    /// Mobile views declare a fixed Safari, their catalog's.
     static func appearsAs(_ generation: DeviceGeneration, safariVersion: String? = nil, hostSafariVersion: String) -> String {
-        let device: String
-        switch generation.platform {
-        case .macOS: device = L("profiles.device.mac")
-        case .iOS: device = L("profiles.device.iphone")
-        case .iPadOS: device = L("profiles.device.ipad")
-        }
+        let device = L("profiles.device.mac")
         var version = generation.osVersionLabel
         if generation.matchesEngine {
             let declared = safariVersion.flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil } ?? hostSafariVersion
@@ -2192,12 +2172,6 @@ private struct ProfileRow: View {
 
     private var seenCell: some View {
         HStack(spacing: 6) {
-            if let symbol = row.deviceSymbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                    .accessibilityHidden(true)
-            }
             Text(row.appearsAs)
                 .font(.lumenBody)
                 .foregroundStyle(Theme.textSecondary)

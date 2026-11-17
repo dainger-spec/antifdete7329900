@@ -489,9 +489,6 @@ final class ProfileManager: ObservableObject {
             // One profile in this process: its geolocation is the engine's own answer, before any
             // web view exists (`NativeGeolocation`; the page script answers where WebKit cannot).
             NativeGeolocation.engage(configuration.geolocation)
-            // An iPhone view's pages find an iPhone's fonts only: the process pool's list, given
-            // before any web content process starts (`PhoneEngine.engageFonts`).
-            PhoneEngine.engageFonts(for: configuration)
             systemCameraActive = ProfileProcess.systemCameraActiveForThisProcess
         } else {
             let usesSystemCamera = configuration.cameraSubstitution.usesSystemCamera
@@ -626,7 +623,6 @@ final class ProfileManager: ObservableObject {
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
-            processorCores: stored.deviceGeneration.processorCores,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive)
         // The process object is held by `children` and, until its exit has been handled, by its own
@@ -1230,7 +1226,7 @@ final class ProfileManager: ObservableObject {
     private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
         if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
         webDriverExecutors.removeValue(forKey: id)?.close()
-        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration),
+        if SafariChromeHost.isHosting,
            let page = await SafariChromeHost.openScenarioPage(session: session, forWebDriver: true) {
             let window = page.webView.window
             let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
@@ -1466,7 +1462,7 @@ final class ProfileManager: ObservableObject {
         }
         session.shutDown()
         rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
-                         emptyForgets: SafariChromeHost.isHosting && SafariChromeHost.canHost(session.configuration))
+                         emptyForgets: SafariChromeHost.isHosting)
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
@@ -1677,9 +1673,9 @@ final class ProfileManager: ObservableObject {
         guard let session = sessions[id] else { return false }
         // Where the run acts. In a profile's own process that hosts Safari's chrome: a window of
         // Safari's, opened for the run — the profile's real window, as a person has it (the owner,
-        // 10 November: a run in a window of ours is not Safari). Everywhere else — an iPhone or
-        // iPad view, the sandboxed build, a macOS where the chrome is not hosted — a window of ours.
-        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration) {
+        // 10 November: a run in a window of ours is not Safari). Everywhere else — the sandboxed
+        // build, a macOS where the chrome is not hosted — a window of ours.
+        if SafariChromeHost.isHosting {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
             objectWillChange.send()
             Task { @MainActor [weak self] in

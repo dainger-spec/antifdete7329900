@@ -104,7 +104,6 @@ final class ProfileProcess {
                       proxyLocationFound: Bool = false,
                       preferences: BrowsingPreferences = BrowsingPreferences(),
                       menusInAppLanguage: Bool = false,
-                      processorCores: Int? = nil,
                       cameraAllowed: Bool = true,
                       systemCameraActive: Bool = false) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -123,7 +122,7 @@ final class ProfileProcess {
                                                    vaultRoot: vaultRoot, timeZone: timeZone, forWarmUpOnly: forWarmUpOnly,
                                                    proxyLocationFound: proxyLocationFound,
                                                    preferences: preferences, menusInAppLanguage: menusInAppLanguage,
-                                                   processorCores: processorCores, cameraAllowed: cameraAllowed,
+                                                   cameraAllowed: cameraAllowed,
                                                    systemCameraActive: systemCameraActive)
 
         let keyPipe = Pipe()
@@ -201,7 +200,6 @@ final class ProfileProcess {
     /// Every name a profile's process can find in its environment (the self-test checks it).
     static let environmentNames = inheritedEnvironment.union([
         "HOME", "TMPDIR", "PATH", "CFFIXED_USER_HOME", "PRIVACYBROWSER_VAULT_DIR", "TZ", "__XPC_TZ", "PB_WARM_UP_ONLY",
-        processorCoresVariable,
         menusInAppLanguageVariable,
         browsingPreferencesVariable,
         proxyLocationFoundVariable,
@@ -230,14 +228,6 @@ final class ProfileProcess {
         ProcessInfo.processInfo.environment[systemCameraActiveVariable] == "1"
     }
 
-    /// The processor count the WebKit processes a profile's process starts are given (WebKit's
-    /// own `WTF_numberOfProcessorCores`, read once by each of them), `__XPC_`-prefixed as `__XPC_TZ`.
-    static let processorCoresVariable = "__XPC_WTF_numberOfProcessorCores"
-
-    /// The self-test's stand-in for a Mac with this many cores, for every profile's process that
-    /// is given no count of its own (CI's runners have three, where WebKit already says 4).
-    static var machineProcessorCoresStandIn: Int?
-
     /// The app's browsing settings as the process starts (`BrowsingPreferences`, JSON): its first
     /// window opens by them — its tabs restored, its zoom — before anything arrives on its channel.
     static let browsingPreferencesVariable = "PB_BROWSING"
@@ -260,7 +250,7 @@ final class ProfileProcess {
     static func childEnvironment(inheriting parent: [String: String], home: URL, vaultRoot: URL,
                                  timeZone: String?, forWarmUpOnly: Bool, proxyLocationFound: Bool = false,
                                  preferences: BrowsingPreferences = BrowsingPreferences(),
-                                 menusInAppLanguage: Bool = false, processorCores: Int? = nil,
+                                 menusInAppLanguage: Bool = false,
                                  cameraAllowed: Bool = true,
                                  systemCameraActive: Bool = false) throws -> [String: String] {
         var environment = parent.filter { inheritedEnvironment.contains($0.key) }
@@ -286,11 +276,6 @@ final class ProfileProcess {
             // And for the WebKit processes the child starts (pages and workers run there): libxpc
             // hands an `__XPC_`-prefixed variable to the services it launches, without the prefix.
             environment["__XPC_TZ"] = timeZone
-        }
-        // The device's processor count, for the pages, frames and workers of the WebKit processes
-        // the child starts (`DeviceGeneration.processorCores`): WebKit's own answer, in every one.
-        if let cores = processorCores ?? machineProcessorCoresStandIn {
-            environment[processorCoresVariable] = String(cores)
         }
         // Started to warm the profile up and nothing else: it opens no window of its own and
         // quits when the run ends, which is what seals what the run collected.

@@ -67,8 +67,6 @@ struct ProfileDraft {
     var lastProxyLocation: ProxyLocation?
     var warnOnProxyIPChange = false
     var menusInAppLanguage = false
-    /// An iPhone view's full disguise (ProfileConfiguration.phoneDisguise); on by default.
-    var phoneFullDisguise = true
     var webRTC: WebRTCMode = .disabled
     /// What a page's camera (and, with it, the microphone) is handed; `.off` by default
     /// (`CameraSubstitution`). Bound field by field in the editor's Camera part.
@@ -213,7 +211,6 @@ struct ProfileDraft {
         lastProxyLocation = c.lastProxyLocation
         warnOnProxyIPChange = c.warnOnProxyIPChange
         menusInAppLanguage = c.menusInAppLanguage
-        phoneFullDisguise = c.phoneDisguise == .full
         webRTC = c.webRTCMode
         camera = c.cameraSubstitution
         cameraWidth = String(c.cameraSubstitution.width)
@@ -484,7 +481,6 @@ struct ProfileDraft {
         configuration.lastProxyLocation = lastProxyLocation
         configuration.warnOnProxyIPChange = warnOnProxyIPChange
         configuration.menusInAppLanguage = menusInAppLanguage
-        configuration.phoneDisguise = phoneFullDisguise ? .full : .engineOnly
         configuration.webRTCMode = webRTC
         configuration.cameraSubstitution = try makeCamera()
         configuration.ephemeral = ephemeral
@@ -586,8 +582,7 @@ struct ProfileEditorView: View {
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
-                                                                            launch: { await model.launch($0) }),
-                                 mobileView: DeviceGenerations.resolved(id: draft.deviceGenerationID).platform != .macOS)
+                                                                            launch: { await model.launch($0) }))
             }
         }
         .fileImporter(isPresented: $choosingCookieFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
