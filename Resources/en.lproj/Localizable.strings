@@ -2876,7 +2876,7 @@
 "vm.row.tools.old" = "Made with Lumen's old tools";
 "vm.row.tools.old.detail" = "The wallpaper, appearance, accent colour and computer name do not apply in it. Update the tools in the base system (⋯ at the top of the section → Open the Base System… → Install Lumen Tools) and make the machine again.";
 "vm.row.wallpaper.failed" = "Lumen's wallpaper was not set in this machine";
-"vm.window.trouble" = "no internet — Lumen's list of machines says why";
+"vm.window.trouble" = "No internet — Lumen's list of machines says why";
 "vm.editor.title.new" = "New virtual machine";
 "vm.editor.title" = "“%@”";
 "vm.editor.subtitle" = "A Mac of its own. What is changed here takes effect at the machine's next start.";
