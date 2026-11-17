@@ -94,6 +94,13 @@ enum SafariTypingGuard {
         for name in names {
             guard let cls = NSClassFromString(name) else { continue }
             wrap(cls, name: name)
+            // The address bar's and the completion list's accessibility: what an app that acts on
+            // every key press (a layout switcher, a grammar checker, a password manager) reads of
+            // the focused field right after each key. A throw there reached AppKit's run loop while
+            // the last event was still the key press.
+            if name.contains("UnifiedField") || name.contains("CompletionList") {
+                wrapWholeClass(cls, name: name, onlyPrefix: "accessibility")
+            }
         }
         for name in completionClasses where !wholeClassesWrapped.contains(name) {
             guard let cls = NSClassFromString(name) else { continue }
@@ -138,7 +145,7 @@ enum SafariTypingGuard {
     /// retain, no release): an integer is never taken for an object. On a throw, it answers nil, 0
     /// or NO. Methods with a float, a struct or more arguments are left as they are, and so are
     /// the object's life cycle (init…, dealloc, copy…, new…, retain, release, .cxx_…).
-    private static func wrapWholeClass(_ cls: AnyClass, name className: String) {
+    private static func wrapWholeClass(_ cls: AnyClass, name className: String, onlyPrefix: String? = nil) {
         for target in [cls, object_getClass(cls)].compactMap({ $0 }) {
             var count: UInt32 = 0
             guard let list = class_copyMethodList(target, &count) else { continue }
@@ -146,6 +153,7 @@ enum SafariTypingGuard {
                 let method = list[index]
                 let selectorName = NSStringFromSelector(method_getName(method))
                 let key = className + " " + selectorName
+                if let onlyPrefix, !selectorName.hasPrefix(onlyPrefix) { continue }
                 guard !wrapped.contains(key), isWrappable(method, named: selectorName) else { continue }
                 let arguments = Int(method_getNumberOfArguments(method)) - 2
                 let returnType = method_copyReturnType(method)
