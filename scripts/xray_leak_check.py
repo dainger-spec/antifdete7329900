@@ -38,7 +38,6 @@ Exit 1 on any leak, any check of the app failing, or any control missing.
 """
 import argparse
 import base64
-import ipaddress
 import json
 import os
 import re
@@ -51,10 +50,9 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from egress_check import FLOW, PORT, QUESTION, parse  # noqa: E402
+from egress_check import DOCUMENTATION, FLOW, PORT, QUESTION, SERVICES, parse  # noqa: E402
 from xray_relay_check import TLSTarget, free_port, links, make_material, wait_for_port  # noqa: E402
 
-DOCUMENTATION = [ipaddress.ip_network(n) for n in ("192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
 # The kinds the app is checked with: every protocol, REALITY and TLS, two transports.
 CHECKED = ["reality-vision", "tls-ws", "vmess-ws", "trojan-tls", "ss2022"]
 FAIL_CLOSED = "reality-vision"
@@ -209,15 +207,46 @@ def read_check_log(path):
     return marks
 
 
-def analyse(capture, marks, server_address, server_ports, out):
-    leaks, listed = [], []
+# The relay's process name, as the capture gives it (Contents/MacOS/LumenXray after its exec).
+RELAY_NAME = "LumenXray"
+
+
+def analyse(capture, marks, server_address, server_ports, server_names=()):
+    """Every packet of the capture, against what a profile on a link may send (the module's doc).
+
+    The app's processes are told by pid (each profile's, the check's own) and by name (the name the
+    check gives for itself: a profile's process runs the same executable); a relay by its pid or its
+    name, whichever relay it is — one the check announced, one started again, or one nobody announced."""
+    leaks, listed = [], {}
     relay_seen = {}
-    controls_seen = set()
+    controls_seen = {}
     token = marks["token"] or "\u0000"
     profile_pids = marks["pids"]
     relay_pids = set(marks["relays"])
+    manager = marks["process"]
+    app_names = {manager[0][:16]} if manager else set()
+    first_profile_pid = min(profile_pids) if profile_pids else None
+    windows = [(begin, end) for _, begin, end in marks["windows"]]
     packets = 0
     with_metadata = 0
+
+    def in_window(packet):
+        return any(begin <= packet["time"] <= end for begin, end in windows)
+
+    def relay(owner):
+        return owner is not None and (owner[1] in relay_pids or owner[0][:16] == RELAY_NAME[:16])
+
+    def app(owner):
+        if owner is None or relay(owner):
+            return False
+        return owner[1] in profile_pids or (manager is not None and owner[1] == manager[1]) \
+            or any(owner[0][:16].startswith(name) for name in app_names)
+
+    def service(owner):
+        # A service that was running before the first profile started was not started for it (egress_check).
+        return owner is not None and any(name in owner[0] for name in SERVICES) \
+            and (first_profile_pid is None or owner[1] >= first_profile_pid)
+
     with open(capture, errors="replace") as handle:
         for line in handle:
             packet = parse(line)
@@ -227,22 +256,25 @@ def analyse(capture, marks, server_address, server_ports, out):
             proc, eproc = packet["proc"], packet["eproc"]
             if proc:
                 with_metadata += 1
-            pids = {p[1] for p in (proc, eproc) if p}
             text = packet["line"]
-            for question in QUESTION.findall(text):
-                name = question.lower().rstrip(".")
-                if name in marks["controls"]:
-                    controls_seen.add(name)
-                elif token in name or name.endswith("leak.example.com"):
-                    leaks.append("a DNS question for %s, resolved on this Mac and not at the link's far end: %s" % (name, text))
-            dst, src = packet["dst"], packet["src"]
-            if dst is not None and any(dst in network for network in DOCUMENTATION):
-                leaks.append("a packet to a documentation address (the leak page's own targets): %s" % text)
-            if pids & profile_pids:
-                leaks.append("a packet of a profile's process, or sent for it, to something other than loopback: %s" % text)
+            lowered = text.lower()
+            names = [question.lower().rstrip(".") for question in QUESTION.findall(text)]
+            control = next((name for name in names if name in marks["controls"]), None)
+            if control:
+                owners = ["%s %s" % (kind, owner[0]) for kind, owner in (("proc", proc), ("eproc", eproc)) if owner]
+                controls_seen.setdefault(control, []).append((", ".join(owners) or "no process", app(proc) or app(eproc)))
                 continue
-            relay = pids & relay_pids
-            if relay:
+            dst, src = packet["dst"], packet["src"]
+            if any(token in name or name.endswith("leak.example.com") for name in names):
+                leaks.append("a DNS question for a page's name, resolved on this Mac and not at the link's far end: %s" % text)
+                continue
+            if token in lowered:
+                leaks.append("a packet carrying the run's token (a page's request made on this Mac): %s" % text)
+                continue
+            if dst is not None and any(dst.version == network.version and dst in network for network in DOCUMENTATION):
+                leaks.append("a packet to a documentation address (the leak page's own targets): %s" % text)
+                continue
+            if relay(proc) or relay(eproc):
                 flow = FLOW.search(text)
                 source_port = PORT.search(flow.group(1)) if flow else None
                 source_port = int(source_port.group(1)) if source_port else None
@@ -250,10 +282,31 @@ def analyse(capture, marks, server_address, server_ports, out):
                 to_server = str(dst) == server_address and packet["dst_port"] in server_ports
                 from_server = str(src) == server_address and source_port in server_ports
                 if to_server or from_server:
-                    for pid in relay:
-                        relay_seen[pid] = relay_seen.get(pid, 0) + 1
+                    for owner in (proc, eproc):
+                        if relay(owner):
+                            relay_seen[owner[1]] = relay_seen.get(owner[1], 0) + 1
+                elif names and all(name in server_names for name in names) or packet["dns_answer"]:
+                    # The server's own name, asked of this Mac's resolver for the relay: the one name a link asks here.
+                    listed.setdefault("the relay's question for its server's name", []).append(text)
                 else:
-                    leaks.append("a packet of a relay (pid %s) to something other than its server: %s" % (sorted(relay)[0], text))
+                    who = proc if relay(proc) else eproc
+                    leaks.append("a packet of a relay (%s %d) to something other than its server: %s" % (who[0], who[1], text))
+                continue
+            profile = any(owner is not None and owner[1] in profile_pids for owner in (proc, eproc))
+            if profile or (in_window(packet) and (app(proc) or app(eproc))):
+                if packet["dns_answer"] and not profile:
+                    # An answer is not a packet the app sent; the question would have been, and fails above or here.
+                    listed.setdefault("DNS answers to the app", []).append(text)
+                elif dst is None or not dst.is_loopback:
+                    leaks.append("a packet of the app's process (a profile's, or the check's own while a profile ran), "
+                                 "or one sent for it, to something other than loopback: %s" % text)
+                continue
+            if in_window(packet) and (service(proc) or service(eproc)):
+                who = proc[0] if service(proc) else "%s (through %s)" % (eproc[0], proc[0] if proc else "?")
+                leaks.append("%s fetched for someone while a profile ran: %s" % (who, text))
+                continue
+            if in_window(packet) and proc:
+                listed.setdefault(proc[0], []).append(text)
     return {"packets": packets, "with_metadata": with_metadata, "leaks": leaks, "relay_seen": relay_seen,
             "controls_seen": controls_seen, "listed": listed}
 
@@ -368,25 +421,40 @@ def main():
         capture.wait(timeout=20)
 
         marks = read_check_log(check_path)
-        result = analyse(capture_path, marks, address, set(ports.values()), options.out)
-        print("XRAY-LEAK INFO capture: %d packets, %d with the process they belong to; profiles %s, relays %s"
-              % (result["packets"], result["with_metadata"], sorted(marks["pids"]), marks["relays"]))
+        result = analyse(capture_path, marks, address, set(ports.values()), server_names={SERVER_NAME})
+        print("XRAY-LEAK INFO capture: %d packets, %d with the process they belong to; profiles %s, relays %s, the check %s, "
+              "windows %d" % (result["packets"], result["with_metadata"], sorted(marks["pids"]), marks["relays"], marks["process"],
+                              len(marks["windows"])))
+        for who, lines in sorted(result["listed"].items(), key=lambda item: -len(item[1])):
+            print("XRAY-LEAK INFO listed, not failed on: %s, %d packet(s), e.g. %s" % (who, len(lines), lines[0][:220]))
         for leak in result["leaks"][:40]:
             print("XRAY-LEAK FAIL %s" % leak[:600])
         if result["leaks"]:
             status = 1
             print("XRAY-LEAK FAIL %d packet(s) went around a link" % len(result["leaks"]))
         else:
-            print("XRAY-LEAK PASS no packet of a profile's process off loopback; every relay's packet to its server; "
-                  "no name of a page resolved on this Mac; nothing to a documentation address")
+            print("XRAY-LEAK PASS no packet of a profile's process off loopback, nor of the app's while a profile ran; "
+                  "every packet of a relay to or from its server; no name of a page resolved on this Mac; nothing to a "
+                  "documentation address; no service fetching for a profile")
         # The controls: what the capture must see, or it proves nothing.
+        if not marks["windows"] or marks["process"] is None or not marks["token"]:
+            status = 1
+            print("XRAY-LEAK SKIPPED the check gave no window, process or token: nothing could be told")
         missing = [name for name in marks["controls"] if name not in result["controls_seen"]]
         if not marks["controls"] or missing:
             status = 1
             print("XRAY-LEAK SKIPPED the capture did not see the DNS question asked on purpose (%s): it cannot tell a name "
                   "resolved on this Mac" % (", ".join(missing) or "none asked"))
         else:
-            print("XRAY-LEAK PASS the control: the capture sees this Mac's DNS questions (%s)" % ", ".join(marks["controls"]))
+            print("XRAY-LEAK PASS the control: the capture sees this Mac's DNS questions (%s, by %s)"
+                  % (", ".join(marks["controls"]), sorted({who for seen in result["controls_seen"].values() for who, _ in seen})))
+        if any(named for seen in result["controls_seen"].values() for _, named in seen):
+            print("XRAY-LEAK PASS the control: the capture names the app's process on the question it asked (%s): "
+                  "the app's own packets are told apart" % marks["process"][0])
+        else:
+            status = 1
+            print("XRAY-LEAK SKIPPED no control packet was named after the app's process (%s): a packet the app sent around "
+                  "a link would go unnoticed" % (marks["process"],))
         unseen = [pid for pid in marks["relays"] if pid not in result["relay_seen"]]
         if not marks["relays"] or unseen:
             status = 1

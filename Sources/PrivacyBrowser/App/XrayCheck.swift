@@ -15,8 +15,9 @@ import Network
 /// link, with the self-test standing in for the network guard (CI cannot load it):
 ///
 /// - the leak page (`/pb-leak`): every kind of request a page can make, to host names carrying the
-///   run's id and to documentation addresses — they must reach the self-test proxy through the
-///   server (its log names them), and the capture must hold none of them;
+///   run's id, to documentation addresses and to this Mac's loopback — they must reach the self-test
+///   proxy through the server (its log names them), its canary on loopback must take none of them,
+///   and the capture must hold none of them;
 /// - the WebRTC call page (`/pb-rtc`, `call`): two peer connections through the app's relay, the
 ///   link's UDP and the server — relay candidates only, at the self-test proxy's address;
 /// - the relay's door: SOCKS5 without the launch's login, and with a wrong password, refused; with it, taken;
@@ -189,6 +190,14 @@ enum XrayCheck {
               "targets \(targets.count), vias \(vias.sorted())")
         check("\(name): the page reported what it could see, through the link",
               !((leakLog["reports"] as? [[String: Any]]) ?? []).isEmpty)
+        // The page's requests to this Mac's own loopback (127.0.0.1, localhost, ::1, 0.0.0.0) went through
+        // the link too: the self-test proxy's canary, listening there, took none of them. (The capture
+        // leaves loopback out; this is what sees it.)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        let latest = await log(run: run, port: spec.httpProxyPort)
+        let canary = latest["canary"] as? [[String: Any]]
+        check("\(name): no request of the page reached this Mac's own loopback around the link (the canary took none)",
+              canary?.isEmpty == true, canary.map { "\($0.count) connection(s): \($0.prefix(3))" } ?? "the self-test proxy's log did not come")
 
         // 2. The relay's door: its login only.
         if let route = ProxyRoutes.shared.route(for: proxy) {
