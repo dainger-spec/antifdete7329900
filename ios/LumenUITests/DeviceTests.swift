@@ -93,7 +93,16 @@ final class DeviceTests: LumenUITestCase {
         onScreen(app.buttons["cancelSignIn"], "the sign-in form's Cancel")
         shot("\(leg) 08 sign-in form")
         reveal(app.buttons["submitSignIn"], "the sign-in form's button can be reached").tap()
-        wait(app.staticTexts["accountEmail"], "signed in", timeout: 40)
+        // Signed in, the account's screen keeps where it was scrolled; at the largest text on the SE
+        // the address's row is above it and the list has not made it (run 163): scrolled to, as a
+        // person does, once the plan's rows say the sign-in went through.
+        let email = app.staticTexts["accountEmail"]
+        let signedIn = Date().addingTimeInterval(40)
+        while !email.exists, Date() < signedIn {
+            if app.staticTexts["planProxies"].exists || app.staticTexts["profileCounter"].exists { scroll(towardStart: true) }
+            usleep(500_000)
+        }
+        XCTAssertTrue(email.exists, "signed in")
         // The plan, below the account's rows: scrolled to, as a person does, once the server named it.
         let plan = app.staticTexts["planName"]
         let named = Date().addingTimeInterval(30)
