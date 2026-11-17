@@ -735,6 +735,13 @@ struct LicenseBannerView: View {
     /// the plans otherwise (§17.4).
     private var renewalPath: String { license.hasNoEmail ? "/key" : "/pricing" }
 
+    /// Check Now: "Checking…" while the account is asked, not pressable again.
+    private var checkNow: some View {
+        Button(L(license.refreshing ? "license.account.refreshing" : "license.banner.checkNow")) { Task { await license.refresh() } }
+            .buttonStyle(.lumenSecondary)
+            .disabled(license.refreshing)
+    }
+
     @ViewBuilder
     private var actions: some View {
         switch banner {
@@ -755,10 +762,10 @@ struct LicenseBannerView: View {
             if outdated {
                 Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
             } else {
-                Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+                checkNow
             }
         case .unverified:
-            Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+            checkNow
         case .appOutdated:
             Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
         case .clockSkew:
@@ -775,7 +782,7 @@ struct LicenseBannerView: View {
                 Button(L("license.banner.hide")) { license.closeTrialNotice() }.buttonStyle(.lumenGhost)
             }
         case .renewalFailing:
-            Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+            checkNow
         }
     }
 
@@ -988,11 +995,11 @@ struct AccountSettingsPage: View {
                         }
                         .buttonStyle(.lumenSecondary)
                     }
-                    Button(L(license.isWorking ? "license.account.refreshing" : "license.account.refresh")) {
+                    Button(L(license.isWorking || license.refreshing ? "license.account.refreshing" : "license.account.refresh")) {
                         Task { await license.refresh() }
                     }
                     .buttonStyle(.lumenGhost)
-                    .disabled(license.isWorking)
+                    .disabled(license.isWorking || license.refreshing)
                 }
             }
             SettingRow(String(format: L("contract.account.profiles"), "\(model.profiles.count)", "\(p.profilesOnOtherDevices)"),
