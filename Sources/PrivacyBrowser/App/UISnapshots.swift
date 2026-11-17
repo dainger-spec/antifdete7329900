@@ -916,6 +916,7 @@ enum UISnapshots {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
         problems += await welcome(into: folder)
+        problems += await firstRun(into: folder, model: lockModel)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()
         }.capture(into: folder)
@@ -953,6 +954,41 @@ enum UISnapshots {
         }.capture(into: folder)
         problems += await Shot(name: "welcome-first-small", size: CGSize(width: 900, height: 560), edges: true) {
             WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: settled)
+        }.capture(into: folder)
+        return problems
+    }
+
+    // MARK: The first run's steps
+
+    /// After the vault is made (FirstRun): the Touch ID offer — asked, on, not recognised — and the
+    /// protection setup — to install, waiting in System Settings, done, the camera not in the plan,
+    /// and inside a virtual machine; and the Profiles window with no profile yet and the guard missing.
+    private static func firstRun(into folder: URL, model: AppModel) async -> Int {
+        var problems = 0
+        let size = CGSize(width: 1180, height: 820)
+        let touchID: [(String, FirstRunTouchIDOutcome?)] = [
+            ("firstrun-touchid", nil), ("firstrun-touchid-on", .on),
+            ("firstrun-touchid-failed", .failed(L("firstRun.touchID.notRecognised"))),
+        ]
+        for (name, outcome) in touchID {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunTouchIDView(done: {}, preview: outcome).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        let protection: [(String, FirstRunProtectionView.Preview)] = [
+            ("firstrun-protection", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true)),
+            ("firstrun-protection-waiting", .init(guardState: .awaitingApproval, cameraState: .awaitingApproval, cameraAllowed: true)),
+            ("firstrun-protection-done", .init(guardState: .ready, cameraState: .active, cameraAllowed: true)),
+            ("firstrun-protection-no-camera-plan", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: false)),
+            ("firstrun-protection-vm", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true, virtualMachine: true)),
+        ]
+        for (name, preview) in protection {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunProtectionView(done: {}, preview: preview).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        problems += await Shot(name: "profiles-empty-guard-reminder", size: CGSize(width: 1180, height: 640), edges: true) {
+            ProfilesPreview(rows: [], sync: .notYet, guardNotice: .notInstalled)
         }.capture(into: folder)
         return problems
     }

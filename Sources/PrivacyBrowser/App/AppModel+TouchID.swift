@@ -70,6 +70,26 @@ extension AppModel {
         return nil
     }
 
+    /// The first run's offer (`FirstRunTouchIDView`), right after the vault was made with the
+    /// master password just typed — no second typing; the system's own Touch ID question first,
+    /// then what is kept, as Settings › Security keeps it. Off later in Settings › Security.
+    func turnTouchIDOnAtFirstRun() async -> FirstRunTouchIDOutcome {
+        guard TouchIDUnlock.isOfferedHere, let vault = repository?.vault else { return .failed(L("touchid.on.locked")) }
+        let sensor = TouchIDUnlock.sensor().sensor
+        guard sensor == .ready else { return .failed(TouchIDText.sensorNote(sensor) ?? L("touchid.sensor.notNow")) }
+        switch await TouchIDUnlock.confirm(reason: L("touchid.reason.turnOn"), cancelTitle: L("common.cancel")) {
+        case nil: return .cancelled
+        case false?: return .failed(L("firstRun.touchID.notRecognised"))
+        case true?: break
+        }
+        if let problem = keepForTouchID(vault) {
+            forgetTouchID()
+            return .failed(problem)
+        }
+        refreshTouchID()
+        return .on
+    }
+
     /// Settings › Security: turns it off. Nothing is asked: it only takes a way in away.
     func turnTouchIDOff() {
         forgetTouchID()

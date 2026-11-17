@@ -103,7 +103,7 @@ struct RootView: View {
     /// The window's screens: the first launch's, the lock screen, "Vault open", the profiles.
     private var screens: some View {
         ZStack {
-            if model.phase == .unlocked && showsProfiles {
+            if model.phase == .unlocked && showsProfiles && model.firstRunSteps.isEmpty {
                 ProfileListView().transition(.opacity)
             } else {
                 // One backdrop for setup, unlock and "open": its eclipses close in while the
@@ -118,19 +118,22 @@ struct RootView: View {
                             .transition(.opacity)
                     case .setup: SetupView().transition(.opacity)
                     case .locked: UnlockView().transition(.opacity)
+                    // The first run's Touch ID and protection steps, before the profiles (FirstRun).
+                    case .unlocked where !model.firstRunSteps.isEmpty: FirstRunView().transition(.opacity)
                     case .unlocked: VaultOpenView().transition(.opacity)
                     }
                 }
                 .transition(.opacity)
                 .overlay {
                     // "Vault open": a key or a click goes on to the profiles at once.
-                    if model.phase == .unlocked && !showsProfiles {
+                    if model.phase == .unlocked && !showsProfiles && model.firstRunSteps.isEmpty {
                         SkipLayer(skip: { showProfiles() })
                     }
                 }
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
+        .animation(Theme.appearAnimation, value: model.firstRunSteps)
         .animation(.easeOut(duration: 0.25), value: showsProfiles)
     }
 
@@ -464,7 +467,9 @@ struct ProfileListView: View {
                        },
                        guardNotice: model.guardNoticeHidden ? nil : WebRTCProtectionNotice.notice(
                            state: networkGuard.state, checking: networkGuard.checking,
-                           profilesWantingIt: model.details.values.contains(where: \.wantsNetworkGuard)),
+                           // Also before any profile wants it (area A, the owner: a fresh Mac was
+                           // never asked); never in a virtual machine (`AppModel.guardReminderWanted`).
+                           profilesWantingIt: model.guardReminderWanted),
                        openGuardSettings: {
                            model.settingsSection = .webRTC
                            openSettings()

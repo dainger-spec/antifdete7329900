@@ -129,6 +129,9 @@ final class AppModel: ObservableObject {
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
+    /// The first run's steps still to show after the vault was made, before the profiles: the
+    /// Touch ID offer and the system extensions' setup (`FirstRun`, `planFirstRun`).
+    @Published var firstRunSteps: [FirstRunStep] = []
     /// Safari on this Mac runs a newer engine than profiles, and OK was not yet pressed for this
     /// pair of versions (`EngineWarning`).
     @Published private(set) var engineWarning: EngineWarning.Facts?
@@ -311,6 +314,8 @@ final class AppModel: ObservableObject {
             }.value
             try self.didUnlock(vault)
             self.license.forgetComparisons()
+            // The first run goes on: Touch ID and the system extensions, offered once (`FirstRun`).
+            self.planFirstRun()
         }
     }
 
@@ -325,6 +330,7 @@ final class AppModel: ObservableObject {
             masterPasswordWarning = warning
             masterPasswordRefusal = nil
             license.forgetComparisons()
+            planFirstRun()
         } catch {
             showError(errorText(error))
         }
@@ -724,6 +730,8 @@ final class AppModel: ObservableObject {
     /// after every seal attempt is force-sealed instead of left decrypted (also when the quit
     /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
     func lock(forQuit: Bool = false) async {
+        // What the first run had left to offer is offered no more: the lock screen comes.
+        firstRunSteps = []
         if forQuit {
             recordProfilesToReopen()
             manager?.prepareForQuit()
