@@ -64,7 +64,7 @@ jobs:
         run: scripts/build-xray.sh --check-notices --out "$PWD/build/xray/xray-darwin-arm64"
       - name: The links' core tests on macOS (CryptoKit, Foundation's JSON)
         if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
-        run: swift test --filter 'ShareLinkTests|XrayLinkProxyTests|FormatPolicyTests|ProxyListTests|ProxyProbeTests|WebRTCGateTests'
+        run: swift test --filter 'ShareLinkTests|XrayLinkProxyTests|LocalRelayTests|FormatPolicyTests|ProxyListTests|ProxyProbeTests|WebRTCGateTests'
       - name: Every kind of link against a real Xray server (and the door check's control)
         if: ${{ !cancelled() && steps.xray.outcome == 'success' }}
         run: |

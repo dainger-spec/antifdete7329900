@@ -503,10 +503,11 @@ public enum AutomationProfiles {
             self.proxy = proxy.map { "\(Self.scheme(of: $0))://\($0.host):\($0.port)" }
         }
 
-        /// The scheme a proxy is written with here: a share link's protocol, never its secret.
+        /// The scheme a proxy is written with here: a share link's protocol, never its secret;
+        /// "openvpn" for an OpenVPN connection (its first server), which no SOCKS5 client could use.
         static func scheme(of proxy: ProxySettings) -> String {
             switch proxy.kind {
-            case .socks5: return "socks5"
+            case .socks5: return proxy.isOpenVPN ? "openvpn" : "socks5"
             case .httpConnect: return "http"
             case .xray: return proxy.shareLink?.scheme.prefix ?? "xray"
             }

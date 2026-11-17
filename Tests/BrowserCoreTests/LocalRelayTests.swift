@@ -165,6 +165,15 @@ final class LocalRelayTests: XCTestCase {
         XCTAssertNotEqual(ProxyLocation.endpoint(of: anonymous), "socks5://vpn.example.net:1194")
     }
 
+    /// The automation API names an OpenVPN connection as one, by its first server, never its login.
+    func testTheAutomationAPINamesAnOpenVPNConnectionAsOne() throws {
+        let summary = ProfileSummary(id: UUID(), name: "P", createdAt: Date(), lastLaunchedAt: nil, revision: 0)
+        let row = AutomationProfiles.Entry(summary, running: false, busy: false, proxy: try vpn())
+        XCTAssertEqual(row.proxy, "openvpn://vpn.example.net:1194")
+        let plainRow = AutomationProfiles.Entry(summary, running: false, busy: false, proxy: plain[0])
+        XCTAssertEqual(plainRow.proxy, "socks5://1.2.3.4:1080")
+    }
+
     /// WebRTC through an OpenVPN connection goes as through the SOCKS5 proxy its tunnel is, with UDP.
     func testTheGateTreatsAnOpenVPNConnectionAsTheSOCKS5ProxyItsTunnelIs() throws {
         let proxy = try vpn()
