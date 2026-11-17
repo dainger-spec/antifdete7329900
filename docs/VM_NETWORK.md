@@ -82,6 +82,17 @@ Where a connection may go:
 With no usable proxy (`VMNetUpstream.none`) every connection is reset at once; DHCP, DNS and ping
 still work, so the guest sees a network on which nothing answers.
 
+**A proxy that goes down while the machine runs** (or stops taking its sign-in) is the same: every
+connection is reset, nothing goes any other way. What changed (17 November) is that it is said.
+The stack counts the connections the proxy failed **by its own fault** one after another
+(`VMNetCounters.proxyFailuresInARow`, with `proxyTrouble`: `unreachable` — its address not found,
+its port not taking the connection, the connection closed or silent; `login` — SOCKS5's sign-in
+refused, or HTTP's 407; `notUnderstood` — an answer in another protocol). A proxy that answers and
+says it cannot reach the site (SOCKS5's "host unreachable", "connection refused", an HTTP status
+other than 407) is a working proxy: such a failure neither counts nor resets. The first tunnel the
+proxy carries again resets the count. The helper says the machine's proxy is the trouble after four
+in a row (`VMNetworkTrouble.ofMachineProxy`), in the machine's row and window.
+
 The guest never receives a connection: nothing outside can open one towards it.
 
 ### UDP: through the proxy's own relay
@@ -169,8 +180,9 @@ close(ends[1])                  // the descriptor stays the app's
 
 `guestMAC` must be the address of the virtual machine's network card (DHCP answers no other), and
 `counters()` may be asked at any time from any thread: bytes each way, connections opened, failed
-and open now, DNS queries and how many were blocked, datagrams dropped, questions for the time,
-and the UDP carried (datagrams and bytes each way, associations). `VMNetConfiguration.relaysUDP`
+and open now, the proxy's own failures in a row and why (above), DNS queries and how many were
+blocked, datagrams dropped, questions for the time, and the UDP carried (datagrams and bytes each
+way, associations). `VMNetConfiguration.relaysUDP`
 turns the guest's UDP through the proxy's relay on (above); it is off unless set.
 
 ### Where a machine connects, and blocking a host as it runs
@@ -258,7 +270,8 @@ a lost segment sent again, duplicates, data ahead of a gap, windows that shut an
 reset from either side, sequence numbers that wrap, and whole transfers over a wire that loses up
 to 30 % of its frames in both directions. Then the whole network over a real socket pair, with the
 test as a small guest and proxies on loopback that sign in, refuse, stall, talk nonsense or are not
-there. Last, the guest as an adversary: frames cut short, grown and changed byte by byte, and
+there — and that go away or come back while the network runs, counted as the proxy's trouble or
+not (a site the proxy cannot reach is not). Last, the guest as an adversary: frames cut short, grown and changed byte by byte, and
 plain noise, through every parser and through a running network — whatever the guest sends
 arrives in Lumen's own process, where a trap would end the app.
 

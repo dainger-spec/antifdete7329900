@@ -49,7 +49,11 @@ licensing, and has the machines.
    at one address.
 
 A build has the section only when it was made with `VM=1` (below). On a Mac with an Intel processor
-the section says that macOS runs as a guest only on Apple silicon.
+the section says that macOS runs as a guest only on Apple silicon. On a Mac that is itself a virtual
+machine (UTM, Parallels, a cloud Mac — `VMHostSupport`: the system's `kern.hv_vmm_present`, or a
+`VirtualMac` model) it says at once that machines need the Mac itself: macOS runs no virtual machine
+inside another. (Before 17 November the setup was offered there, and the helper said "This Mac
+cannot run virtual machines." in English once the person had asked for it.)
 
 ## What a machine costs
 
@@ -58,7 +62,7 @@ the section says that macOS runs as a guest only on Apple silicon.
 | Download | about 25 GB, once, from Apple; removed after the installation |
 | Base system on disk | about 20–25 GB |
 | Each machine on disk | what its macOS changes after the clone: usually 3–6 GB, growing with use |
-| Memory | 3, 4, 6 or 8 GB per profile, only while it runs; a new machine gets 8 on a Mac with 24 GB or more, 6 with 16, 4 below |
+| Memory | 3, 4, 6 or 8 GB per profile, only while it runs; a new machine gets 8 on a Mac with 24 GB or more, 6 with 16, 4 below. Machines running at once that leave the Mac less than 4 GB (two on a Mac with 8 GB) are said to above the list — a warning, not a refusal |
 | At once | **two** machines — Apple's limit for macOS guests on one Mac, enforced by the framework |
 | Start | 20–40 seconds, as a Mac starts |
 
@@ -151,7 +155,13 @@ What the helper does about the Mac and the app around it:
   not kept: its guide panel is part of it.
 - **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
   the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
-  request to shut down, and a helper whose main thread is stuck took neither.
+  request to shut down, and a helper whose main thread is stuck took neither. That end is not
+  reported as a failure. Force Stop while the proxy is still being checked calls the start off.
+- **What a stop part-way leaves.** An installation that failed or was called off (Cancel, Lock,
+  Quit) leaves no half-written base: while no `base.json` records a base, the app removes the
+  base's disk and firmware files at once — up to twenty gigabytes, often on a disk that was full —
+  and Continue installs again from the image, which stays. A machine's first copy of the base's
+  disk on a volume that cannot clone, stopped part-way, is removed by the helper before it says why.
 - **The base and a machine being made**: a machine not made yet is a copy of the base's disk,
   so it is not started while the base is open (checked again after its proxy was asked), and
   the base is not opened while such a machine is starting.
@@ -179,10 +189,17 @@ that the decision is tested on Linux too:
 | `image` | the restore image does not load | download it again, or another file |
 | `needsUpdate` | the installer wants this Mac's software updated first | Software Update, then Continue |
 | `installation` | the installation did not finish | Continue starts it over; nothing is downloaded again |
+| `noVirtualization` | the framework says this Mac runs no virtual machine at all — above all a Mac that is itself one | open Lumen on the Mac itself; otherwise restart the Mac |
 
-A failure of none of these kinds is said in the system's words alone, as before — among them the
-framework's "invalid configuration" and "not supported", each of which covers too many things for
-one piece of advice to be true of. The numbers are
+A failure of none of these kinds — among them the framework's "invalid configuration" and "not
+supported", each of which covers too many things for one piece of advice to be true of — leads with
+a sentence of the app's (something went wrong; try again, restart the Mac if it repeats, send the
+detail), and the system's words stay under it as the technical detail. (Until 17 November it was
+the system's words alone: English in a Russian interface, a domain and a number.) The question to
+Apple, the image's load and the installation fall back to `catalog`, `image` and `installation`
+where the framework's error is none of the kinds above. A helper that ended without a word is said
+as such, its exit status the detail — except after Force Stop, whose last resort (the system's kill
+after eight seconds) the person asked for. The numbers are
 Apple's as their headers have them; what a given failure on a Mac really carries is seen there —
 the detail line always shows the system's own words beside Lumen's.
 
@@ -266,6 +283,13 @@ updates through a paid proxy. docs/VM_NETWORK.md has the details and the tests.
 Before each start the proxy is checked, as a profile's is: where it comes out, its time zone, and
 whether it carries UDP. A machine whose proxy does not answer is not started. With "time zone and language follow the
 proxy" the profile takes them from that check.
+
+A proxy that goes down **while the machine runs**, or stops taking its user name and password,
+leaves the machine with no internet — nothing goes past it — and since 17 November its row and
+window say why (`VMNetworkTrouble.ownProxyUnreachable`, `ownProxyLogin`, `ownProxyNotUnderstood`):
+the network counts the connections the proxy failed by its own fault, one after another, and the
+helper names the trouble after four; a site the proxy says it cannot reach does not count. The first
+connection the proxy carries again clears it. A changed password takes at the machine's next start.
 
 A proxy reached over TLS (`https://`) is not supported for machines yet; the editor does not offer
 one, and `VMProfile.validate` refuses it. A proxy's "domains that go direct" are not applied in a
@@ -778,6 +802,14 @@ at a pause. The setup shows what the chunks that are here come to, not the parti
 - A chunk that does not come whole is asked for again after a moment; a network that brings
   nothing again and again is given up on, with what is here kept. A server's own trouble (5xx,
   408, 429) is tried again; any other refusal is said.
+- **A network that drops** (Wi-Fi gone, a VPN reconnecting) fails nothing: the requests wait for the
+  connection. After eight seconds without a byte the setup says it is waiting for the network — no
+  speed, no time left (`VMImageFetch.Progress.stalled`) — and goes on by itself once bytes come
+  again. (It used to show the last speed and time left for as long as the wait lasted.)
+- **A download that stopped** is said by what stopped it (`VMDownloadFailure`): a full disk (what
+  was fetched is kept: free room, then Continue), the network, Apple's refusal (with the other way to
+  the file), anything else — the system's words or the server's status under them as the technical
+  detail, never alone.
 - The connections go the way any app's do on this Mac — its VPN, its system proxy.
 
 ### A file the person has
