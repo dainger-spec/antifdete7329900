@@ -214,7 +214,7 @@ struct FirstRunProtectionView: View {
         }
     }
 
-    private func guardStatus(_ state: NetworkGuardState) -> FirstRunCard.Status {
+    private func guardStatus(_ state: NetworkGuardState) -> FirstRunCardStatus {
         switch state {
         case .ready, .unproven: return .done
         case .awaitingApproval, .restartNeeded: return .waiting
@@ -258,7 +258,7 @@ struct FirstRunProtectionView: View {
         }
     }
 
-    private func cameraStatus(_ state: SystemCamera.State) -> FirstRunCard.Status {
+    private func cameraStatus(_ state: SystemCamera.State) -> FirstRunCardStatus {
         switch state {
         case .active: return .done
         case .installing, .awaitingApproval, .restartNeeded: return .waiting
@@ -269,8 +269,11 @@ struct FirstRunProtectionView: View {
 
 /// One thing to set up: its symbol, title, a sentence that says what it does or what to click,
 /// a mark (to do, waiting, done — green — or not in the plan), and its buttons.
+/// Where one thing to set up stands (`FirstRunCard`).
+enum FirstRunCardStatus { case todo, waiting, done, unavailable }
+
 struct FirstRunCard<Actions: View>: View {
-    enum Status { case todo, waiting, done, unavailable }
+    typealias Status = FirstRunCardStatus
 
     let symbol: String
     let title: String
