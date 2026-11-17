@@ -251,7 +251,8 @@ final class FormatPolicyTests: XCTestCase {
         try assertRefused("index.bin", keeps: url) { try repository.replaceIndex(incoming) }
     }
 
-    /// `config.bin` is at format 2 since a profile's proxy can be an OpenVPN connection (`ProfileConfiguration.format`).
+    /// `config.bin` is at format 2 since a profile's proxy can be reached through a relay the app
+    /// runs: an OpenVPN connection or a share link's (`ProfileConfiguration.format`).
     func testSettingsOfANewerVersion() throws {
         let url = repository.configURL(for: id)
         try SecureFile.write(AEAD.seal(newerThan2, key: key, aad: ProfileRepository.configAAD(id)), to: url)

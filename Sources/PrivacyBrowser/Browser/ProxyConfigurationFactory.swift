@@ -31,6 +31,13 @@ enum ProxyConfigurationFactory {
     static func make(_ settings: ProxySettings?) throws -> [ProxyConfiguration] {
         guard let settings else { return [] }
         try settings.validate() // a bare host name or IP, port 1–65535, consistent credentials
+        // A share link's proxy is its relay (SOCKS5 on 127.0.0.1, `ProxyRoutes`) — and with no relay
+        // running for it, a proxy that does not exist: never `[]`, which would be direct, and never
+        // the link's server, which only the relay may talk to (docs/TUNNEL.md, "Links").
+        if settings.kind == .xray {
+            guard let route = ProxyRoutes.shared.connectable(settings) else { return [deadProxy] }
+            return try make(route)
+        }
         guard let port = NWEndpoint.Port(rawValue: UInt16(settings.port)) else {
             throw CoreError.invalidConfiguration("proxy port \(settings.port)")
         }
@@ -43,6 +50,9 @@ enum ProxyConfigurationFactory {
                                                tlsOptions: settings.tlsToProxy ? NWProtocolTLS.Options() : nil)
         case .socks5:
             configuration = ProxyConfiguration(socksv5Proxy: endpoint)
+        case .xray:
+            // Taken to its relay above.
+            return [deadProxy]
         }
         if let username = settings.username, let password = settings.password {
             // Also answered by BrowserTab when WebKit forwards the proxy's auth challenge.
@@ -56,6 +66,13 @@ enum ProxyConfigurationFactory {
     /// For the app's own requests about a profile's proxy (where it exits): through the proxy
     /// whatever the profile's bypass list says. A request that went around it would come from this
     /// Mac's own address — and be answered with it.
+    /// A proxy nothing listens at, failover off: every load through it fails.
+    static var deadProxy: ProxyConfiguration {
+        var dead = ProxyConfiguration(httpCONNECTProxy: .hostPort(host: "127.0.0.1", port: 1))
+        dead.allowFailover = false
+        return dead
+    }
+
     static func makeWithoutBypass(_ settings: ProxySettings) throws -> [ProxyConfiguration] {
         var settings = settings
         settings.excludedDomains = []

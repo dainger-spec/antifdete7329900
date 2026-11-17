@@ -234,6 +234,7 @@ extension ProxyListImport.Reason {
         case .missingPort: return L("proxies.reason.missingPort")
         case let .duplicate(line): return String(format: L("proxies.reason.duplicate"), line)
         case let .tooMany(limit): return String(format: L("proxies.reason.tooMany"), limit)
+        case let .shareLink(problem): return shareLinkText(problem)
         case let .unreadable(problem):
             switch problem {
             case .empty, .containsWhitespace: return L("proxies.reason.whitespace")

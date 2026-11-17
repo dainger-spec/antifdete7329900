@@ -23,6 +23,8 @@
 //   ObjCExceptions  macOS only: an Objective-C `@try` around a call, for Safari's code called
 //                   from Swift tasks (PBCatchException).
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
+//   lumen-xray-config  The relay's configuration for a share link (BrowserCore's XrayConfig), for
+//                   scripts/xray_relay_check.py. macOS and Linux; not in the app.
 //   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
 //                   with BrowserCore's own checks. macOS and Linux.
 //   UpdateInstaller macOS only: replaces the app with a checked release (code signature, process
@@ -129,6 +131,14 @@ var targets: [Target] = [
         name: "pbupdate",
         dependencies: ["BrowserCore"],
         path: "Sources/pbupdate"
+    ),
+    // The relay's configuration for a share link, as the app gives it to Xray (docs/TUNNEL.md,
+    // "Links"): for scripts/xray_relay_check.py, which runs it against real Xray servers of every
+    // protocol. macOS and Linux; never in the app.
+    .executableTarget(
+        name: "lumen-xray-config",
+        dependencies: ["BrowserCore"],
+        path: "Sources/lumen-xray-config"
     ),
 ]
 

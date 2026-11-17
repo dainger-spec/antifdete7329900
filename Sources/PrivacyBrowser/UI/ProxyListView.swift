@@ -738,7 +738,7 @@ struct ProxyExitLabel: View {
 
 extension ProxyListEntry {
     /// "SOCKS5", "HTTP", or "HTTPS" for TLS to the proxy.
-    var kindName: String { ProxyReport.kindName(proxy.kind, tls: proxy.tlsToProxy) }
+    var kindName: String { ProxyReport.kindName(of: proxy) }
 
     /// The line under the name: the address (when a label is the name) and the user name.
     var detailLine: String {

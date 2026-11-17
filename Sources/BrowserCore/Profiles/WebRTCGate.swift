@@ -56,7 +56,7 @@ public enum WebRTCProtectionNotice: String, Equatable, Sendable, CaseIterable {
 
     /// A profile that would carry WebRTC through its proxy if the guard worked.
     public static func wants(proxyKind: ProxySettings.Kind?, webRTC: WebRTCPolicy) -> Bool {
-        proxyKind == .socks5 && webRTC != .disabled
+        (proxyKind == .socks5 || proxyKind == .xray) && webRTC != .disabled
     }
 }
 
@@ -121,7 +121,7 @@ public enum WebRTCGate {
         if policy == .disabled { return .off(nil) }
         guard let proxy else { return .native(policy) }
         // What the person can change about the proxy comes first: no guard makes HTTP carry UDP.
-        guard proxy.kind == .socks5 else { return .off(.httpProxy) }
+        guard proxy.carriesUDP else { return .off(.httpProxy) }
         switch guardState {
         case .notInBuild: return .off(.guardNotInBuild)
         case .notInstalled: return .off(.guardNotInstalled)
@@ -145,7 +145,7 @@ public enum WebRTCGate {
     /// Whether a launch needs to ask anything at all (the guard, the proxy's UDP): only a profile
     /// with a SOCKS5 proxy whose WebRTC is not Disabled.
     public static func wantsRelay(policy: WebRTCPolicy, proxy: ProxySettings?) -> Bool {
-        policy != .disabled && proxy?.kind == .socks5
+        policy != .disabled && proxy?.carriesUDP == true
     }
 
     /// Whether WebRTC that must not connect (`decide` said `.off`) can stay in the pages, as Safari

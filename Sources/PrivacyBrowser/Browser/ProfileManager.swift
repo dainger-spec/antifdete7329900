@@ -204,12 +204,18 @@ final class ProfileManager: ObservableObject {
         case stillSealing(name: String)
         /// The profile's OpenVPN connection did not come up (docs/OPENVPN.md): why, in words.
         case openVPN(name: String, reason: String)
+        /// The profile's proxy is a share link, and this build has no relay for it (`XrayRelays`).
+        case relayNotInBuild(name: String)
+        /// The profile's proxy is a share link, and its relay did not start.
+        case relayDidNotStart(name: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
             case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
             case .stillSealing(let name): return String(format: L("launch.error.stillSealing"), name)
             case .openVPN(let name, let reason): return String(format: L("launch.error.openVPN"), name, reason)
+            case .relayNotInBuild(let name): return String(format: L("launch.error.relayNotInBuild"), name)
+            case .relayDidNotStart(let name): return String(format: L("launch.error.relayDidNotStart"), name)
             }
         }
     }
@@ -399,6 +405,16 @@ final class ProfileManager: ObservableObject {
         defer {
             if tunnelProxy != nil, children[id] == nil, sessions[id] == nil { OpenVPNTunnels.shared.stop(profile: id) }
         }
+        // A share link's proxy is reached through its relay alone (`XrayRelays`, docs/TUNNEL.md,
+        // "Links"): it runs before anything asks the proxy — the probe, the lookup, the process — and
+        // a launch that does not go on stops it again.
+        var relayKept = false
+        if let proxy = stored.proxy, proxy.kind == .xray, !runsInProfileProcess {
+            try await startRelay(for: id, proxy: proxy, name: summary.name)
+        }
+        defer {
+            if stored.proxy?.kind == .xray, !runsInProfileProcess, !relayKept { XrayRelays.shared.stop(owner: id) }
+        }
         // Settings → Proxies → "Do not start it": the proxy is asked before anything is decrypted,
         // and a profile whose proxy does not work stays stopped; the Profiles window says why.
         var probedBeforeLaunch = false
@@ -444,6 +460,7 @@ final class ProfileManager: ObservableObject {
             }
             try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow, proxyLocationFound: foundNow,
                                   tunnelProxy: tunnelProxy)
+            relayKept = true
             return
         }
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
@@ -591,6 +608,8 @@ final class ProfileManager: ObservableObject {
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
         sessions[id] = session
+        // A profile in this process keeps its relay until it stops (`stop`).
+        relayKept = true
         // Before any web view of this process exists: in a profile's own process every web view is
         // built with this session's data store, which is what carries its proxy (ProfileNetworkGuard).
         ProfileNetworkGuard.register(session: session)
@@ -689,7 +708,8 @@ final class ProfileManager: ObservableObject {
             menusInAppLanguage: stored.menusInAppLanguage,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive,
-            tunnelProxy: tunnelProxy)
+            tunnelProxy: tunnelProxy,
+            routes: Self.routes(for: stored.proxy, owner: id))
         // The process object is held by `children` and, until its exit has been handled, by its own
         // termination handler — never by what it calls: each of these held it, and it and its
         // pipes were never freed (`ProfileProcess.didExit`).
@@ -780,6 +800,8 @@ final class ProfileManager: ObservableObject {
             self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
             OpenVPNTunnels.shared.stop(profile: id)
+            // Its link's relay, once nothing of the process is left to use it.
+            XrayRelays.shared.stop(owner: id)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
             self.runningProfileIDs.remove(id)
@@ -834,10 +856,18 @@ final class ProfileManager: ObservableObject {
     /// that must not connect: kept in the pages, connecting nowhere, once the guard holds the process
     /// to its proxy (`WebRTCGate.silence`), and otherwise off in the engine — said once, where there
     /// is something to say (`WebRTCGate.tells`).
-    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy,
+    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy storedProxy: ProxySettings, policy: WebRTCPolicy,
                               automatic: Bool = false, userAgent: String) async {
         // Once asking macOS is over (the app just started, the guard was just installed).
         let guardState = await NetworkGuard.shared.settledState()
+        // What the process is held to and the relay sends through: a share link's relay, as the
+        // SOCKS5 proxy it is to this Mac (`ProxyRoutes`); any other proxy as it is. A link without a
+        // running relay has nothing to hold to: WebRTC is off.
+        guard let reach = Self.reach(of: storedProxy, owner: id) else {
+            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: .notRegistered)))
+            return
+        }
+        let proxy = reach
         // The proxy is asked about UDP only when nothing else rules the relay out.
         var udp = ProxyUDPSupport.unknown
         var exit: IPAddr?
@@ -932,6 +962,48 @@ final class ProfileManager: ObservableObject {
             return (.elsewhere, nil)
         }
         return (.supported, exit)
+    }
+
+    // MARK: A share link's relay
+
+    /// Starts the relay of `id`'s link (`XrayRelays`). Should it end while the profile runs and not
+    /// start again, the profile stops, and the person is told: its pages fail meanwhile, never going
+    /// another way (docs/TUNNEL.md, "Links").
+    private func startRelay(for id: UUID, proxy: ProxySettings, name: String) async throws {
+        do {
+            try await XrayRelays.shared.start(for: proxy, owner: id) { [weak self] _ in
+                guard let self, self.isRunning(id) || self.busyProfileIDs.contains(id) else { return }
+                self.log.error("The relay of \(id.uuidString, privacy: .public) ended and did not start again: the profile stops")
+                self.onError?(String(format: L("launch.relayEnded"), name))
+                let grace = Self.relayDeathGrace
+                Task {
+                    if grace > 0 { try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000)) }
+                    try? await self.stop(id)
+                }
+            }
+        } catch XrayRelays.StartError.notInBuild {
+            throw LaunchError.relayNotInBuild(name: name)
+        } catch {
+            log.error("The relay of \(id.uuidString, privacy: .public) did not start: \(String(describing: error), privacy: .private)")
+            throw LaunchError.relayDidNotStart(name: name)
+        }
+    }
+
+    /// How long a profile whose relay died runs on before it is stopped: none. The check of links
+    /// (`XrayCheck`) leaves it a few seconds, to see its pages fail meanwhile, never going around.
+    static var relayDeathGrace: TimeInterval = 0
+
+    /// The routes a profile's own process is given with its grant: its link's relay, if it has one.
+    static func routes(for proxy: ProxySettings?, owner: UUID) -> [String: ProxyRoutes.Route] {
+        guard let proxy, proxy.kind == .xray, let link = proxy.link, let route = XrayRelays.shared.route(owner: owner) else { return [:] }
+        return [link: route]
+    }
+
+    /// What `id`'s process is held to and its WebRTC sent through: its own link relay, as the SOCKS5
+    /// proxy it is to this Mac, or any other proxy as it is; nil for a link whose relay is not running.
+    static func reach(of proxy: ProxySettings, owner: UUID) -> ProxySettings? {
+        guard proxy.kind == .xray else { return proxy }
+        return XrayRelays.shared.route(owner: owner).map { ProxyRoutes.socks5($0, excludedDomains: proxy.excludedDomains) }
     }
 
     /// The relay and the guard's hold of a profile whose process ended or was stopped.
@@ -1506,6 +1578,8 @@ final class ProfileManager: ObservableObject {
             await child.waitUntilExit(timeout: 30)
             // Its tunnel, once nothing of the profile can use it any more.
             OpenVPNTunnels.shared.stop(profile: id)
+            // Its link's relay: only now, with nothing of the process left to send to its port.
+            XrayRelays.shared.stop(owner: id)
             if let status = child.terminationStatus { onChildStopped?(id, status) }
             if let key = try? repository.profileKey(for: id) {
                 try safariHomeVault.seal(profileID: id, key: key)
@@ -1546,6 +1620,7 @@ final class ProfileManager: ObservableObject {
         }
         cookieSnapshots.stopWatching(id)
         session.shutDown()
+        XrayRelays.shared.stop(owner: id)
         rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
                          emptyForgets: SafariChromeHost.isHosting)
         // `session` is now the last reference; it is released when this scope ends, but its

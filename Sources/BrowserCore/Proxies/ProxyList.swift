@@ -252,6 +252,11 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// type; a new password is the same proxy). Another user name is another proxy: gateway
     /// providers pick the exit — the country, the session — from it.
     public static func identity(of proxy: ProxySettings) -> String {
+        // A share link's server is its account on it: the protocol, the server and the user's id or
+        // password (another id on the same server is another proxy, as another user name is).
+        if proxy.kind == .xray {
+            return "xray\u{0}" + (proxy.shareLink?.identity ?? proxy.link ?? "")
+        }
         let base = [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
         // Two OpenVPN configurations of the same server and login are two connections (other
         // certificates, keys, transports): told apart by their configuration.
@@ -338,7 +343,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var result = result
         let before = entries[index].proxy
         let kinds = result.diagnosis?.kinds ?? []
-        if let found = kinds.first, !entries[index].kindKnown || !kinds.contains(before.kind) {
+        // A link's proxy is checked through its relay, which answers as SOCKS5: that is not its type.
+        if let found = kinds.first, before.kind != .xray, !entries[index].kindKnown || !kinds.contains(before.kind) {
             result.kindFinding = entries[index].kindKnown ? .corrected(from: before.kind) : .found
             entries[index].proxy.kind = found
             if found == .socks5 { entries[index].proxy.tlsToProxy = false }
@@ -428,7 +434,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// changed in the profile's editor — and the one never overwrites the other.
     public static func sameConnection(_ a: ProxySettings, _ b: ProxySettings) -> Bool {
         identity(of: a) == identity(of: b) && a.kind == b.kind && a.tlsToProxy == b.tlsToProxy
-            && (a.password ?? "") == (b.password ?? "") && a.openVPN == b.openVPN
+            && (a.password ?? "") == (b.password ?? "") && a.openVPN == b.openVPN && a.link == b.link
     }
 
     /// The entries as text, one per line, in the form the import reads back
@@ -519,11 +525,12 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// link (or changes its IP at launch). A version from before origins would read a service's
     /// proxy as the user's and write it back without its origin, and one from before IP changes
     /// would write a proxy back without its link: each is to refuse the file instead
-    /// (docs/UPDATES.md, R4). 4 once one is an OpenVPN connection (`ProxySettings.openVPN`): a
-    /// version from before them would read it as SOCKS5 at the VPN server and drop its configuration
-    /// when it saves the list.
+    /// (docs/UPDATES.md, R4). 4 once one is reached through a relay the app runs
+    /// (`ProxySettings.localRelay`): a version from before OpenVPN connections would read one as
+    /// SOCKS5 at the VPN server and drop its configuration when it saves the list, and one from before
+    /// share links skips a link's entry and would drop it the same way.
     static func format(for entries: [ProxyListEntry]) -> Int {
-        if entries.contains(where: { $0.proxy.openVPN != nil }) { return 4 }
+        if entries.contains(where: { $0.proxy.localRelay != nil }) { return 4 }
         if entries.contains(where: \.hasIPChange) { return 3 }
         return entries.contains { $0.origin != .user } ? 2 : 1
     }

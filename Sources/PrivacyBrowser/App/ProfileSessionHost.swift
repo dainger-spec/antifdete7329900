@@ -63,6 +63,15 @@ enum ProfileSessionHost {
                 exit(2)
             }
         }
+        // The routes to the relays the manager runs for a share link's proxy (`ProxyRoutes`), right
+        // after the grant: this process reaches a link's server through them alone.
+        do {
+            let routes = try ProxyRoutes.readRecord { count in try? FileHandle.standardInput.read(upToCount: count) }
+            for (link, route) in routes { ProxyRoutes.shared.add(route, for: link, id: UUID()) }
+        } catch {
+            FileHandle.standardError.write(Data("--profile-session expects the proxy routes after its grant\n".utf8))
+            exit(2)
+        }
         // The profile's own settings first: what this process may send, and through which proxy,
         // is decided before anything in it can send at all — before Safari's frameworks, which
         // start clients of their own as soon as they load, are even loaded (ProfileNetworkGuard).

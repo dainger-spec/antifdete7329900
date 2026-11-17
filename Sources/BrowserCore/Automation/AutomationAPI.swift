@@ -500,7 +500,16 @@ public enum AutomationProfiles {
             self.running = running
             self.busy = busy
             lastLaunchedAt = summary.lastLaunchedAt
-            self.proxy = proxy.map { "\($0.kind == .socks5 ? "socks5" : "http")://\($0.host):\($0.port)" }
+            self.proxy = proxy.map { "\(Self.scheme(of: $0))://\($0.host):\($0.port)" }
+        }
+
+        /// The scheme a proxy is written with here: a share link's protocol, never its secret.
+        static func scheme(of proxy: ProxySettings) -> String {
+            switch proxy.kind {
+            case .socks5: return "socks5"
+            case .httpConnect: return "http"
+            case .xray: return proxy.shareLink?.scheme.prefix ?? "xray"
+            }
         }
     }
 

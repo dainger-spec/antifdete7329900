@@ -468,7 +468,8 @@ public final class ProfileRepository: @unchecked Sendable {
     }
 
     /// The newest format of `config.bin` this version reads and writes (docs/UPDATES.md §4): 2 once
-    /// its proxy is an OpenVPN connection (`ProfileConfiguration.format`).
+    /// its proxy is reached through a relay the app runs — an OpenVPN connection or a share link's
+    /// (`ProxySettings.localRelay`, `ProfileConfiguration.format`).
     static let configurationFormat = 2
 
     /// A configuration's JSON, refused when a newer version wrote it: its decoder is tolerant, so

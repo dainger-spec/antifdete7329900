@@ -93,13 +93,14 @@ final class WebRTCGateTests: XCTestCase {
         XCTAssertEqual(Set(broken.values), Set(WebRTCProtectionNotice.allCases))
     }
 
-    /// Wanted: a SOCKS5 proxy with WebRTC not switched off; an HTTP proxy, no proxy, or WebRTC off: not.
+    /// Wanted: a SOCKS5 proxy (or a share link's, reached through its relay as one) with WebRTC not
+    /// switched off; an HTTP proxy, no proxy, or WebRTC off: not.
     func testAProfileWantsTheProtectionOnlyWithSOCKS5AndWebRTCOn() {
         let kinds: [ProxySettings.Kind?] = [nil] + ProxySettings.Kind.allCases.map { $0 }
         for kind in kinds {
             for policy in WebRTCPolicy.allCases {
                 XCTAssertEqual(WebRTCProtectionNotice.wants(proxyKind: kind, webRTC: policy),
-                               kind == .socks5 && policy != .disabled, "\(String(describing: kind)) \(policy)")
+                               (kind == .socks5 || kind == .xray) && policy != .disabled, "\(String(describing: kind)) \(policy)")
             }
         }
     }

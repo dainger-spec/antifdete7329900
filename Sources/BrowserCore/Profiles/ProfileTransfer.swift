@@ -43,9 +43,11 @@ public enum ProfileTransfer {
     /// 3: 2 with a one-time code's generator in a saved login (`PasswordEntry.totp`), which a
     /// version that reads only 2 would import without. Written only for a profile that has one;
     /// any other profile's export is format 2, as before.
-    /// 4: its proxy is an OpenVPN connection (`ProxySettings.openVPN`), which a version that reads only
-    /// 3 would import as SOCKS5 at the VPN server, without its configuration: it says the file is a
-    /// newer version's instead. Written only for such a profile.
+    /// 4: its proxy is reached through a relay the app runs (`ProxySettings.localRelay`): an OpenVPN
+    /// connection (`ProxySettings.openVPN`), which a version that reads only 3 would import as SOCKS5
+    /// at the VPN server, without its configuration, or a share link's (`ProxySettings.Kind.xray`),
+    /// which it could not decode. It says the file is a newer version's instead. Written only for
+    /// such a profile.
     static let format = 4
     /// The formats this version imports (R1).
     static let readableFormats = 1...format
@@ -189,7 +191,7 @@ public enum ProfileTransfer {
 
     /// The oldest format that holds what this export carries (the formats above).
     static func exportFormat(configuration: ProfileConfiguration, documents: Documents) -> Int {
-        if configuration.proxy?.openVPN != nil { return 4 }
+        if configuration.proxy?.localRelay != nil { return 4 }
         return documents.passwords.contains { $0.totp != nil } ? 3 : 2
     }
 

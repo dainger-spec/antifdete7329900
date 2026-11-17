@@ -43,6 +43,11 @@
 #   OVPN=1                     with OpenVPN connections (docs/OPENVPN.md): build-app.sh builds openvpn
 #                              from pinned sources and puts it and LumenTunnel into the app, with their
 #                              licenses and sources (GPL-2.0: docs/LICENSING.md). Needs no profile.
+#   XRAY=1                     with the relay of VLESS, VMess, Trojan and Shadowsocks links
+#                              (docs/TUNNEL.md, "Links"): build-app.sh builds Xray-core from its
+#                              pinned source (scripts/build-xray.sh: git and Go on this Mac), checks
+#                              it against scripts/xray.lock and signs it as Contents/MacOS/LumenXray
+#                              with no entitlement. Without XRAY a link's profile does not start.
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
@@ -369,6 +374,19 @@ if [[ "${VM:-0}" == "1" ]]; then
     || { echo "error: the machines' helper does not start: no release" >&2; exit 1; }
   [[ -f "$APP/Contents/Resources/VMGuest/lumen-guest.sh" ]] \
     || { echo "error: VM=1, but the app has no tools for the machines' macOS (Resources/VMGuest)" >&2; exit 1; }
+fi
+
+# With the links' relay (XRAY=1): Xray as pinned, signed with no entitlement, and it starts.
+if [[ "${XRAY:-0}" == "1" ]]; then
+  XRAY_HELPER="$APP/Contents/MacOS/LumenXray"
+  [[ -x "$XRAY_HELPER" ]] || { echo "error: XRAY=1, but the app has no links' relay (Contents/MacOS/LumenXray)" >&2; exit 1; }
+  if codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | grep -F "<key>" >/dev/null; then
+    echo "error: the links' relay is signed with an entitlement: it holds none" >&2; exit 1
+  fi
+  [[ "$(codesign -d --verbose=2 "$XRAY_HELPER" 2>&1 | awk '/^CodeDirectory/ { print }')" == *"runtime"* ]] \
+    || { echo "error: the links' relay is not signed with the hardened runtime" >&2; exit 1; }
+  "$XRAY_HELPER" version >/dev/null || { echo "error: the links' relay does not start: no release" >&2; exit 1; }
+  [[ -f "$APP/Contents/Resources/Xray-NOTICE.txt" ]] || { echo "error: XRAY=1, but the relay's licences are not in the app" >&2; exit 1; }
 fi
 
 # 2. Notarize and staple (an Apple account's notary profile and a Developer ID signature).

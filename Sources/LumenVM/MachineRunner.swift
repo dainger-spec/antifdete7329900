@@ -107,6 +107,9 @@ final class MachineNetwork {
                 switch proxy.kind {
                 case .socks5: upstream = .socks5(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
                 case .httpConnect: upstream = .httpConnect(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
+                // The app gives a link's machine its relay, a SOCKS5 proxy; a link itself reaches
+                // nothing from here: no way out at all.
+                case .xray: upstream = .none
                 }
             }
         case .closed, .absent:

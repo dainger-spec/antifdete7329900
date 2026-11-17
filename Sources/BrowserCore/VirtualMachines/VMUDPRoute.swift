@@ -28,7 +28,7 @@ public enum VMUDPRoute: String, Codable, Equatable, Sendable, CaseIterable {
     /// The route for a machine with `proxy`, from what the check before its start found of the
     /// proxy's UDP (`check.udp`; nil: not tried, or a dead proxy).
     public static func forProxy(_ proxy: ProxySettings, check: ProxyCheckResult?) -> VMUDPRoute {
-        guard proxy.kind == .socks5, !proxy.tlsToProxy else { return .httpProxy }
+        guard proxy.carriesUDP, !proxy.tlsToProxy else { return .httpProxy }
         guard let check, check.isAlive else { return .unknown }
         switch check.udp {
         case .supported?: return .throughProxy
