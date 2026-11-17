@@ -1297,7 +1297,7 @@ final class AppModel: ObservableObject {
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {
-            if !quiet { showError(error.localizedDescription) }
+            if !quiet { showError(named(String(format: L("warmup.error.planNotSaved"), errorText(error)), for: id)) }
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
@@ -1348,7 +1348,7 @@ final class AppModel: ObservableObject {
             objectWillChange.send()
             return true
         } catch {
-            showError(error.localizedDescription)
+            showError(String(format: L("warmup.templates.saveFailed"), errorText(error)))
             return false
         }
     }
@@ -1361,7 +1361,7 @@ final class AppModel: ObservableObject {
             try stored.save(to: vault)
             objectWillChange.send()
         } catch {
-            showError(error.localizedDescription)
+            showError(String(format: L("warmup.templates.deleteFailed"), errorText(error)))
         }
     }
 

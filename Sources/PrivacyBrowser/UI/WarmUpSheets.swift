@@ -479,6 +479,7 @@ struct WarmUpTemplateEditor: View {
     @State private var countryCode = ""
     @State private var importing = false
     @State private var loaded = false
+    @State private var confirmingDelete = false
 
     private var reading: (pages: [WarmUpPlan.Page], problems: [WarmUpPlan.Problem]) {
         WarmUpPlan(addresses: addresses).pages()
@@ -551,8 +552,14 @@ struct WarmUpTemplateEditor: View {
             .frame(maxHeight: .infinity, alignment: .top)
             SheetFooter(leading: {
                 if let template {
-                    Button(L("warm.own.delete")) { actions.deleteTemplate(template.id); dismiss() }
+                    Button(L("warm.own.delete")) { confirmingDelete = true }
                         .buttonStyle(.lumenDestructive)
+                        .confirmationDialog(String(format: L("warm.own.delete.title"), template.name), isPresented: $confirmingDelete,
+                                            titleVisibility: .visible) {
+                            Button(L("warm.own.delete.confirm"), role: .destructive) { actions.deleteTemplate(template.id); dismiss() }
+                        } message: {
+                            Text(L("warm.own.delete.message"))
+                        }
                 }
             }, buttons: {
                 Button(L("common.cancel")) { dismiss() }
