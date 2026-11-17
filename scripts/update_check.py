@@ -25,7 +25,9 @@ each packet's process (pktap): no request with automatic checks off — checked 
 whose control is the first request once they are on — the older build never offered, the stale and
 forged appcasts and the changed archive refused, the release downloaded, nothing handed over while
 a profile with a window and a warm-up without one run, then the quit path, the gate and the real
-installer helper. This script waits for the swap (the old build's folder holds build 2), looks at
+installer helper. The moment the old build has quit, this script opens it again through
+LaunchServices — a person clicking Lumen in the Dock while it is being replaced —: that start must
+step aside (UpdateLaunchGuard), and the install go on. This script waits for the swap (the old build's folder holds build 2), looks at
 the vault on disk at that moment, waits for the new build to be started by the helper and for the
 helper's own word ("Update: installed") in the unified log, quits it, and runs the new build's
 `--selftest-updates verify`: the old build's vault, profiles and data open. Every request the feed
@@ -352,6 +354,13 @@ def main():
         check("the old build's scenarios passed", code == 0 and "SELFTEST-UPDATES run PASSED" in log, f"exit {code}")
         profile_ids = re.findall(r"INFO profile \S+ ([0-9A-F-]{36})", log)
         handed = "INFO handed-over" in log
+        if handed:
+            # A person opening Lumen again the moment it quit — a Dock click — while the installer
+            # waits and checks: that start must step aside (UpdateLaunchGuard) and leave the install
+            # to go on, not end it (0.1.18's tester: "the app was started again before it could be
+            # replaced"). Through LaunchServices, as a click opens it.
+            print("+ open " + old_app, flush=True)
+            subprocess.run(["open", old_app])
 
         # The swap: the old build's folder now holds the new one.
         swapped = handed and wait(180, lambda: build_number(old_app) == NEW[1])
@@ -373,6 +382,18 @@ def main():
         print(said[-4000:])
         print("::endgroup::", flush=True)
         check("the installer says it installed the update", "Update: installed" in said)
+        stepped = subprocess.run(["log", "show", "--last", "15m", "--style", "compact", "--predicate",
+                                  'subsystem == "PrivacyBrowser" AND category == "Updates"'],
+                                 capture_output=True, text=True).stdout
+        print("::group::the app's update log", flush=True)
+        print("\n".join(line for line in stepped.splitlines() if "step" in line or "Update" in line)[-3000:])
+        print("::endgroup::", flush=True)
+        check("Lumen, opened again during the install, stepped aside and the install went on",
+              handed and "steps aside" in stepped and "Update: installed" in said)
+        staging = os.path.join(home, f"Library/Caches/{BUNDLE_ID}.update")
+        check("the installer left no marker and no relaunch wish behind",
+              not os.path.exists(os.path.join(staging, "installing.json")) and not os.path.exists(os.path.join(staging, "relaunch.json")),
+              ", ".join(n for n in ("installing.json", "relaunch.json") if os.path.exists(os.path.join(staging, n))))
         if relaunched:
             # Nothing of it runs (its own vault is elsewhere and locked): SIGTERM, not an Apple Event,
             # which would wait on an automation prompt no one answers here.
