@@ -3909,3 +3909,4 @@
 "openvpn.import.username" = "Имя пользователя";
 "openvpn.import.password" = "Пароль";
 "openvpn.import.servers.more" = "%1$@ и ещё серверов: %2$ld";
+"vm.error.openVPN" = "Не запущена: виртуальная машина пока не может использовать подключение OpenVPN. Укажите ей прокси.";

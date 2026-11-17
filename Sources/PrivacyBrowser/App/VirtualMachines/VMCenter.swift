@@ -856,6 +856,12 @@ final class VMCenter: ObservableObject {
             }
             return
         }
+        // An OpenVPN connection is a profile's (docs/OPENVPN.md): a machine is not given one, and
+        // does not start rather than reach for the VPN server as if it were a proxy.
+        if proxy.isOpenVPN {
+            problems[id] = L("vm.error.openVPN")
+            return
+        }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in
             let check = await VMCenter.checkProxy(proxy)
