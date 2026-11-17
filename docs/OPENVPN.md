@@ -1,9 +1,30 @@
 # OpenVPN connections: a profile through a provider's .ovpn
 
 Many mobile-proxy sellers deliver access as an OpenVPN configuration (`.ovpn`) rather than a proxy
-address. Lumen takes such a file as an entry of Settings › Proxies, and a profile given it goes
+address. Lumen takes such a file as an entry of the proxy list, and a profile given it goes
 through that VPN and nothing else — without root, without a system VPN, and without changing
 anything of this Mac's network.
+
+## Where it is added (0.1.19)
+
+Until 0.1.18 the file was taken only from the Proxies section's ⋯ → Add OpenVPN…, which the owner
+did not find. Now every way in leads to the same sheet (`OpenVPNImportView`):
+
+- **Proxies → Add → OpenVPN (.ovpn)**: Add is the section's main button; its choices (a proxy, a
+  link, OpenVPN, a list — `ProxyAddChoicesView`) say what each takes. The empty list shows them too.
+- **Add's sheet** (a proxy line or a link): Choose .ovpn File…, or a `.ovpn` dropped on the sheet,
+  turns it into the OpenVPN sheet with the file read (`ProxyAddSheet`). A `.ovpn`'s text pasted into
+  any proxy field is said to be one (`ProxyLine.looksLikeOpenVPN`).
+- **A profile's settings → Connection → Add to List…**: the same choices; what is added is chosen
+  for the profile.
+- **Settings → Proxies → Add a proxy, a link or OpenVPN → Add…**: the section, with Add's choices
+  open. The Settings search finds "OpenVPN" (and the links' names) there.
+- **A `.ovpn` opened with Lumen in the Finder**: `Info.plist` declares the extension as a document
+  type, role Viewer, rank Alternate — an OpenVPN client the person has stays the default; Lumen
+  takes a double-click only where nothing else claims the extension, and is offered under Open With.
+  `AppDelegate.application(_:open:)` opens the section's OpenVPN sheet with the file (after the
+  master password if the vault is locked). Nothing in the signature or entitlements changes: the
+  sandboxed development build reads the file through the grant the open gives it.
 
 ## Status (17 November 2026): works end to end on macOS 26, and on Linux
 
@@ -164,7 +185,7 @@ tar, make, clang, ar, lipo, strip, otool): every tarball carries its own configu
 — mbed TLS's with its generated files, built with its own Makefile — and each library's flags are
 given to OpenVPN's configure directly, so neither CMake, autotools, pkg-config nor Homebrew is used.
 The full pipeline's release dry run builds it with PATH cut to `/usr/bin:/bin:/usr/sbin:/sbin`.
-Without `OVPN=1` the app has neither program: Add OpenVPN… says this build has none, and a profile
+Without `OVPN=1` the app has neither program: the OpenVPN sheet says this build has none, and a profile
 given an OpenVPN connection does not start, said. The sandboxed development build cannot run one
 either (profiles there are not in their own process).
 

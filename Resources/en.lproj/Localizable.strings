@@ -2205,7 +2205,7 @@
 "help.start.first" = "First steps";
 "help.start.step.new" = "Click New Profile (⌘N), name the profile and, if it needs one, give it a proxy.";
 "help.start.step.launch" = "Choose the profile in the list and click Launch: its window opens.";
-"help.start.step.proxies" = "Proxies are in Proxies on the left: they are added, checked and given to profiles there.";
+"help.start.step.proxies" = "Proxies are in Proxies on the left: they are added, checked and given to profiles there. Add takes an HTTP or SOCKS5 proxy, a VLESS, VMess, Trojan or Shadowsocks link, an OpenVPN connection from a .ovpn file, or a whole list.";
 "help.start.step.lock" = "Lock, at the bottom left, stops all profiles, encrypts their data and forgets the keys, until the master password is typed again.";
 "help.start.where" = "Where things are";
 "help.start.where.palette" = "Commands and Search on the left, or ⌘K, is the command palette: any profile, action or section of Settings by its first letters.";

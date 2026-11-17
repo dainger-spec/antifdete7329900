@@ -652,6 +652,12 @@ profile uses it as an ordinary SOCKS5 proxy on 127.0.0.1. Everything this page s
 proxy — WebRTC through its UDP, the network guard's hold, the proxy check, the exit's location —
 then holds through the relay.
 
+Where a link is entered (0.1.19): the Proxies section's **Add → Link** (Add's sheet takes a proxy line
+or a link in one field, and says at once what it recognised: "Recognised: VLESS · REALITY + TCP +
+Vision · server nl1.example.com:443"), the Import's list, and a profile's proxy field under New; the
+fields' example names the links (`proxyLine.example`). Until 0.1.18 nothing said a link could go
+there, and Add was in ⋯ alone.
+
 | Traffic of a profile on a link | Path | How it is known |
 |---|---|---|
 | Pages (TCP), WebSocket, fetch, media | the data store's proxy: the relay's SOCKS5 on 127.0.0.1, with the launch's login (failover off) → the link's server | `xray_relay_check.py` (every kind against a real server); `Lumen --xray-check` (the leak page through each kind) inside a capture |
