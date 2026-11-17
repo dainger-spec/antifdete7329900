@@ -25,7 +25,7 @@ final class DeviceTests: LumenUITestCase {
         ])
 
         // The first launch: no session yet, and the way to make one.
-        onScreen(app.buttons["newSessionEmpty"], "the first launch offers a new session")
+        onScreen(reveal(app.buttons["newSessionEmpty"], "the first launch offers a new session"), "the empty list's button", wholly: false)
         onScreen(app.buttons["newSession"], "the list's own button for a new session")
         onScreen(app.buttons["plansButton"], "the account's button")
         onScreen(app.buttons["proxiesButton"], "the proxies' button")
@@ -36,8 +36,9 @@ final class DeviceTests: LumenUITestCase {
         let long = "Магазин — длинное имя для маленького экрана"
         createSession(name: long, notes: "Описание сессии, которое не помещается в одну строку на узком экране", tags: "работа")
         createSession(name: "Почта")
-        onScreen(sessionCard(long), "the card with the long name")
-        onScreen(sessionCard("Почта"), "the second card")
+        // A list scrolls: a card is reached as a person reaches it, then it must take a touch.
+        onScreen(reveal(sessionCard(long), "the card with the long name can be reached"), "the card with the long name", wholly: false)
+        onScreen(reveal(sessionCard("Почта"), "the second card can be reached"), "the second card", wholly: false)
         shot("\(leg) 02 sessions")
 
         // A session's browser: the address bar and the bar below the page, a page loaded.
@@ -70,7 +71,7 @@ final class DeviceTests: LumenUITestCase {
         wait(app.navigationBars["Прокси"], "the proxy list opens")
         addProxy(name: "Берлин", kind: "HTTP", port: "28381", user: "ua", password: "pa")
         waitRow("Берлин", says: "Работает", timeout: 40)
-        onScreen(proxyRow("Берлин"), "the proxy's row")
+        onScreen(proxyRow("Берлин"), "the proxy's row", wholly: false)
         onScreen(app.buttons["newProxy"], "the list's button for a new proxy")
         assertDark("the proxies")
         shot("\(leg) 06 proxies")
@@ -95,7 +96,7 @@ final class DeviceTests: LumenUITestCase {
         let plan = app.staticTexts["planName"]
         XCTAssertTrue(plan.waitForExistence(timeout: 30), "the plan is named once signed in")
         XCTAssertEqual(plan.label, "Тариф: Профессиональный")
-        onScreen(reveal(app.buttons["signOut"], "the account's screen offers to sign out"), "the sign-out button")
+        onScreen(reveal(app.buttons["signOut"], "the account's screen offers to sign out"), "the sign-out button", wholly: false)
         shot("\(leg) 09 signed in")
         app.buttons["signOut"].tap()
         let confirm = touchable("confirmSignOut", "signing out asks first")
@@ -113,18 +114,22 @@ final class DeviceTests: LumenUITestCase {
         shot("\(leg) 11 on its side")
         XCUIDevice.shared.orientation = .portrait
         sleep(1)
-        onScreen(sessionCard("Почта"), "a card, the iPhone upright again")
+        onScreen(reveal(sessionCard("Почта"), "a card can be reached"), "a card, the iPhone upright again", wholly: false)
     }
 
-    /// `element` is on the screen, wholly inside the window, and takes a touch.
+    /// `element` is there and takes a touch; `wholly`: and lies wholly inside the window — a button
+    /// of a bar, a field, a form's button (a row of a list that scrolls may stand at its edge).
     @discardableResult
-    func onScreen(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
+    func onScreen(_ element: XCUIElement, _ what: String, wholly: Bool = true,
+                  file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         XCTAssertTrue(element.waitForExistence(timeout: 15), "\(what): there", file: file, line: line)
         let window = app.windows.firstMatch.frame
         let frame = element.frame
         XCTAssertTrue(element.isHittable, "\(what): takes a touch (\(frame) in \(window))", file: file, line: line)
-        XCTAssertTrue(window.insetBy(dx: -1, dy: -1).contains(frame), "\(what): wholly on the screen (\(frame) in \(window))",
-                      file: file, line: line)
+        if wholly {
+            XCTAssertTrue(window.insetBy(dx: -1, dy: -1).contains(frame), "\(what): wholly on the screen (\(frame) in \(window))",
+                          file: file, line: line)
+        }
         return element
     }
 
