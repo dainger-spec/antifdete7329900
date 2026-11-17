@@ -20,6 +20,7 @@ struct PlansView: View {
 
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroller in
             List {
                 if let because {
                     Section { NoticeRow(text: because, identifier: "plansBecause") }
@@ -37,6 +38,7 @@ struct PlansView: View {
                                         .accessibilityIdentifier("deviceCode")
                                 }
                             }
+                            .id(Self.accountRow)
                         } else {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(L("Вход не выполнен")).accessibilityIdentifier("signedOut")
@@ -101,6 +103,14 @@ struct PlansView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            // Signed in, the screen goes back to its top, where it says who: at the largest text on a
+            // small iPhone the account's row was above the screen, where the sign-in had left it
+            // (devices runs 163 and 174).
+            .onChange(of: model.account?.email) { _, email in
+                guard email != nil else { return }
+                withAnimation(.smooth) { scroller.scrollTo(Self.accountRow, anchor: .top) }
+            }
+            }
             .navigationTitle(L("Аккаунт"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -117,6 +127,8 @@ struct PlansView: View {
             }
         }
     }
+
+    private static let accountRow = "accountRow"
 
     /// How many profiles of how many — a neutral line under it, full when there is no room left.
     private var profilesRow: some View {
