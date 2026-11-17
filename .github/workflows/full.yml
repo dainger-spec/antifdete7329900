@@ -363,6 +363,12 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: TITLE="macOS 27 - a scenario in Safari's window" scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/egress27/scenario-safari
+      - name: macOS 27 - typing into Safari 27's address bar, every key reaching the field (reported)
+        # scripts/address_bar_check.sh, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 15
+        run: TITLE="macOS 27 - typing into Safari's address bar" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/egress27/address-bar
       - name: macOS 27 - Selenium against a profile in Safari 27's window (WebDriver; reported)
         # scripts/webdriver_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -1056,6 +1062,23 @@ jobs:
         with:
           name: scenario-safari
           path: build/scenario-safari
+          if-no-files-found: ignore
+      - name: Typing into Safari's address bar — every key reaches the field, with no exception and no notice
+        # scripts/address_bar_check.sh (Lumen --address-bar-check): one profile per search engine, a
+        # tab and a visited page that match what is typed, then key presses one at a time into
+        # Safari's address bar — Latin, Cyrillic, and composed as an input method; Google's profile
+        # launched twice. A customer's address bar put up "not available in a profile" at every key
+        # (0.1.17 or earlier): the field must hold what was typed, no key press may raise, the run
+        # loop may catch nothing and the window put up no notice. Every exception thrown on the way
+        # is printed with its frames.
+        if: always()
+        timeout-minutes: 15
+        run: scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: address-bar
+          path: build/address-bar
           if-no-files-found: ignore
       - name: Selenium against a profile — a session starts it, finds, types, clicks and reads in Safari's window (WebDriver)
         # scripts/webdriver_check.sh (Lumen --webdriver-serve, scripts/webdriver_check.py): the
