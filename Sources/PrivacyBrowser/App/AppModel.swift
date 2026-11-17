@@ -1470,7 +1470,7 @@ final class AppModel: ObservableObject {
             // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
             refresh()
         } catch {
-            showError(error.localizedDescription)
+            showError(errorText(error))
         }
     }
 

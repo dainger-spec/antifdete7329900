@@ -2102,6 +2102,9 @@
 "sync.off.message" = "Sync stops on this Mac: the folder, or the server's address and token, is forgotten here. What is synced already stays, there and here — the Lumen server keeps its copy until the sync data is deleted on the account page.";
 "sync.off.confirm" = "Turn Off";
 "sync.server.saved" = "Saved";
+"sync.server.error.extra" = "Leave out a user name or password, and anything after ? or #: the token goes in its own field.";
+"sync.server.error.https" = "Only an https:// address can be used: the server must have a certificate.";
+"sync.server.error.address" = "This is not a server's address: write it like https://sync.example.com.";
 "sync.mode.account" = "Lumen Account";
 "sync.to.account.detail" = "The Lumen server, through your account: ciphertext only; the key stays on your devices.";
 "sync.account.row" = "Sync through the account";
