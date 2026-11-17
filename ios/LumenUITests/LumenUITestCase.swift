@@ -177,9 +177,19 @@ class LumenUITestCase: XCTestCase {
             }
         }
         field.typeText(text)
-        var now = (field.value as? String) ?? ""
-        if now == (field.placeholderValue ?? "") { now = "" }
-        XCTAssertEqual(now, text, "the field holds what was typed", file: file, line: line)
+        // A slow simulator shows the text a moment later, or loses keys (the SE on iOS 18.6, devices
+        // run 154: the field held "http://" of the address just after the typing): waited for, and
+        // if keys were lost, typed once more from empty, as a person types it again.
+        let typed = NSPredicate(format: "value == %@", text)
+        if XCTWaiter.wait(for: [expectation(for: typed, evaluatedWith: field)], timeout: 10) != .completed {
+            let partial = held()
+            if !partial.isEmpty {
+                field.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: partial.count + 2))
+            }
+            field.typeText(text)
+            _ = XCTWaiter.wait(for: [expectation(for: typed, evaluatedWith: field)], timeout: 10)
+        }
+        XCTAssertEqual(held(), text, "the field holds what was typed", file: file, line: line)
     }
 
     // MARK: Browser

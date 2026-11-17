@@ -156,14 +156,16 @@ test_leg() {
     TEST_RUNNER_LUMEN_DEVICE_LEG="$leg" xcodebuild test-without-building "${COMMON[@]}" -destination "id=$UDID" \
         -only-testing:LumenUITests/DeviceTests -resultBundlePath "$OUT/$leg.xcresult" >"$OUT/$leg.txt" 2>&1 &
     local pid=$! waited=0
-    # A leg that hangs (an app that never goes idle: ci.sh's run 35) is stopped after 40 minutes,
-    # so the others still run.
+    # A leg that hangs (an app that never goes idle: ci.sh's run 35) is stopped after 80 minutes,
+    # so the others still run. Not 40: the SE on iOS 18.6 on macos-26 is slow (devices run 154: two
+    # minutes to set up the automation session, a minute at a time waiting for the app to go idle,
+    # 22 minutes to the first page of the path).
     while kill -0 "$pid" 2>/dev/null; do
         sleep 10; waited=$((waited + 10))
-        if [[ $waited -ge 2400 ]]; then
+        if [[ $waited -ge 4800 ]]; then
             xcrun simctl io "$UDID" screenshot "$OUT/screens/stuck-$leg.png" >/dev/null 2>&1
             kill "$pid" 2>/dev/null; sleep 5; kill -9 "$pid" 2>/dev/null
-            echo "LUMEN CI: stopped after 40 minutes" >>"$OUT/$leg.txt"
+            echo "LUMEN CI: stopped after 80 minutes" >>"$OUT/$leg.txt"
             break
         fi
     done
