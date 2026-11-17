@@ -1015,10 +1015,11 @@ struct AccountSettingsPage: View {
             switch reason {
             case "no_license": return L("contract.export.no_license")
             case "account_disabled": return L("contract.error.account_disabled")
-            default: return String(format: L("contract.export.period_ended"), p.periodEndsAt.map(LicenseText.date) ?? "—")
+            default: return String(format: L("contract.export.period_ended"), p.periodEndsAt.map { LicenseText.shortDate($0, now: state.now) } ?? "—")
             }
         }
-        let end = p.periodEndsAt.map(LicenseText.date) ?? "—"
+        // The day alone: the period's minute is no one's business on this line.
+        let end = p.periodEndsAt.map { LicenseText.shortDate($0, now: state.now) } ?? "—"
         if p.plan == "trial" { return String(format: L("contract.account.plan.trial"), end) }
         return String(format: L("contract.account.plan"), LicenseText.plan(p.plan), end)
     }
