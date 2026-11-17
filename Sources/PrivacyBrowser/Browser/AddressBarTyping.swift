@@ -39,6 +39,9 @@ enum AddressBarTyping {
         var caughtByTypingGuard = 0
         /// Notices the window put up while it typed (`SafariChrome.noticesPresented`).
         var notices = 0
+        /// The windows that were up, other than before the typing, once it was over: Safari's
+        /// completion list is one (whether the typing reached the completions at all).
+        var windowsWhileTyping: [String] = []
         /// The search providers Safari's chrome has here, as they describe themselves.
         var providers = ""
 
@@ -71,6 +74,7 @@ enum AddressBarTyping {
         let noticesBefore = SafariChrome.noticesPresented
         let guardBefore = SafariTypingGuard.caught
         report.windowWasKey = window.isKeyWindow
+        let windowsBefore = Set(NSApp.windows.filter(\.isVisible).map { ObjectIdentifier($0) })
         if composing, let editor = field.currentEditor() as? NSTextView {
             // As an input method composes: the marked text grows a character at a time, then the
             // whole is inserted in its place.
@@ -97,6 +101,11 @@ enum AddressBarTyping {
             try? await Task.sleep(nanoseconds: 180_000_000)
         }
         try? await Task.sleep(nanoseconds: 1_500_000_000)
+        for shown in NSApp.windows where shown.isVisible && !windowsBefore.contains(ObjectIdentifier(shown)) {
+            var name = String(describing: Swift.type(of: shown))
+            if let content = shown.contentViewController { name += " " + String(describing: Swift.type(of: content)) }
+            report.windowsWhileTyping.append(name)
+        }
         ExceptionLog.onThrown = previous
         report.thrown = thrown
         report.caughtByRunLoop = ExceptionLog.reported - reportedBefore

@@ -68,7 +68,7 @@ enum AddressBarCheck {
         for engine in engines {
             // Google, the default and the customer's engine, more ways: Cyrillic, an input method's
             // composing, and the same profile launched a second time (its home no longer new).
-            let texts = engine == .google ? [text, "гугл", AddressBarTyping.composedPrefix + "гугл"] : [text]
+            let texts = engine == .google ? [text, "google.selftest", "гугл", AddressBarTyping.composedPrefix + "гугл"] : [text]
             let launches = engine == .google ? 2 : 1
             let problems = await check(engine, texts: texts, launches: launches, repository: repository, port: port)
             if problems.isEmpty {
@@ -87,7 +87,9 @@ enum AddressBarCheck {
         let profile: ProfileSummary
         do {
             profile = try repository.create(name: "Address bar \(engine.name)", configuration: ProfileConfiguration(
-                startURL: URL(string: "http://proxied.selftest.invalid/one?address-bar"),
+                // A page whose address and title hold what is typed: what Safari completes from (the
+                // open tab, the page's history, its top hit), as a person's profile would have it.
+                startURL: URL(string: "http://www.google.selftest.invalid/search?q=google"),
                 proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: port), ephemeral: false,
                 matchProxyLocation: false, searchEngine: engine))
         } catch {
@@ -111,8 +113,14 @@ enum AddressBarCheck {
                 return problems + ["launch \(launch): the profile's process does not host Safari's chrome ("
                     + (seen.hostsChrome == nil ? "no answer, exit \(seen.exited.map { "\($0)" } ?? "none")" : "this app's own window") + ")"]
             }
-            // The window settles (its first page, its toolbar) before a person would type.
+            // The window settles (its first page, its toolbar) before a person would type; a second tab
+            // and another page that match what is typed, as a profile in use has them.
             try? await Task.sleep(nanoseconds: 3_000_000_000)
+            for action in [WindowProbeAction.openTab("http://google.selftest.invalid/one?tab"),
+                           .go("http://www.google.selftest.invalid/two?visited")] {
+                seen.look = nil
+                if manager.lookAtWindow(profile.id, action) { await wait(30) { seen.look != nil || seen.exited != nil } }
+            }
             for typed in (launch == 1 ? texts : [text]) {
                 seen.look = nil
                 print("\(tag) INFO \(engine.name), launch \(launch): typing \(typed)")
@@ -139,7 +147,7 @@ enum AddressBarCheck {
         }
         print("\(tag) INFO \(engine.name): field \"\(report.field)\", window key \(report.windowWasKey), "
               + "exceptions out of key presses \(report.outOfKeyPresses), caught by the run loop \(report.caughtByRunLoop), "
-              + "caught by the typing guard \(report.caughtByTypingGuard), thrown in all \(report.thrown.count), notices \(report.notices)")
+              + "windows that came up \(report.windowsWhileTyping.joined(separator: " | ")), caught by the typing guard \(report.caughtByTypingGuard), thrown in all \(report.thrown.count), notices \(report.notices)")
         for line in report.providers.split(separator: "\n") { print("\(tag) INFO \(engine.name) providers: \(line.prefix(400))") }
         // Each distinct exception once, with its frames.
         var said: Set<String> = []
