@@ -79,9 +79,8 @@ the page — with:
 profile's own process that hosts Safari's chrome, the run opens a window of Safari's for itself, on
 an empty page (`SafariChromeHost.openScenarioPage`), acts on its tab's web view and goes to
 addresses through the tab (`loadURL:`), as the address bar does. A profile that was stopped is
-started without a window of its own, so the run's is the only one. Everywhere else — an iPhone or
-iPad view, the sandboxed build, a macOS where the chrome is not hosted — it is a window of the
-app's, as before; and when Safari's window gives no page to act on within a few seconds, the run
+started without a window of its own, so the run's is the only one. Everywhere else — the sandboxed
+build, a macOS where the chrome is not hosted — it is a window of the app's, as before; and when Safari's window gives no page to act on within a few seconds, the run
 goes on in a window of the app's rather than being lost. The run's log says which, in its first line. In Safari's window the page may run
 under the toolbar, so the viewport's place in the web view is measured, not assumed: the page is
 asked, from the driver's own world, where it saw a move of the input (`PageDriver.measureViewport`).

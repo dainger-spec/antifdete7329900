@@ -58,7 +58,7 @@ the row says what would show it.
 | Start page onboarding | traps on a new tab | stubbed | menu walk (⌘T) |
 | Web-extension store migration (`WBSWebExtensionSQLiteStoreMigrator`) | extensions of the real Safari have no place in a profile | stubbed; Safari Extensions… disabled | menu walk |
 | Tab-group sync (`WBTabGroupSyncAgentProxy` sync and observers) | its agent is refused; observers crashed a profile | stubbed (3 methods) | scale check |
-| Completion list's remote view (`SPSafariPlatformSupport`) | a view of a refused service; asked again in a loop | stubbed in every profile's process (bd9628e) | self-test (iPhone view idle 0 %, control 99 %) |
+| Completion list's remote view (`SPSafariPlatformSupport`) | a view of a refused service; asked again in a loop | stubbed in every profile's process (bd9628e) | self-test (a profile in our window, in its own process, idle 0 %, control 99 %) |
 | Default-browser question, Settings (⌘,), restorable state | not a profile's business | stubbed / our Settings | self-test, menu walk |
 | Safari's XPC services (`com.apple.Safari*`: SafariPlatformSupport helper, SearchHelper, CredentialExtractionHelper, extension helpers, configuration subscriber) | they reach the real Safari's data, the keychain and the network outside the proxy | refused by the kernel | XPC service watch (self-test) |
 | Add to Dock, browsing-data import/export, Shared with You | outside the profile (owner's decisions) | removed from the menu | menu walk |
