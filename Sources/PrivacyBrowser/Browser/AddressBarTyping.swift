@@ -47,6 +47,13 @@ enum AddressBarTyping {
         var completionClasses: [String] = []
         /// The search providers Safari's chrome has here, as they describe themselves.
         var providers = ""
+        /// Accessibility reads made after each key press, as an app that watches every key through
+        /// the accessibility API makes them (`AccessibilitySweep`), and those that raised: element's
+        /// class, attribute, parameter — with a range inside the text.
+        var accessibilityReads = 0
+        var accessibilityExceptions: [String] = []
+        /// The same, for a range past the text's end (a client that asked with a stale range).
+        var accessibilityPastEndExceptions: [String] = []
 
         var json: String {
             guard let data = try? JSONEncoder().encode(self) else { return "{}" }
@@ -91,6 +98,7 @@ enum AddressBarTyping {
                 }
                 if caught != nil { report.outOfKeyPresses += 1 }
                 try? await Task.sleep(nanoseconds: 180_000_000)
+                sweep(field, in: window, into: &report)
             }
             let caught = PBCatchException { editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0)) }
             if caught != nil { report.outOfKeyPresses += 1 }
@@ -102,6 +110,7 @@ enum AddressBarTyping {
             }
             // As a person types: what a key press schedules (the completions) runs before the next.
             try? await Task.sleep(nanoseconds: 180_000_000)
+            sweep(field, in: window, into: &report)
         }
         try? await Task.sleep(nanoseconds: 1_500_000_000)
         for shown in NSApp.windows where shown.isVisible && !windowsBefore.contains(ObjectIdentifier(shown)) {
@@ -127,6 +136,26 @@ enum AddressBarTyping {
         return report
     }
 
+    /// The accessibility of the address bar and of Safari's completion list, read after a key press.
+    private static func sweep(_ field: NSTextField, in window: NSWindow, into report: inout Report) {
+        var elements: [NSObject] = [field]
+        if let cell = field.cell { elements.append(cell) }
+        if let editor = field.currentEditor() as? NSTextView { elements.append(editor) }
+        for shown in NSApp.windows where shown.isVisible && shown !== window
+            && String(describing: Swift.type(of: shown)).contains("Completion") {
+            if let content = shown.contentView { elements += AccessibilitySweep.views(under: content, limit: 80) }
+        }
+        let typedSoFar = (field.currentEditor() as? NSTextView)?.string ?? ""
+        let length = (typedSoFar as NSString).length
+        let center = window.convertPoint(toScreen: field.convert(NSPoint(x: field.bounds.midX, y: field.bounds.midY), to: nil))
+        let result = AccessibilitySweep.read(elements, textLength: length, point: center)
+        report.accessibilityReads += result.reads
+        for line in result.failures where !report.accessibilityExceptions.contains(line) { report.accessibilityExceptions.append(line) }
+        for line in result.pastEnd where !report.accessibilityPastEndExceptions.contains(line) {
+            report.accessibilityPastEndExceptions.append(line)
+        }
+    }
+
     /// A key-down and a key-up of the key that types `character` on this Mac's keyboard layout.
     private static func keyEvents(_ character: Character, in window: NSWindow) -> [NSEvent] {
         let key = PageInput.key(typing: character)
@@ -144,5 +173,98 @@ enum AddressBarTyping {
             }
         }
         return events
+    }
+}
+
+/// What an app that acts on every key press through the accessibility API — a keyboard-layout
+/// switcher, a grammar checker, a text expander, a password manager — reads of the focused field
+/// after each key: every attribute of each element, and every parameterized attribute with the
+/// parameters such a client gives (a range of the text, an index, a line, a point). Called
+/// in-process, each read inside an Objective-C @try, through the runtime: the informal
+/// NSAccessibility methods, which the accessibility server calls when such an app asks.
+@MainActor
+enum AccessibilitySweep {
+    struct Result {
+        var reads = 0
+        var failures: [String] = []
+        var pastEnd: [String] = []
+    }
+
+    static func views(under root: NSView, limit: Int) -> [NSObject] {
+        var found: [NSObject] = []
+        var queue: [NSView] = [root]
+        while !queue.isEmpty, found.count < limit {
+            let view = queue.removeFirst()
+            found.append(view)
+            queue += view.subviews
+        }
+        return found
+    }
+
+    static func read(_ elements: [NSObject], textLength length: Int, point: NSPoint) -> Result {
+        var result = Result()
+        let names = NSSelectorFromString("accessibilityAttributeNames")
+        let value = NSSelectorFromString("accessibilityAttributeValue:")
+        let parameterizedNames = NSSelectorFromString("accessibilityParameterizedAttributeNames")
+        let parameterized = NSSelectorFromString("accessibilityAttributeValue:forParameter:")
+        for element in elements {
+            let kind = String(describing: Swift.type(of: element))
+            func record(_ exception: NSException, _ what: String, pastEnd: Bool) {
+                let line = kind + " " + what + ": " + exception.name.rawValue
+                if pastEnd {
+                    result.pastEnd.append(line)
+                } else {
+                    result.failures.append(line)
+                }
+            }
+            var attributes: [String] = []
+            if element.responds(to: names) {
+                if let thrown = PBCatchException({ attributes = element.perform(names)?.takeUnretainedValue() as? [String] ?? [] }) {
+                    record(thrown, "accessibilityAttributeNames", pastEnd: false)
+                }
+            }
+            for attribute in attributes where element.responds(to: value) {
+                result.reads += 1
+                if let thrown = PBCatchException({ _ = element.perform(value, with: attribute as NSString) }) {
+                    record(thrown, attribute, pastEnd: false)
+                }
+            }
+            var parameterizedAttributes: [String] = []
+            if element.responds(to: parameterizedNames) {
+                if let thrown = PBCatchException({
+                    parameterizedAttributes = element.perform(parameterizedNames)?.takeUnretainedValue() as? [String] ?? []
+                }) {
+                    record(thrown, "accessibilityParameterizedAttributeNames", pastEnd: false)
+                }
+            }
+            for attribute in parameterizedAttributes where element.responds(to: parameterized) {
+                for (parameter, label, pastEnd) in parameters(for: attribute, length: length, point: point) {
+                    result.reads += 1
+                    if let thrown = PBCatchException({ _ = element.perform(parameterized, with: attribute as NSString, with: parameter) }) {
+                        record(thrown, attribute + " " + label, pastEnd: pastEnd)
+                    }
+                }
+            }
+        }
+        return result
+    }
+
+    /// The parameters a client asks a parameterized attribute with: a range, an index or a line
+    /// inside the text and one just past it, or a point on the field.
+    private static func parameters(for attribute: String, length: Int, point: NSPoint) -> [(NSObject, String, Bool)] {
+        if attribute.hasSuffix("ForRange") {
+            let whole = NSRange(location: 0, length: length)
+            let last = NSRange(location: max(length - 1, 0), length: length > 0 ? 1 : 0)
+            let past = NSRange(location: length, length: 1)
+            return [(NSValue(range: whole), "{0,\(length)}", false), (NSValue(range: last), "{\(last.location),\(last.length)}", false),
+                    (NSValue(range: past), "{\(length),1}", true)]
+        }
+        if attribute.hasSuffix("ForIndex") || attribute.hasSuffix("ForLine") {
+            return [(NSNumber(value: 0), "0", false), (NSNumber(value: length), "\(length)", false), (NSNumber(value: length + 1), "\(length + 1)", true)]
+        }
+        if attribute.hasSuffix("ForPosition") || attribute.hasSuffix("ForScreenPoint") || attribute.hasSuffix("ForPoint") {
+            return [(NSValue(point: point), "the field's middle", false)]
+        }
+        return []
     }
 }

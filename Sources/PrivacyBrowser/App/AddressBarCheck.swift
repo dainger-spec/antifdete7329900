@@ -152,6 +152,10 @@ enum AddressBarCheck {
             print("\(tag) CLASSES \(report.completionClasses.joined(separator: " "))")
         }
         for line in report.providers.split(separator: "\n") { print("\(tag) INFO \(engine.name) providers: \(line.prefix(400))") }
+        print("\(tag) INFO \(engine.name): \(report.accessibilityReads) accessibility reads after the key presses, "
+              + "\(report.accessibilityExceptions.count) raised, \(report.accessibilityPastEndExceptions.count) past the text's end raised")
+        for line in report.accessibilityExceptions { print("\(tag) AX-THREW \(engine.name): \(line.prefix(300))") }
+        for line in report.accessibilityPastEndExceptions { print("\(tag) AX-PAST-END \(engine.name): \(line.prefix(300))") }
         // Each distinct exception once, with its frames.
         var said: Set<String> = []
         for thrown in report.thrown where said.insert(thrown.name + thrown.reason).inserted {
@@ -163,6 +167,10 @@ enum AddressBarCheck {
         if report.field != report.typed { problems.append("the field holds \"\(report.field)\", not \"\(report.typed)\"") }
         if report.outOfKeyPresses > 0 { problems.append("\(report.outOfKeyPresses) key press(es) raised an exception") }
         if report.caughtByRunLoop > 0 { problems.append("the run loop caught \(report.caughtByRunLoop) exception(s) while it typed") }
+        if !report.accessibilityExceptions.isEmpty {
+            problems.append("\(report.accessibilityExceptions.count) accessibility read(s) of the field or the completion list raised "
+                            + "(as an app that reads the focused field at every key would: \(report.accessibilityExceptions.prefix(3).joined(separator: "; ")))")
+        }
         if report.notices > 0 { problems.append("the window put up \(report.notices) notice(s)") }
         return problems
     }
