@@ -41,6 +41,14 @@ enum WindowProbeAction: Codable, Equatable {
     /// pressed after: what the field holds then and every exception thrown meanwhile, as JSON in
     /// `detail` (`AddressBarTyping`).
     case typeInAddressBar(String)
+    /// Typed into the window's address bar as `typeInAddressBar` types, then — with `firstCompletion`,
+    /// after the Down arrow, as a person picks the completion list's first row — a real Return,
+    /// key-down and key-up, sent to the window: what the field held, what the front tab went to, and
+    /// what was thrown and done on the way, as JSON in `detail` (`AddressBarTyping.Entered`).
+    case enterInAddressBar(String, firstCompletion: Bool)
+    /// Safari's stores in the profile's home as they stand, opened read-only, the files there and
+    /// where Safari's path getters pointed, as JSON in `detail` (`SafariStores.Report`).
+    case safariStores
 }
 
 struct WindowLook: Codable, Equatable {
@@ -169,6 +177,17 @@ enum WindowProbe {
                 look.detail = await AddressBarTyping.type(text, into: field, in: window).json
                 look.found = true
             }
+        case .enterInAddressBar(let text, let firstCompletion):
+            look.action = "Return in the address bar"
+            if let window, let field = addressField(in: window) {
+                look.detail = await AddressBarTyping.enter(text, firstCompletion: firstCompletion, into: field, in: window).json
+                look.found = true
+            }
+        case .safariStores:
+            look.action = "Safari's stores"
+            let report = SafariStores.report()
+            look.found = !report.home.isEmpty
+            look.detail = (try? JSONEncoder().encode(report)).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
         case .search(let text):
             look.action = "search"
             if let window, let field = addressField(in: window) {

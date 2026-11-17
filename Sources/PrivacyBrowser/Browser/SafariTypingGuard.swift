@@ -41,6 +41,33 @@ enum SafariTypingGuard {
     /// On Safari's own NSText and NSTextField subclasses.
     static let textViewMethods = ["keyDown:", "insertText:", "insertText:replacementRange:", "didChangeText", "complete:"]
 
+    /// Every exception caught here, with the method ("Class selector") and the exception's name, from
+    /// the thread that caught it: the address bar's Return (`AddressBarCommit`) hears of a throw on
+    /// its way.
+    nonisolated(unsafe) static var onCaught: ((String, String) -> Void)?
+
+    /// The commit of the address bar — Return, a completion chosen — on its way through Safari's
+    /// classes: the field's action, going to a typed address or a search, the search address built,
+    /// the top hit, a typed address recorded in history, the completion chosen, a tab told to load.
+    /// The methods of Safari's classes whose names say so (`commitClassWords`, `commitSelectorWords`)
+    /// are called inside an Objective-C @try, as the completions' classes are: what throws there
+    /// answers nothing, is written down with the method's name, and the address bar's Return does what
+    /// was asked itself when no page started loading (`AddressBarCommit`). Their names on each Safari
+    /// are in the address bar check's report (`commitMethods`).
+    static let commitClassWords = ["UnifiedField", "BrowserWindowController", "Completion", "SearchProvider", "TopHit",
+                                   "History", "BrowserTabViewItem"]
+    static let commitSelectorWords = ["goTo", "ToolbarLocation", "ommit", "earchURL", "URLForQuery", "URLForSearch", "opHit",
+                                      "ypedURL", "ypedAddress", "ypedText", "addTyped", "navigateTo", "performSearch",
+                                      "handleReturn", "insertNewline", "loadURL", "hooseCompletion", "ompletionChosen",
+                                      "electedCompletion", "electCompletion", "cceptCompletion", "ctivateCompletion",
+                                      "erformCompletion", "ompletionItemSelected"]
+    /// The commit's methods wrapped so far, as "Class selector".
+    private(set) static var commitMethods: [String] = []
+
+    static func isCommitMethod(className: String, selectorName: String) -> Bool {
+        commitClassWords.contains { className.contains($0) } && commitSelectorWords.contains { selectorName.contains($0) }
+    }
+
     /// The address bar's field editor, as it begins editing: none of the system's typing aids —
     /// inline predictions, completion, spelling correction, text replacement — which are this Mac's
     /// own settings (System Settings › Keyboard), different from one Mac to the next, and which
@@ -321,6 +348,15 @@ enum SafariTypingGuard {
                 wrapControlCommand(method, key: key)
             } else if selectorName == shouldChange {
                 wrapShouldChange(method, key: key)
+            } else if isCommitMethod(className: className, selectorName: selectorName), isWrappable(method, named: selectorName) {
+                let arguments = Int(method_getNumberOfArguments(method)) - 2
+                let returnType = method_copyReturnType(method)
+                let returnsNothing = String(cString: returnType) == "v"
+                free(returnType)
+                if wrapRegisters(method, arguments: arguments, returnsNothing: returnsNothing, key: key) {
+                    wrapped.insert(key)
+                    commitMethods.append(key)
+                }
             }
         }
     }
@@ -333,6 +369,7 @@ enum SafariTypingGuard {
         let selectorName = parts.count > 1 ? parts[1] : ""
         let exceptionName = exception.name.rawValue
         log.error("Caught in -[\(className, privacy: .public) \(selectorName, privacy: .public)], typing goes on: \(exceptionName, privacy: .public)")
+        onCaught?(key, exceptionName)
     }
 
     private static func wrapOneObject(_ method: Method, key: String) {

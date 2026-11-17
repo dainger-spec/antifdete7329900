@@ -332,6 +332,7 @@ enum SafariChrome {
         bridgeNibInitializers()
         stubChromeFeatures()
         SafariTypingGuard.install()
+        AddressBarCommit.install()
         closeSafarisAutoFill()
         installUnavailableNotice()
     }
@@ -1284,8 +1285,16 @@ enum SafariChrome {
             let title = (note.userInfo?["MenuItem"] as? NSMenuItem)?.title ?? ""
             MainActor.assumeIsolated { lastMenuItem = (title, Date()) }
         }
-        ExceptionLog.onCaughtInRunLoop = { _, eventType in
-            MainActor.assumeIsolated { showUnavailable(eventType: eventType) }
+        ExceptionLog.onCaughtInRunLoop = { exception, eventType in
+            MainActor.assumeIsolated {
+                // Thrown on the way of a Return in the address bar: that Return does what was asked
+                // itself (`AddressBarCommit`), and the window says nothing.
+                if AddressBarCommit.takesCaughtException(exception) {
+                    log.notice("A caught exception was not announced: the address bar's Return handles it")
+                    return
+                }
+                showUnavailable(eventType: eventType)
+            }
         }
     }
 
@@ -1738,6 +1747,8 @@ extension SafariChrome {
     static func prepareForCheck(arguments: [String]) -> Bool {
         guard !AppEnvironment.isSandboxed else { return false }
         isolateForCheck(arguments: arguments)
+        // As a profile's process does: Safari's stores in the home before its frameworks load.
+        SafariStores.prepare()
         guard load() else { return false }
         // As a profile's process does (SafariChromeHost): Safari's own folders are the home's
         // before any of Safari's code runs, not the account's (which the sandbox refuses anyway).

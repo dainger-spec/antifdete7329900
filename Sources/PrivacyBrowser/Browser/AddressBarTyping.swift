@@ -1,5 +1,6 @@
 import AppKit
 import ObjCExceptions
+import WebKit
 
 /// Typing into the address bar of a profile's window as a person types: one key press at a time,
 /// each a key-down and a key-up sent to the window, as AppKit hands a key to a window
@@ -65,7 +66,8 @@ enum AddressBarTyping {
     /// then the composed text inserted), in the field editor, rather than typed key by key.
     static let composedPrefix = "ime:"
 
-    static func type(_ given: String, into field: NSTextField, in window: NSWindow) async -> Report {
+    /// `leaveText`: the field is left editing with what was typed in it (a Return comes next).
+    static func type(_ given: String, into field: NSTextField, in window: NSWindow, leaveText: Bool = false) async -> Report {
         var report = Report()
         let composing = given.hasPrefix(composedPrefix)
         let text = composing ? String(given.dropFirst(composedPrefix.count)) : given
@@ -129,11 +131,129 @@ enum AddressBarTyping {
             .filter { name in words.contains { name.contains($0) } }.sorted().prefix(300))
         report.caughtByTypingGuard = SafariTypingGuard.caught - guardBefore
         // The field left as it was found: empty, and not editing.
-        _ = PBCatchException {
-            (field.currentEditor() as? NSTextView)?.string = ""
-            window.makeFirstResponder(nil)
+        if !leaveText {
+            _ = PBCatchException {
+                (field.currentEditor() as? NSTextView)?.string = ""
+                window.makeFirstResponder(nil)
+            }
         }
         return report
+    }
+
+    // MARK: Return
+
+    /// What a Return in the address bar did (`enter`).
+    struct Entered: Codable, Equatable {
+        var typing = Report()
+        var firstCompletion = false
+        /// What the field held when Return was pressed: after the Down arrow, the row chosen.
+        var fieldAtReturn = ""
+        var pageBefore = ""
+        var pageAfter = ""
+        /// Every address the window's front page took after Return, in order.
+        var pagesSeen: [String] = []
+        /// Another page came in front (a tab switched to, a new web view).
+        var frontPageChanged = false
+        var tabsBefore = 0
+        var tabsAfter = 0
+        /// Exceptions out of the Down arrow's and the Return's key events, caught here.
+        var outOfKeyPresses = 0
+        var thrown: [Thrown] = []
+        var caughtByTypingGuard = 0
+        var caughtByRunLoop = 0
+        var notices = 0
+        /// The Return was taken for the address bar's (`AddressBarCommit`).
+        var returnSeen = false
+        /// Where Safari's code threw after Return, and what this process loaded itself.
+        var thrownAfterReturn: [String] = []
+        var rescues: [String] = []
+        /// The frames that started the page Return loaded: Safari's commit path, by name.
+        var navigationFrames: [String] = []
+        /// The commit's methods guarded in this Safari (`SafariTypingGuard.commitMethods`).
+        var commitMethods: [String] = []
+
+        var json: String {
+            guard let data = try? JSONEncoder().encode(self) else { return "{}" }
+            return String(decoding: data, as: UTF8.self)
+        }
+    }
+
+    private final class Pages {
+        var seen: [String] = []
+        func add(_ page: WKWebView?) {
+            let address = page?.url?.absoluteString ?? "none"
+            if seen.last != address { seen.append(address) }
+        }
+    }
+
+    /// Types `given` as `type` does, then — with `firstCompletion`, after the Down arrow — presses
+    /// Return, a key-down and a key-up sent to the window as AppKit sends a key, and watches the
+    /// window's front tab for four seconds.
+    static func enter(_ given: String, firstCompletion: Bool, into field: NSTextField, in window: NSWindow) async -> Entered {
+        var entered = Entered()
+        entered.firstCompletion = firstCompletion
+        let pageBefore = SafariChromeHost.frontPage(in: window)
+        entered.pageBefore = pageBefore?.url?.absoluteString ?? ""
+        entered.tabsBefore = SafariTabs.tabs().filter { $0.window === window }.count
+        entered.typing = await type(given, into: field, in: window, leaveText: true)
+        var thrown: [Thrown] = []
+        let previous = ExceptionLog.onThrown
+        ExceptionLog.onThrown = { name, reason, frames in
+            previous?(name, reason, frames)
+            thrown.append(Thrown(name: name, reason: reason, frames: Array(frames.prefix(40))))
+        }
+        let reportedBefore = ExceptionLog.reported
+        let noticesBefore = SafariChrome.noticesPresented
+        let guardBefore = SafariTypingGuard.caught
+        let returnsBefore = AddressBarCommit.returns
+        let rescuesBefore = AddressBarCommit.rescues.count
+        let thrownBefore = AddressBarCommit.thrownAfterReturn.count
+        if firstCompletion {
+            for event in keyEvents(code: 125, characters: "\u{F701}", modifiers: [.numericPad, .function], in: window) {
+                if PBCatchException({ window.sendEvent(event) }) != nil { entered.outOfKeyPresses += 1 }
+            }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+        }
+        entered.fieldAtReturn = (field.currentEditor() as? NSTextView)?.string ?? field.stringValue
+        let pages = Pages()
+        var observations: [NSKeyValueObservation] = []
+        if let pageBefore {
+            observations.append(pageBefore.observe(\.url, options: [.new]) { page, _ in pages.add(page) })
+        }
+        for event in keyEvents(code: 36, characters: "\r", modifiers: [], in: window) {
+            if PBCatchException({ window.sendEvent(event) }) != nil { entered.outOfKeyPresses += 1 }
+        }
+        for _ in 0..<20 {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            pages.add(SafariChromeHost.frontPage(in: window))
+        }
+        observations.removeAll()
+        let front = SafariChromeHost.frontPage(in: window)
+        entered.pageAfter = front?.url?.absoluteString ?? ""
+        entered.frontPageChanged = front !== pageBefore
+        entered.pagesSeen = pages.seen
+        entered.tabsAfter = SafariTabs.tabs().filter { $0.window === window }.count
+        ExceptionLog.onThrown = previous
+        entered.thrown = thrown
+        entered.caughtByRunLoop = ExceptionLog.reported - reportedBefore
+        entered.notices = SafariChrome.noticesPresented - noticesBefore
+        entered.caughtByTypingGuard = SafariTypingGuard.caught - guardBefore
+        entered.returnSeen = AddressBarCommit.returns > returnsBefore
+        entered.rescues = Array(AddressBarCommit.rescues.dropFirst(rescuesBefore))
+        entered.thrownAfterReturn = Array(AddressBarCommit.thrownAfterReturn.dropFirst(thrownBefore))
+        entered.navigationFrames = AddressBarCommit.lastNavigationFrames
+        entered.commitMethods = SafariTypingGuard.commitMethods
+        return entered
+    }
+
+    /// A key-down and a key-up of the key with this code (Return, an arrow).
+    private static func keyEvents(code: UInt16, characters: String, modifiers: NSEvent.ModifierFlags, in window: NSWindow) -> [NSEvent] {
+        [NSEvent.EventType.keyDown, .keyUp].compactMap { type in
+            NSEvent.keyEvent(with: type, location: .zero, modifierFlags: modifiers,
+                             timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                             context: nil, characters: characters, charactersIgnoringModifiers: characters,
+                             isARepeat: false, keyCode: code)
+        }
     }
 
     /// The accessibility of the address bar and of Safari's completion list, read after a key press.

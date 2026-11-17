@@ -101,6 +101,13 @@ ALLOWED_IN_FILE = {
     ("SafariChrome.swift", "String(describing: NSApp.map { type(of: $0) })"): "a class name",
     ("SafariChrome.swift", "closed.joined(separator: \", \")"): "names of Safari's classes and the WebKit selectors closed in them",
     ("SafariChromeHost.swift", "structural.joined(separator: \", \")"): "names of Safari's classes this macOS lacks",
+    ("SafariStores.swift", "path"): "a store's path relative to the profile's home, from SafariStoreLayout's list (Library/Safari/…)",
+    ("SafariStores.swift", "line"):
+        "what could not be done to a store: its path relative to the home, from SafariStoreLayout's list, and an error's domain and code",
+    ("AddressBarCommit.swift", "place"):
+        "where Safari's code threw after Return: a class and selector of Safari's (SafariTypingGuard's lists), a fixed text of "
+        "this file's and an exception's name — never its reason, never what was typed",
+    ("AddressBarCommit.swift", "intent.thrownIn.joined(separator: \"; \")"): "the same places, one after the other",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",
     ("ProxyGeoLookup.swift", "service.url.host ?? \"?\""): "a geolocation service of the app's own list, not the proxy",
     ("ProxyExitLookup.swift", "endpoint.host ?? \"?\""): "Cloudflare's trace address of the app's own list (1.1.1.1, 1.0.0.1), not the proxy",
