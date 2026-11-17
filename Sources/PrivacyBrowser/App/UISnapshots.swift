@@ -703,6 +703,10 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-profile-import", size: CGSize(width: 480, height: 300), titled: false) {
                 ProfileImportView().environmentObject(model)
             }.capture(into: folder)
+            // Copies of a profile: how many, typed or stepped, and where their proxies come from.
+            problems += await Shot(name: "sheet-duplicate", size: CGSize(width: 520, height: 520), titled: false) {
+                DuplicateProfileView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
         } else {
             print("FAIL could not make a sample profile summary")
             problems += 1

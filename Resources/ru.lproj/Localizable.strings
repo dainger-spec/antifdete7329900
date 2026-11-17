@@ -1864,6 +1864,7 @@
 "duplicate.title" = "Дублировать «%@»";
 "duplicate.explanation" = "Копии получат настройки этого профиля — устройство, языки и часовой пояс, WebRTC, камеру, поисковик, теги — и ничего из его данных: ни cookies, ни истории, ни паролей, ни заметок. У каждой копии будет своё прошлое.";
 "duplicate.count" = "Копий";
+"duplicate.count.range" = "от 1 до %ld";
 "duplicate.proxy" = "Прокси";
 "duplicate.proxy.same" = "Тот же";
 "duplicate.proxy.list" = "Из списка по очереди";
@@ -1876,6 +1877,8 @@
 "duplicate.fixedLocale" = "Часовой пояс и язык этого профиля заданы вручную: копии сохранят их, в какой бы стране ни выходили их прокси.";
 "duplicate.more" = "…и ещё %ld";
 "duplicate.action" = "Дублировать";
+"duplicate.action.count" = "Создать копии: %ld";
+"duplicate.working" = "Создание копий: %ld…";
 "duplicate.error.noProxies" = "В списке нет подходящего прокси: нет прокси этой страны или ни у одного не определён тип.";
 "duplicate.partly" = "Создано копий: %1$ld. Остальные не созданы: %2$@";
 "journal.copied" = "Создан как копия «%@»";
