@@ -1,0 +1,74 @@
+name: Links — VLESS, VMess, Trojan, Shadowsocks
+
+# A profile whose proxy is a share link goes through a relay the app runs (Xray-core) and through
+# nothing else (docs/TUNNEL.md, "Links"). This shows, on macOS:
+#
+# - the relay's build is the pinned one: Xray-core from its source at the pinned commit with the
+#   pinned Go comes out with the SHA-256 scripts/xray.lock records — recorded on Linux, so the same
+#   bytes from two different hosts (scripts/build-xray.sh);
+# - every kind of link Lumen reads, as Lumen's own code configures the relay, works against a real
+#   Xray server — a page and UDP by name, nothing resolved — and the relay takes no one without its
+#   login (scripts/xray_relay_check.py, with its control);
+# - the end-to-end leak test: a profile on each link, started as the app starts one, inside a capture
+#   of every packet of the runner — nothing of the profile's process off loopback, each relay only to
+#   its server, no page's name resolved on the runner, WebRTC through the link, and a relay killed
+#   under a running profile fails closed (scripts/xray_leak_check.py, `Lumen --xray-check`).
+#
+# On a push to a branch claude/xray-*, on request, and from the full pipeline (full.yml).
+on:
+  push:
+    branches: ['claude/xray-*']
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  PB_GEO_SERVICES_OFF: "1"
+
+jobs:
+  links:
+    name: Links — the relay's build, every kind against a real server, and the leak test
+    runs-on: macos-26
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.4'
+          cache: false
+      - name: Xray from its pinned source, the bytes scripts/xray.lock records (arm64 and x86_64)
+        run: |
+          scripts/build-xray.sh --arch arm64 --out "$PWD/build/xray/xray-darwin-arm64"
+          scripts/build-xray.sh --arch amd64 --out "$PWD/build/xray/xray-darwin-amd64"
+          echo "### Xray, as pinned" >> "$GITHUB_STEP_SUMMARY"
+          shasum -a 256 build/xray/xray-darwin-* | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY"
+          ls -l build/xray/xray-darwin-* | sed 's/^/    /' >> "$GITHUB_STEP_SUMMARY"
+      - name: The relay's licences match the pin
+        run: scripts/build-xray.sh --check-notices --out "$PWD/build/xray/xray-darwin-arm64"
+      - name: The links' core tests on macOS (CryptoKit, Foundation's JSON)
+        run: swift test --filter 'ShareLinkTests|XrayLinkProxyTests|FormatPolicyTests|ProxyListTests|ProxyProbeTests|WebRTCGateTests'
+      - name: Every kind of link against a real Xray server (and the door check's control)
+        run: |
+          swift build --product lumen-xray-config
+          python3 -I scripts/xray_relay_check.py --xray build/xray/xray-darwin-arm64 --config-tool .build/debug/lumen-xray-config
+      - name: Build the app with the links' relay (XRAY=1, unsandboxed, ad hoc)
+        run: XRAY=1 XRAY_BINARY="$PWD/build/xray/xray-darwin-arm64" SANDBOX=0 APP_DIR=build/xray-app scripts/build-app.sh
+      - name: The relay as built into the app — signed apart, no entitlement, the pinned version
+        run: |
+          relay=build/xray-app/Lumen.app/Contents/MacOS/LumenXray
+          codesign -dv "$relay" 2>&1 | grep -E '^(Identifier|CodeDirectory|Format)'
+          codesign -d --entitlements - --xml "$relay" 2>/dev/null | grep -c '<key>' | grep -qx 0
+          "$relay" version | head -1
+          ls -l "$relay"
+      - name: The leak test — a profile on each link, inside a capture of every packet
+        timeout-minutes: 40
+        run: python3 -I scripts/xray_leak_check.py --app build/xray-app/Lumen.app --out build/xray-leaks
+      - name: What the leak test saw
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xray-leaks
+          path: |
+            build/xray-leaks/*.txt
+            build/xray-leaks/*.log
+            build/xray-leaks/*.err
+          retention-days: 14
