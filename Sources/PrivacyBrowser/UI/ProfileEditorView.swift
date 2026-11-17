@@ -380,6 +380,9 @@ struct ProfileDraft {
         guard var location = check?.location(for: proxy) else { return }
         if !warnOnProxyIPChange { location.exitIP = nil }
         lastProxyLocation = location
+        // A check that just found the exit answers the launch's failed lookup: the card shows the
+        // fresh place, so the warning beside it would contradict it (a customer's editor).
+        proxyLocationLookupFailed = false
     }
 
     /// The proxy of the chosen mode (nil: none). Throws, in words for the person, when "From the

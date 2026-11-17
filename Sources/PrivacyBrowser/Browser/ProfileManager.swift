@@ -1225,7 +1225,7 @@ final class ProfileManager: ObservableObject {
             return
         }
         proxyLookupFinished(result, for: id, name: name, stored: stored)
-        if running, let found = result.location { sessions[id]?.exitLocation = found }
+        if running, let found = result.location { sessions[id]?.exitLocation = found; proxyLocationUnknown.remove(id) }
         if running, stored.needsProxyLocation, stored.timeZoneIdentifier == nil,
            let zone = result.location?.timeZoneIdentifier, zone != runningZone {
             onError?(String(format: L("launch.proxyZoneChanged"), name, zone))
@@ -1242,6 +1242,8 @@ final class ProfileManager: ObservableObject {
     /// answer about a proxy they replaced (or its credentials) is not kept. The exit IP is kept
     /// only while the warning that asks for it is on. Written only when it changed.
     private func rememberProxyLocation(_ found: ProxyLocation, for id: UUID) {
+        // A lookup that answered ends an earlier one's "unknown" for this profile.
+        proxyLocationUnknown.remove(id)
         do {
             var current = try repository.loadConfiguration(id)
             var found = found

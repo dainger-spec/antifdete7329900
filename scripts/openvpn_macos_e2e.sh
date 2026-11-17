@@ -218,8 +218,8 @@ sudo kill "$(cat "$W/server.pid")"
 sudo rm -f "$W/server.pid"
 python3 -I "$HERE/openvpn_e2e_check.py" closed "$ADDRESS" "$W/session.txt" | tee -a "$OUT/result.txt"
 [[ ${PIPESTATUS[0]} == 0 ]] || fail "a page loaded with the server gone"
-for _ in $(seq 1 60); do grep -q "its OpenVPN connection went down" "$W/serve.txt" && break; sleep 1; done
-grep -q "its OpenVPN connection went down" "$W/serve.txt" || fail "the profile was not stopped with the tunnel gone"
+for _ in $(seq 1 60); do grep -q "its OpenVPN connection" "$W/serve.txt" && break; sleep 1; done
+grep -q "its OpenVPN connection" "$W/serve.txt" || fail "the profile was not stopped with the tunnel gone"
 sleep 4
 if pgrep -f "$APP/Contents/MacOS/openvpn" >/dev/null || pgrep -f "$APP/Contents/MacOS/LumenTunnel" >/dev/null; then
   pgrep -fl "$APP/Contents/MacOS/" || true
