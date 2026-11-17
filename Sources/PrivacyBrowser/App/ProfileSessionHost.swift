@@ -89,6 +89,15 @@ enum ProfileSessionHost {
         // again each time its service ended: in our own window, for ever. Its
         // stub is made here for every profile, not only where Safari's chrome is hosted.
         SafariChrome.stopRefusedServiceLoops()
+        // The app's browsing settings as this process starts: its first window opens by them.
+        if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
+           let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
+            BrowsingPreferences.current = preferences
+        }
+        // Safari's own downloads folder, which its code names and saves to, is the settings' one:
+        // set before Safari's frameworks load, as its other settings for a profile are, since some
+        // of what they read they read as they load.
+        HostedDownloads.nameFolderForSafari(BrowsingPreferences.current)
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
@@ -96,13 +105,6 @@ enum ProfileSessionHost {
         }
         // ⌘, and Settings… in Safari's menu: the manager's Settings, not Safari's.
         SafariChrome.onShowSettings = { ProfileSessionHost.send(.showSettings) }
-        // The app's browsing settings as this process starts: its first window opens by them.
-        if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
-           let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
-            BrowsingPreferences.current = preferences
-        }
-        // Safari's own downloads folder, which its code names and saves to, is the settings' one.
-        HostedDownloads.nameFolderForSafari(BrowsingPreferences.current)
         let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared
