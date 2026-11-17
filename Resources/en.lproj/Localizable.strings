@@ -433,7 +433,7 @@
 "sync.unreadable.file.taken" = "The file %2$@ of the profile “%1$@” could not be read on this Mac — its copy from the sync location was taken. The unreadable file is kept beside it as %3$@.";
 "sync.unreadable.file.none" = "The file %2$@ of the profile “%1$@” cannot be read, and the sync location has no readable copy of it. The file was neither sent nor written over; it can be put back from a backup: %3$@ in the vault's folder.";
 "history.error.save" = "Could not save history: %@";
-"webdata.error.stillInUse" = "WebKit did not release the profile's data: it stays unencrypted on disk until the next stop or unlock seals it.";
+"webdata.error.stillInUse" = "The profile's data is not encrypted yet: WebKit has not let it go. It is encrypted at the next stop or unlock.";
 "error.newerFormat" = "The file %@ was saved by a newer version of Lumen. This version neither reads nor changes it: install the newer version to open it.";
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
@@ -466,32 +466,32 @@
 "index.path" = "Vault folder: %@";
 "index.unreadable.cannotCreate" = "The profile was not created: the profile list (index.bin) could not be read, and it is not written over until it is restored. The Profiles window says how.";
 "settings.device.unreadable" = "This Mac's settings (settings.bin: sync, the automation API) could not be read, so the defaults are shown. The file is not written over: at the first change of settings it is kept beside as settings.bin.unreadable.";
-"launch.error.proxyInvalid" = "The profile's proxy is misconfigured (address “%@”). The profile was not started, so no site opens directly. Fix the proxy address in the profile settings.";
-"launch.error.proxyNeedsCredentials" = "The proxy at “%@” requires a user name and password. The profile was not started, so no site opens directly. Add them in the profile settings.";
-"launch.error.stillSealing" = "“%@” is still being encrypted by its own process, left running when Lumen last quit unexpectedly. The profile was not started; try again in a moment.";
-"launch.languageFixed" = "Websites see the language “%1$@” (set for this run by the first profile launched). For this profile’s proxy they would expect “%2$@”: quit the app and launch this profile first.";
-"launch.proxyIPChanged" = "Profile “%1$@”: its proxy now exits from %3$@ (at the previous launch: %2$@).";
-"launch.proxyNeedsCredentialsStopped" = "The proxy at “%@” now requires a user name and password. The profile was stopped, so no site opens directly. Add them in the profile settings.";
-"launch.proxyZoneChanged" = "Profile “%1$@”: its proxy now exits in the time zone %2$@. The profile uses it from its next launch; pages open now keep the current one.";
-"launch.proxyLocationUnknown.last" = "Profile “%1$@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are those of its last launch (%2$@).";
-"launch.proxyLocationUnknown.mac" = "Profile “%@”: where its proxy exits to the internet could not be found — no geolocation service answered through it (they are often blocked). Its time zone and language are this Mac's, not the proxy country's: a site comparing them with its address sees the mismatch. Set them in the editor, or check the proxy.";
-"launch.directLocationUnknown.last" = "Profile “%1$@” (no proxy): where it exits to the internet could not be found — no geolocation service answered. Its time zone and language are those of its last launch (%2$@).";
-"launch.directLocationUnknown.mac" = "Profile “%@” (no proxy): where it exits to the internet could not be found — no geolocation service answered. Its time zone and language are this Mac's.";
+"launch.error.proxyInvalid" = "The profile was not started: the proxy address “%@” is not valid. Correct it in the profile's settings.";
+"launch.error.proxyNeedsCredentials" = "The proxy “%@” asks for a login and password. The profile was not started — enter them in its settings.";
+"launch.error.stillSealing" = "“%@” is still being encrypted after Lumen quit unexpectedly. Try again in a minute.";
+"launch.languageFixed" = "Sites see the language “%1$@”, and this profile's proxy needs “%2$@”. Quit Lumen and open this profile first.";
+"launch.proxyIPChanged" = "“%1$@”: the proxy now goes out from %3$@ (it was %2$@).";
+"launch.proxyNeedsCredentialsStopped" = "The proxy “%@” now asks for a login and password. The profile was stopped — enter them in its settings.";
+"launch.proxyZoneChanged" = "“%1$@”: the proxy is now in the %2$@ time zone. The profile moves to it at its next start.";
+"launch.proxyLocationUnknown.last" = "“%1$@”: the proxy's country could not be found. The time zone and language are as at the last start (%2$@).";
+"launch.proxyLocationUnknown.mac" = "“%@”: the proxy's country could not be found, so the time zone and language are this Mac's. Set them in the profile's settings, or check the proxy.";
+"launch.directLocationUnknown.last" = "“%1$@”: where its connection comes out could not be found. The time zone and language are as at the last start (%2$@).";
+"launch.directLocationUnknown.mac" = "“%@”: where its connection comes out could not be found. The time zone and language are this Mac's.";
 "profiles.exit.lookupFailed" = "At the last launch no geolocation service answered through the proxy: where it exits is not confirmed.";
 "editor.location.lookupFailed" = "At the last launch no geolocation service answered through the proxy — where it exits is not confirmed, and the time zone and language did not come from it.";
-"launch.webrtcOff.httpProxy" = "WebRTC is off in this profile: an HTTP proxy cannot carry UDP. WebRTC through a proxy needs SOCKS5.";
-"launch.webrtcOff.guardNotInBuild" = "WebRTC is off in this profile: this version of Lumen has no network guard, and without it WebRTC's UDP could leave around the proxy from this Mac's real address.";
-"launch.webrtcOff.guardNotInstalled" = "WebRTC is off in this profile: Lumen's network guard is not installed. Install it under Settings › WebRTC through proxies; until then WebRTC stays off in every profile with a proxy.";
-"launch.webrtcOff.guardAwaitingApproval" = "WebRTC is off in this profile: the network guard waits for your permission in System Settings › General › Login Items & Extensions › Network Extensions.";
-"launch.webrtcOff.guardOff" = "WebRTC is off in this profile: the network guard is switched off in System Settings. Turn it on under Settings › WebRTC through proxies.";
-"launch.webrtcOff.guardNotAnswering" = "WebRTC is off in this profile: the network guard does not answer (it may be updating). Start the profile again in a minute.";
-"launch.webrtcOff.guardUnproven" = "WebRTC is off in this profile: it is not confirmed yet on this Mac that the network guard sees the profile's connections. The check runs by itself; if it failed, Settings › WebRTC through proxies says so.";
-"launch.webrtcOff.proxyWithoutUDP" = "WebRTC is off in this profile: its proxy does not carry UDP (UDP ASSOCIATE refused, or nothing came back through it). WebRTC needs a SOCKS5 proxy with UDP.";
-"launch.webrtcOff.proxyUDPElsewhere" = "WebRTC is off in this profile: its proxy sends UDP out from another address than its TCP. A site would see two different addresses — and learn that the profile goes through a proxy. WebRTC needs a proxy whose UDP and TCP leave from one address.";
-"launch.webrtcOff.proxyExitUnknown" = "WebRTC is off in this profile: the address its proxy leaves from could not be found out, and without it there is no telling that WebRTC would leave from the same address as the pages. Start the profile again; if it happens again, the proxy does not let the address check through (a request to 1.1.1.1), and WebRTC will not go through it.";
-"launch.webrtcOff.proxyUDPUnknown" = "WebRTC is off in this profile: whether its proxy carries UDP could not be found out before it started. Check the proxy under Proxies and start the profile again.";
-"launch.webrtcOff.notOwnProcess" = "WebRTC is off in this profile: through a proxy it works only for a profile in a process of its own, and this build runs profiles inside the app.";
-"launch.webrtcOff.notRegistered" = "WebRTC is off in this profile: the network guard did not take the profile's process, or its relay could not start.";
+"launch.webrtcOff.httpProxy" = "WebRTC is off: an HTTP proxy carries no UDP. It needs a SOCKS5 proxy.";
+"launch.webrtcOff.guardNotInBuild" = "WebRTC is off: this version of Lumen has no network guard.";
+"launch.webrtcOff.guardNotInstalled" = "WebRTC is off: the network guard is not installed. Install it in Settings › WebRTC Through the Proxy.";
+"launch.webrtcOff.guardAwaitingApproval" = "WebRTC is off: the network guard is waiting for your approval in System Settings › General › Login Items & Extensions.";
+"launch.webrtcOff.guardOff" = "WebRTC is off: the network guard is turned off. Turn it on in Settings › WebRTC Through the Proxy.";
+"launch.webrtcOff.guardNotAnswering" = "WebRTC is off: the network guard does not answer. Start the profile again in a minute.";
+"launch.webrtcOff.guardUnproven" = "WebRTC is off: the network guard is still being checked on this Mac. The result is in Settings › WebRTC Through the Proxy.";
+"launch.webrtcOff.proxyWithoutUDP" = "WebRTC is off: the proxy carries no UDP. It needs a SOCKS5 proxy with UDP.";
+"launch.webrtcOff.proxyUDPElsewhere" = "WebRTC is off: the proxy's UDP goes out from another address, and a site would see two.";
+"launch.webrtcOff.proxyExitUnknown" = "WebRTC is off: the proxy's exit address could not be found. Start the profile again.";
+"launch.webrtcOff.proxyUDPUnknown" = "WebRTC is off: the proxy's UDP could not be checked. Check the proxy in the Proxies section.";
+"launch.webrtcOff.notOwnProcess" = "WebRTC is off: this build runs profiles inside the app.";
+"launch.webrtcOff.notRegistered" = "WebRTC is off: the network guard did not take the profile's process.";
 "library.bookmarks.empty" = "No bookmarks. Use ☆ in the toolbar or ⌘D to bookmark a page.";
 "library.edit" = "Edit…";
 "library.editor.choose" = "Choose";
@@ -1240,7 +1240,7 @@
 "sync.to" = "Sync to";
 "tab.newTab" = "New Tab";
 "tab.stopped.title" = "This page stopped working";
-"tab.stopped.body" = "This page's process ended several times in a row, so the tab no longer reloads it by itself, to spare your Mac. Reload when you're ready, or go to another address.";
+"tab.stopped.body" = "The page crashed several times in a row, so the tab no longer reloads it by itself. Reload when you are ready.";
 "tab.stopped.reload" = "Reload";
 "toolbar.back" = "Back";
 "toolbar.forward" = "Forward";
@@ -1457,26 +1457,26 @@
 "window.profiles.title" = "Profiles";
 
 /* Network guard of a profile's own process */
-"network.webViewOffProfile" = "A page of this profile was about to open outside its data and proxy, and was stopped: better a page that does not open than one opened from this Mac's own address. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
-"safari.chrome.missingPieces" = "This macOS's Safari no longer has parts the Safari window of a profile relies on (%@). The profile still loads only through its proxy, but some of Safari's window may misbehave; an update of Lumen is needed.";
+"network.webViewOffProfile" = "Loading was stopped: the page nearly opened outside the profile's data and proxy. Please tell us, with the diagnostics (Settings → Diagnostics).";
+"safari.chrome.missingPieces" = "This macOS's Safari lacks parts of the profile's window (%@). The proxy works as before, but the window may misbehave — Lumen needs an update.";
 "safari.unavailable.title" = "This Safari feature is not available in a profile";
-"safari.unavailable.item" = "“%@” relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
-"safari.unavailable.action" = "This relies on services of the real Safari that a profile does not have, so it did not work. The profile keeps running; the details are in the log.";
+"safari.unavailable.item" = "“%@” works through Safari services a profile does not have. The profile keeps running.";
+"safari.unavailable.action" = "This works through Safari services a profile does not have. The profile keeps running.";
 "simplified.chip" = "Simplified mode";
 "simplified.title" = "This profile runs in a simplified mode";
-"simplified.body" = "Its window is the app's own, not Safari's. The profile goes through its proxy and keeps its data as always, but it does not match Safari: without Safari's window this is plain WebKit, and sites can tell.";
+"simplified.body" = "The profile's window is Lumen's, not Safari's. The proxy and data are the same, but sites can tell it from Safari.";
 "simplified.why" = "Why: %@";
-"simplified.reason.sandboxed" = "this build of Lumen runs in the App Sandbox, where Safari's window cannot be hosted. The build without the App Sandbox hosts it.";
+"simplified.reason.sandboxed" = "this build of Lumen runs in the App Sandbox, where Safari's window does not open.";
 "simplified.reason.turnedOff" = "Safari's window is turned off for profiles (PB_SAFARI_CHROME=0).";
 "simplified.reason.noProfileProcess" = "profiles run inside the app's own process (PB_PROFILE_PROCESS or the PBProfileProcess setting), and Safari's window is hosted only in a profile's own process.";
-"simplified.reason.frameworks" = "Safari's frameworks on this macOS did not load. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
-"simplified.reason.missingPieces" = "this macOS's Safari no longer has parts its window cannot come up without (%@). Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
-"simplified.reason.notSafarisApplication" = "the profile's process could not become Safari's application. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
-"simplified.reason.windowDidNotOpen" = "Safari did not open its window for this profile. Please report this with the diagnostics: Settings → Diagnostics → Collect Diagnostics…";
+"simplified.reason.frameworks" = "Safari's frameworks on this macOS did not load. Please tell us, with the diagnostics (Settings → Diagnostics).";
+"simplified.reason.missingPieces" = "this macOS's Safari lacks parts of its window (%@). Please tell us, with the diagnostics (Settings → Diagnostics).";
+"simplified.reason.notSafarisApplication" = "the profile's process could not become Safari's application. Please tell us, with the diagnostics (Settings → Diagnostics).";
+"simplified.reason.windowDidNotOpen" = "Safari did not open its window for this profile. Please tell us, with the diagnostics (Settings → Diagnostics).";
 "safari.autofill.closed.title" = "AutoFill from this Mac is off in profiles";
-"safari.autofill.closed.text" = "This Mac's passwords, cards and contact card are yours, not the profile's: a profile does not fill its pages from them. The profile's own passwords are in its Passwords window.";
+"safari.autofill.closed.text" = "This Mac's passwords and cards are yours, not the profile's. The profile's own passwords are in its Passwords window.";
 "safari.outside.title" = "Not available in a profile";
-"safari.outside.text" = "This works outside the profile — through Safari's own web apps, this Mac's keychain or its Messages account — so a profile does not offer it.";
+"safari.outside.text" = "This works through this Mac's Safari, keychain or Messages, not through the profile.";
 
 /* Profile export and import; crash recovery */
 "profiles.row.export" = "Export Profile…";
@@ -1516,8 +1516,8 @@
 "recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
 "recovery.webDataNotSealed" = "Could not encrypt the data of profile “%1$@” again: %2$@";
 "profile.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@”: %2$@. It is encrypted again at the next unlock.";
-"profile.crashed" = "Profile “%@” ended unexpectedly. Its data is encrypted: its next launch has its sign-ins and cookies, but not the tabs it had open.";
-"profile.crashedUnsealed" = "Profile “%@” ended unexpectedly, and its data is not encrypted yet: that happens at the next unlock.";
+"profile.crashed" = "“%@” quit unexpectedly. Its sign-ins and cookies are kept; its open tabs are not.";
+"profile.crashedUnsealed" = "“%@” quit unexpectedly. Its data is encrypted at the next unlock.";
 
 /* Warm-up: several profiles in a queue, a schedule, what a run left per site */
 "profiles.menu.warmUpSeveral" = "Warm Up Several Profiles…";
@@ -2714,7 +2714,7 @@
 "inspector.webDriver.hidden" = "WebDriver address, token hidden";
 "inspector.checkProfile" = "Check the profile";
 "profiles.menu.guard" = "WebRTC through proxies (network guard)…";
-"launch.guardLost" = "Lumen's network guard stopped answering while the profile “%@” used WebRTC through its proxy. The profile was stopped so that nothing goes around the proxy; start it again — WebRTC comes back once the guard is ready again.";
+"launch.guardLost" = "“%@” was stopped: the network guard stopped answering. Start it again.";
 "guard.title" = "WebRTC through proxies";
 "guard.status" = "Status";
 "guard.configurationName" = "Lumen network guard";
@@ -2962,13 +2962,19 @@
 "vm.error.listUnreadable" = "The list of virtual machines could not be read, so nothing is written over it.";
 "vm.error.load" = "The list of virtual machines could not be read (%@). The machines' disks are untouched.";
 "vm.error.deleteRunning" = "Shut the machine down before deleting it.";
-"vm.download.error.refused" = "Apple's server refused the download. Try again later — or download the file another way (“Copy Apple's link”) and choose it with “I have the file…”.";
-"vm.download.error.incomplete" = "The download broke off. Press Continue: it goes on from where it stopped.";
-"vm.download.error.notFetchable" = "Apple gave an address that cannot be downloaded from.";
-"vm.download.error.keepsChanging" = "Apple's file changed several times while it was being downloaded. Try again later.";
-"vm.download.error.noRoom" = "This Mac's disk is full, so the download stopped. What was downloaded is kept: free some space and press Continue — it goes on from where it stopped.";
-"vm.download.error.network" = "The download stopped: the connection to Apple's servers was lost again and again. What was downloaded is kept: check this Mac's internet connection (a VPN or a filter can be in the way) and press Continue.";
-"vm.download.error.other" = "The download stopped. What was downloaded is kept: press Continue to go on from where it stopped.";
+"vm.download.error.refused" = "Apple's server refused the download";
+"vm.download.error.refused.detail" = "Try again later. Or download the file yourself (Copy Apple's link) and choose it with “I have the file…”.";
+"vm.download.error.incomplete" = "The download broke off";
+"vm.download.error.incomplete.detail" = "Press Continue — it goes on from where it stopped.";
+"vm.download.error.notFetchable" = "Apple gave an address that cannot be downloaded from";
+"vm.download.error.keepsChanging" = "Apple's file kept changing while it downloaded";
+"vm.download.error.keepsChanging.detail" = "Try again later.";
+"vm.download.error.noRoom" = "The download stopped: the disk is full";
+"vm.download.error.noRoom.detail" = "What was downloaded is kept. Free some space and press Continue.";
+"vm.download.error.network" = "The download stopped: the connection to Apple keeps dropping";
+"vm.download.error.network.detail" = "What was downloaded is kept. Check the internet connection — a VPN or a filter may be in the way — and press Continue.";
+"vm.download.error.other" = "The download stopped";
+"vm.download.error.other.detail" = "What was downloaded is kept. Press Continue to go on from where it stopped.";
 "vm.window.stop" = "Shut Down the Virtual Machine…";
 "vm.window.stopQuestion" = "Shut down this virtual machine?";
 "vm.window.stopDetail" = "Its macOS shuts down as a Mac does; what is open in it is closed.";
@@ -3426,7 +3432,7 @@
 "scenarios.schedule.several" = "%1$@ · profiles: %2$d";
 "scenarios.steps.count" = "Steps: %d";
 "scenarios.steps.code" = "own code";
-"scenarios.takes" = "takes %@";
+"scenarios.takes" = "needs %@";
 "scenarios.when.today" = "today, %@";
 "scenarios.when.yesterday" = "yesterday, %@";
 "scenarios.length.seconds" = "%d s";
@@ -3533,7 +3539,7 @@
 "scenarios.run.never" = "Not run yet";
 "scenarios.run.going" = "Running: %1$d of %2$d";
 "scenarios.run.done" = "Done: %1$d of %2$d";
-"scenarios.run.someFailed" = "Done: %1$d of %2$d · failed: %3$d";
+"scenarios.run.someFailed" = "%1$d of %2$d · %3$d failed";
 "scenarios.run.wasStopped" = "Stopped: %1$d of %2$d done";
 "scenarios.run.copy" = "Copy the Table";
 "scenarios.run.csv" = "CSV…";
@@ -3797,9 +3803,9 @@
 "warm.result.stopped" = "Stopped, sites: %ld";
 "warm.result.blocked" = "CAPTCHA on sites: %1$ld of %2$ld";
 "warm.result.failed" = "Sites that did not load: %ld";
-"warm.advice.proxy" = "Three pages in a row did not load, and the warm-up stopped. Check the profile’s proxy.";
-"warm.advice.notStarted" = "The profile could not be started — most often because of its proxy.";
-"warm.advice.blocked" = "Lumen does not answer a CAPTCHA and leaves such a page. Another IP usually helps.";
+"warm.advice.proxy" = "Three pages in a row did not load. Check the profile's proxy.";
+"warm.advice.notStarted" = "Most often the proxy is in the way.";
+"warm.advice.blocked" = "Lumen does not solve captchas and leaves such pages. Another IP usually helps.";
 "warm.site.failed" = "did not load";
 "warm.site.timedOut" = "took over 30 s to load";
 "warm.site.sensitive" = "a sign-in or payment page — skipped";
@@ -3948,8 +3954,8 @@
 "profiles.row.warmed" = "Warmed up %@";
 
 /* OpenVPN connections (docs/OPENVPN.md) */
-"launch.error.openVPN" = "“%1$@” was not started: its OpenVPN connection did not come up, so no site opens directly. %2$@";
-"launch.openVPNLost" = "“%1$@” was stopped: its OpenVPN connection went down and did not come back, and nothing goes around it. %2$@ Start the profile again to reconnect.";
+"launch.error.openVPN" = "“%1$@” was not started: its OpenVPN connection did not come up. %2$@";
+"launch.openVPNLost" = "“%1$@” was stopped: its OpenVPN connection dropped. %2$@ Start the profile again.";
 "openvpn.failure.notInThisBuild" = "This build of Lumen has no OpenVPN.";
 "openvpn.failure.needsOwnProcess" = "OpenVPN works only for a profile in its own process, which this build does not have.";
 "openvpn.failure.credentialsNeeded" = "The VPN server asks for a user name and password: add them to the connection in Settings › Proxies.";
@@ -4003,7 +4009,7 @@
 
 /* Cookie recovery: snapshots of a profile's cookies, put back when its store lost them (CookieSnapshotKeeper, CookieRecoveryNotice, CookieSnapshotsView; docs/COOKIE_RECOVERY.md) */
 "cookieRecovery.notice" = "Cookies were restored from a snapshot of %@";
-"cookieRecovery.notice.detail" = "The profile’s cookie store had lost them after the last run. Cookies back: %ld.";
+"cookieRecovery.notice.detail" = "The profile's store had lost them since its last run. Brought back: %ld.";
 "cookieRecovery.notice.close" = "Close";
 "editor.cookies.snapshots" = "Keep cookie snapshots and restore lost cookies";
 "editor.cookies.snapshots.footer" = "While the profile runs, Lumen keeps its last three snapshots of its persistent cookies, encrypted with the profile’s data on this Mac — never synced. If a crash, a forced quit or a damaged store loses them, the next launch puts them back before the first page loads and says so. Turning this off removes the snapshots.";
@@ -4032,9 +4038,9 @@
 "journal.cookiesRecovered.plain" = "Lost cookies restored from a snapshot";
 "journal.cookiesRestored" = "Cookies restored from the snapshot of %@";
 "journal.cookiesRestored.plain" = "Cookies restored from a snapshot";
-"launch.error.relayNotInBuild" = "“%@” connects through a VLESS, VMess, Trojan or Shadowsocks link, and this build of Lumen has no relay for links. The profile was not started.";
-"launch.error.relayDidNotStart" = "The relay for the link of “%@” did not start, so the profile was not started: nothing goes around the link. Check the link in the Proxies section.";
-"launch.relayEnded" = "The relay for the link of “%@” stopped and could not be started again. The profile was stopped; its pages went nowhere meanwhile. Start it again.";
+"launch.error.relayNotInBuild" = "“%@” was not started: this build of Lumen has no support for VLESS, VMess, Trojan and Shadowsocks links.";
+"launch.error.relayDidNotStart" = "“%@” was not started: the link's relay did not start. Check the link in the Proxies section.";
+"launch.relayEnded" = "“%@” was stopped: the link's relay stopped working. Start the profile again.";
 "vm.error.relay" = "The link's relay did not start";
 "vm.error.relay.detail" = "So the machine was not started. Check the link in the Proxies section.";
 "vm.error.relayEnded" = "The link's relay stopped";

@@ -350,13 +350,17 @@ final class VMCenter: ObservableObject {
                 }
             }
         }, onFinish: { [weak self] result in
-            let failure: String?
-            if case .failure(let error) = result { failure = errorText(error) } else { failure = nil }
+            let failure: VMProblem?
+            if case .failure(let error) = result {
+                failure = (error as? VMImageDownloader.Failure)?.problem ?? VMProblem(errorText(error))
+            } else {
+                failure = nil
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self, self.setupRun == run else { return }
                     self.downloader = nil
-                    if let failure { return self.setupFailed(VMProblem(failure)) }
+                    if let failure { return self.setupFailed(failure) }
                     self.install()
                 }
             }

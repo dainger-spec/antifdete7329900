@@ -364,9 +364,18 @@ struct WarmUpReportSheet: View {
                     .font(.lumenSecondary).foregroundStyle(Theme.textSecondary).monospacedDigit()
                     .fixedSize(horizontal: false, vertical: true)
                 if let remark = WarmUpText.remark(run) {
-                    Label(remark + (advice.map { " " + $0 } ?? ""), systemImage: "exclamationmark.triangle.fill")
-                        .font(.lumenSecondary).foregroundStyle(remarkColor)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // What went wrong, then what to do, on a line of its own: run together they read
+                    // «Прокси не отвечает Три страницы подряд…».
+                    VStack(alignment: .leading, spacing: 3) {
+                        Label(remark, systemImage: "exclamationmark.triangle.fill")
+                            .font(.lumenSecondary.weight(.medium)).foregroundStyle(remarkColor)
+                        if let advice {
+                            Text(advice)
+                                .font(.lumenSecondary).foregroundStyle(Theme.textSecondary)
+                                .padding(.leading, 21)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .padding(.horizontal, 24)
