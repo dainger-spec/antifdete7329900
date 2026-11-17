@@ -320,7 +320,10 @@ enum SweepSteps {
         for (name, all) in byClass {
             let views = all.filter { $0.frame.height >= 16 && $0.frame.height <= 64 && $0.frame.width >= 40 }
             guard views.count >= 2, views.count <= max(count, 2) else { continue }
-            let area = views.reduce(CGFloat(0)) { $0 + $1.frame.width * $1.frame.height }
+            // A tab's own button first (Safari 26 and 27: UnifiedTabBarButton), before the bar's
+            // filters and containers, which can be as many and are wider (CI run 44012019641).
+            let isButton = name.hasSuffix("TabBarButton") || name.hasSuffix("TabButton")
+            let area = views.reduce(CGFloat(0)) { $0 + $1.frame.width * $1.frame.height } + (isButton ? 1e9 : 0)
             if best == nil || area > (best?.2 ?? 0) { best = (name, views, area) }
         }
         guard let best else { return ([], said) }
