@@ -166,5 +166,6 @@ end with the run. A profile made ephemeral loses its snapshots at the save.
   again; cookies deleted through WebDriver copied at once and not brought back when the store is lost
   after; an ephemeral profile keeps none. In a profile's own process (the unsandboxed build) — the
   process killed with SIGKILL and its cookie file damaged: the cookies are back at the next launch, the
-  notice shown in its window; then deleted through WebDriver, killed and damaged again: nothing comes
-  back.
+  notice shown in its window; then deleted through WebDriver, killed and its store removed: nothing
+  comes back. Measured on macOS 26.7.2 (CI run 953, a scratch branch): every one of these passed but
+  the last, whose first form damaged a cookie file that an emptied store no longer has.

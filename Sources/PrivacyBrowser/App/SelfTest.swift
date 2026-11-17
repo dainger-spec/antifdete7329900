@@ -7188,8 +7188,8 @@ final class SelfTest {
     /// page loaded; cookies deleted through Lumen (WebDriver) are copied at once and stay deleted
     /// when the store is lost after; an ephemeral profile keeps no snapshot. In a profile's own
     /// process (the unsandboxed build): the process killed, its cookie file damaged, the cookies back
-    /// at the next launch, said in its window; then deleted through Lumen, the process killed and the
-    /// file damaged again — and nothing comes back.
+    /// at the next launch, said in its window; then deleted through Lumen, the process killed and its
+    /// store removed — and nothing comes back.
     private func cookieRecovery(_ repository: ProfileRepository) async throws {
         let names = ["here: cookies come back when the website data is removed", "here: cookies come back when the cookie file is damaged",
                      "here: cookies deleted through Lumen are copied at once and not brought back"]
@@ -7331,11 +7331,11 @@ final class SelfTest {
 
     /// The process of a profile killed with its cookie file damaged after, as a crash and a damaged
     /// store leave it (`cookieRecovery`): its cookies come back at the next launch, said in its window;
-    /// deleted through Lumen, then killed and damaged again: nothing comes back.
+    /// deleted through Lumen, then killed and its store removed: nothing comes back.
     private func cookieRecoveryInItsOwnProcess(_ repository: ProfileRepository, start: URL, proxy: ProxySettings,
                                                cookies: [ImportedCookie]) async throws {
         let restoredName = "cookie recovery, in a profile's own process: killed, its cookie file damaged — its cookies are back at the next launch, said in its window"
-        let clearedName = "cookie recovery, in a profile's own process: deleted through Lumen, killed, its cookie file damaged — nothing comes back"
+        let clearedName = "cookie recovery, in a profile's own process: deleted through Lumen, killed, its store removed — nothing comes back"
         guard !AppEnvironment.isSandboxed else {
             skip(restoredName, "the sandboxed build runs no process per profile", .build)
             skip(clearedName, "the sandboxed build runs no process per profile", .build)
@@ -7377,19 +7377,30 @@ final class SelfTest {
             return up && exited == nil
         }
         /// Killed as a crash ends it; then its WebKit data — sealed into its home by the manager, as
-        /// any crash leaves it — has its cookie file cut short, as damage leaves it.
-        func killAndDamage() async throws -> Int {
+        /// any crash leaves it — has its cookie file cut short, as damage leaves it, or (`removing`)
+        /// the store's directories removed, as a store that went missing. How many were.
+        func killAndDamage(removing: Bool = false) async throws -> Int {
             guard let pid = manager.processIdentifier(of: profile.id) else { return -1 }
             _ = kill(pid, SIGKILL)
             guard await waitUntil(timeout: 30, { exited != nil }) else { return -1 }
             try homes.prepareForLaunch(profileID: profile.id, key: key)
             let target = profile.id.uuidString.lowercased()
             var damaged = 0
+            var stores: [URL] = []
             if let walk = FileManager.default.enumerator(at: homes.homeDirectory(for: profile.id), includingPropertiesForKeys: nil) {
-                for case let file as URL in walk where file.pathExtension == "binarycookies" && file.path.lowercased().contains(target) {
-                    try Data(try Data(contentsOf: file).prefix(12)).write(to: file)
-                    damaged += 1
+                for case let file as URL in walk {
+                    if removing, file.lastPathComponent.lowercased() == target {
+                        stores.append(file)
+                        walk.skipDescendants()
+                    } else if !removing, file.pathExtension == "binarycookies", file.path.lowercased().contains(target) {
+                        try Data(try Data(contentsOf: file).prefix(12)).write(to: file)
+                        damaged += 1
+                    }
                 }
+            }
+            for store in stores {
+                try FileManager.default.removeItem(at: store)
+                damaged += 1
             }
             try homes.seal(profileID: profile.id, key: key)
             return damaged
@@ -7420,7 +7431,8 @@ final class SelfTest {
                   + "cookie files cut short \(damaged), up again \(back), told \(recovered.map { "\($0.cause.rawValue) \($0.restored) notice \($0.noticeShown)" }), "
                   + "the store now \(exported.map { $0.name })")
 
-        // Deleted through Lumen in its process (WebDriver), killed, the file damaged again: nothing back.
+        // Deleted through Lumen in its process (WebDriver), killed, its store removed: nothing back. (An
+        // emptied store has no cookie file left to damage: WebKit writes none for no cookie.)
         func driver(_ command: String, _ body: String = "{}") async -> WebDriverAnswer {
             await manager.webDriver(profile.id, WebDriverCall(id: UUID(), command: command, element: nil, name: nil, body: body))
         }
@@ -7428,7 +7440,7 @@ final class SelfTest {
         let afterDelete = (try? repository.cookieSnapshots(for: profile.id))?.latest
         _ = await driver("close")
         var damagedAgain = -1
-        if back { damagedAgain = try await killAndDamage() }
+        if back { damagedAgain = try await killAndDamage(removing: true) }
         recovered = []
         let backAgain = await launchUp()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -7438,7 +7450,7 @@ final class SelfTest {
         check(clearedName,
               driven && afterDelete?.cookies.isEmpty == true && damagedAgain > 0 && backAgain && recovered.isEmpty && !cameBack,
               "WebDriver \(answers.map { $0.error?.message ?? "ok" }), copied after the deletion \(afterDelete.map { "\($0.trigger.rawValue): \($0.cookies.count)" } ?? "none"), "
-                  + "cookie files cut short \(damagedAgain), up again \(backAgain), told \(recovered.count), the store now \(exportedAgain.map { $0.name })")
+                  + "store directories removed \(damagedAgain), up again \(backAgain), told \(recovered.count), the store now \(exportedAgain.map { $0.name })")
         try? await manager.stop(profile.id)
         info("cookie recovery, own process: messages \(messages)")
     }
