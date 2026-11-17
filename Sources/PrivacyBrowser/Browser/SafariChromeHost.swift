@@ -191,6 +191,8 @@ enum SafariChromeHost {
         HistoryMenuRoute.install(session: session)
         // View › Show Downloads lists the profile's downloads (`HostedDownloads`).
         HostedDownloads.routeMenu()
+        // The keys of the items routed here are theirs, where a menu's delegate answers for its keys.
+        if let bar = NSApp.mainMenu { SafariWindowGuard.guardMenuKeys(in: bar) }
         // What the windows hold is the profile's to open again at its next start (`SafariTabs`).
         SafariTabs.follow()
         if let window = controller.window, !kept.isEmpty { SafariTabs.reopen(kept, first: window) }

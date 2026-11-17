@@ -1311,6 +1311,8 @@ enum SafariChrome {
         addPasteAsTyped(to: menu)
         retargetNewWindow(in: menu)
         NSApplication.shared.mainMenu = menu
+        // Its menus whose delegate answers for their keys itself: a retargeted item's key is its own.
+        SafariWindowGuard.guardMenuKeys(in: menu)
         keepAutoFillInsertItemsOut()
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true

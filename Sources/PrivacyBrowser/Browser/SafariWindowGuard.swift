@@ -20,10 +20,15 @@ import os
 ///     `+[NSLayoutConstraint safari_constraintsMatchingFrameOfView:withFrameOfView:edgeInsets:]` threw
 ///     on the nil: once a page was in the Reading List, its sidebar stayed empty (chosen from the
 ///     menu) or ended the process (⌃⌘2). No view, no constraints to match it: an empty list.
-///   * Bookmarks › Add Bookmark… (⌘D) put each bookmark folder in its sheet's location menu, and a
-///     folder with no title — a tab group's, once the profile had one — threw in
-///     `-[NSMenu safari_addMenuItemForBookmarkFolder:]`: the sheet never came. That folder is left
-///     out of the menu and the sheet comes.
+///   * Bookmarks › Add Bookmark… (⌘D) put each bookmark folder in its sheet's location menu, and
+///     once the profile had a tab group it was handed a folder that is not there (nil: the group's
+///     favorites, CI run 43999545658) — `-[NSMenu safari_addMenuItemForBookmarkFolder:]` threw on its
+///     title and the sheet never came. No folder, no menu item: the sheet comes.
+///   * File › New Window's key (⌘N) did nothing: the File menu's delegate (Safari's AppController)
+///     answers for the menu's key equivalents itself (`menuHasKeyEquivalent:forEvent:target:action:`),
+///     so AppKit never looked at the item, which opens a window of the profile chosen by a click
+///     (`SafariChrome.retargetNewWindow`). An item of the menu that this app retargeted answers its
+///     own key.
 @MainActor
 enum SafariWindowGuard {
     nonisolated private static let log = Logger(subsystem: "PrivacyBrowser", category: "SafariChrome")
@@ -44,6 +49,57 @@ enum SafariWindowGuard {
     /// Exceptions AppKit uses to end a modal session or a print job, which must go on up as they
     /// would have.
     nonisolated static let passedOn: Set<String> = ["NSAbortModalException", "NSAbortPrintingException"]
+
+    /// The menus of `bar` whose delegate answers for their key equivalents itself: an item this app
+    /// retargeted (its target is one of this app's own objects) answers its own key there. Called
+    /// once Safari's menu bar is up (`SafariChrome.installMainMenu`).
+    static func guardMenuKeys(in bar: NSMenu) {
+        let selector = NSSelectorFromString("menuHasKeyEquivalent:forEvent:target:action:")
+        func walk(_ menu: NSMenu) {
+            if let delegate = menu.delegate, let owner = object_getClass(delegate),
+               menu.items.contains(where: isRetargeted), !guarded.contains("keys " + NSStringFromClass(owner)),
+               let method = class_getInstanceMethod(owner, selector) {
+                wrapKeyAnswer(method, selector: selector)
+                guarded.insert("keys " + NSStringFromClass(owner))
+            }
+            for item in menu.items { if let submenu = item.submenu { walk(submenu) } }
+        }
+        walk(bar)
+    }
+
+    /// An item whose target is one of this app's own objects (its class is in this app's
+    /// executable, not in a framework): put there in place of Safari's.
+    static func isRetargeted(_ item: NSMenuItem) -> Bool {
+        guard let target = item.target, item.action != nil, !item.keyEquivalent.isEmpty,
+              let image = class_getImageName(type(of: target)) else { return false }
+        return String(cString: image).contains("/Contents/MacOS/")
+    }
+
+    private static func wrapKeyAnswer(_ method: Method, selector: Selector) {
+        typealias Answer = @convention(c) (AnyObject, Selector, NSMenu, NSEvent, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool
+        let original = unsafeBitCast(method_getImplementation(method), to: Answer.self)
+        let replacement: @convention(block) (AnyObject, NSMenu, NSEvent, UnsafeMutableRawPointer?, UnsafeMutableRawPointer?) -> Bool = { delegate, menu, event, target, action in
+            let answered = original(delegate, selector, menu, event, target, action)
+            guard let item = menu.items.first(where: { isRetargeted($0) && SafariWindowGuard.matches(event, $0) }),
+                  let itemTarget = item.target, let target, let action else { return answered }
+            target.assumingMemoryBound(to: UnsafeRawPointer?.self).pointee = UnsafeRawPointer(Unmanaged.passUnretained(itemTarget).toOpaque())
+            action.assumingMemoryBound(to: Selector?.self).pointee = item.action
+            return true
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
+
+    /// Whether a key press is `item`'s key equivalent: its modifiers, and its character as the
+    /// keyboard's layout gives it with or without them (a Russian layout gives Latin with ⌘).
+    static func matches(_ event: NSEvent, _ item: NSMenuItem) -> Bool {
+        guard event.type == .keyDown, !item.keyEquivalent.isEmpty else { return false }
+        let relevant: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
+        var wanted = item.keyEquivalentModifierMask.intersection(relevant)
+        let key = item.keyEquivalent.lowercased()
+        if key != item.keyEquivalent { wanted.insert(.shift) }
+        guard event.modifierFlags.intersection(relevant) == wanted else { return false }
+        return [event.charactersIgnoringModifiers, event.characters].contains { $0?.lowercased() == key }
+    }
 
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
@@ -140,7 +196,16 @@ enum SafariWindowGuard {
                     guard let type = ivar_getTypeEncoding(ivar), type.pointee == CChar(UInt8(ascii: "@")) else { continue }
                     let ivarName = ivar_getName(ivar).map { String(cString: $0) } ?? "?"
                     let value = base.advanced(by: ivar_getOffset(ivar)).load(as: UnsafeRawPointer?.self)
-                    if value == nil { empty.append(ivarName) } else { set += 1 }
+                    guard value == nil else {
+                        set += 1
+                        continue
+                    }
+                    // Its declared class, and whether this process has that class at all.
+                    let encoding = String(cString: type)
+                    let declared = encoding.count > 3 ? String(encoding.dropFirst(2).dropLast()) : ""
+                    let className = declared.split(separator: "<").first.map(String.init) ?? ""
+                    let present = className.isEmpty ? "" : (NSClassFromString(className) == nil ? " absent" : "")
+                    empty.append(declared.isEmpty ? ivarName : "\(ivarName) \(declared)\(present)")
                 }
                 free(list)
             }
@@ -159,6 +224,11 @@ enum SafariWindowGuard {
         typealias Add = @convention(c) (AnyObject, Selector, AnyObject?) -> AnyObject?
         let original = unsafeBitCast(method_getImplementation(method), to: Add.self)
         let replacement: @convention(block) (AnyObject, AnyObject?) -> AnyObject? = { menu, folder in
+            guard folder != nil else {
+                countCaught()
+                log.notice("Safari asked for a menu item for a bookmark folder that is not there: none")
+                return nil
+            }
             var item: AnyObject?
             guard let thrown = PBCatchException({ item = original(menu, selector, folder) }) else { return item }
             if passedOn.contains(thrown.name.rawValue) { thrown.raise() }
