@@ -40,6 +40,15 @@ struct RootView: View {
                 welcomeSplash(welcome)
                     .zIndex(2)
             }
+            if let installed = model.installedUpdate, model.welcome == nil || model.welcomeFinished {
+                // The first launch of a new version: once, over the lock screen, taking no keyboard
+                // from its password field (`UpdateInstalledCard`).
+                UpdateInstalledCard(update: installed) {
+                    withAnimation(Theme.appearAnimation) { model.installedUpdate = nil }
+                }
+                .transition(.opacity)
+                .zIndex(3)
+            }
         }
         .onAppear { showsProfiles = model.phase == .unlocked }
         .onChange(of: model.phase) { _, phase in
@@ -476,15 +485,18 @@ struct ProfileListView: View {
                            openSettings()
                        },
                        dismissEngineWarning: { model.engineWarningSeen() },
-                       updateOffer: model.updateOffer,
+                       // A release found is said by the update's window and the sidebar's row
+                       // (`UpdateSidebarRow`), which stays while it waits; the first launch of a
+                       // new version by its welcome over the lock screen (`UpdateInstalledCard`).
+                       updateOffer: nil,
                        dismissUpdateOffer: { model.updateOfferSeen() },
                        updatedTo: model.updatedTo,
                        openUpdates: {
                            model.updatedNoticeSeen()
-                           model.settingsSection = .updates
-                           openSettings()
+                           model.showUpdateWindow(.updater, focus: true)
                        },
-                       dismissUpdated: { model.updatedNoticeSeen() })
+                       dismissUpdated: { model.updatedNoticeSeen() },
+                       pendingUpdate: model.pendingUpdate)
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -657,6 +669,7 @@ struct ProfileListView: View {
                 model.settingsSection = .account
                 openSettings()
             },
+            openUpdate: { model.showUpdateWindow(.updater, focus: true) },
             changePassword: { changingPassword = true },
             warmUpQueue: { withAnimation(Theme.appearAnimation) { section = .warmUp } },
             openProxies: { showProxies(selecting: []) },
@@ -927,6 +940,8 @@ struct ProfileActions {
     var openSettings: () -> Void = {}
     /// Settings › Account (the sidebar's line about the rights).
     var openAccount: () -> Void = {}
+    /// The update's window (the sidebar's row while a release waits).
+    var openUpdate: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
     var warmUpQueue: () -> Void = {}
@@ -1043,6 +1058,8 @@ struct ProfilesScreen: View {
     var updatedTo: String?
     var openUpdates: () -> Void = {}
     var dismissUpdated: () -> Void = {}
+    /// A release waiting: the sidebar's row (`UpdateSidebarRow`) while there is one.
+    var pendingUpdate: UpdateOffer?
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -1081,7 +1098,7 @@ struct ProfilesScreen: View {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
                                 showsScenarios: scenarios != nil, showsWarmUp: warmUp != nil,
-                                actions: actions, rights: rights)
+                                actions: actions, rights: rights, pendingUpdate: pendingUpdate)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -1671,6 +1688,7 @@ private struct ProfilesSidebar: View {
     var showsWarmUp = false
     let actions: ProfileActions
     var rights: RightsLine?
+    var pendingUpdate: UpdateOffer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -1738,6 +1756,10 @@ private struct ProfilesSidebar: View {
             .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .padding(.bottom, 12)
+            if let pendingUpdate {
+                UpdateSidebarRow(offer: pendingUpdate, action: actions.openUpdate)
+                    .padding(.bottom, 8)
+            }
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
             if let rights {

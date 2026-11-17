@@ -1375,7 +1375,7 @@
 "updates.found.later" = "Позже";
 "updates.found.restartNote" = "Lumen закроется, установит обновление и откроется снова сам.";
 "updates.found.stops" = "Перед установкой Lumen остановит и зашифрует:";
-"updates.found.background" = "Загружается в фоне: %1$@ из %2$@";
+"updates.found.background" = "Загружается в фоне — %@";
 "updates.checking.title" = "Проверка обновлений…";
 "updates.upToDate.title" = "У вас последняя версия";
 "updates.upToDate.text" = "Lumen %@ — самая новая версия.";
@@ -1394,7 +1394,11 @@
 "updates.progress.opensItself" = "Lumen откроется сам, как только обновление установится.";
 "updates.failed.title" = "Не удалось загрузить обновление";
 "updates.failed.text" = "Lumen %1$@ не загрузился: %2$@";
-"updates.failed.check" = "Не удалось проверить обновления: %@";
+"updates.failed.check" = "Проверка не удалась: %@";
+"updates.checking.failedTitle" = "Не удалось проверить обновления";
+"updates.error.network" = "нет связи с сервером обновлений";
+"updates.error.secure" = "не удалось защищённое соединение с сервером обновлений";
+"updates.error.other" = "не удалось сохранить файл обновления";
 "updates.retry" = "Повторить";
 "updates.installNowButton" = "Установить сейчас";
 "updates.blocked.title" = "Это обновление нельзя установить здесь";

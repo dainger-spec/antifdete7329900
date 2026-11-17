@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import MachineCover
 import SwiftUI
+import UpdateProgress
 
 /// `Lumen --render-ui-snapshots <folder>`: renders the app's screens with sample data
 /// into PNG files, so the design can be reviewed from CI (no vault, no WebKit, no network).
@@ -297,6 +298,8 @@ enum UISnapshots {
             return 1
         }
         NSApp.activate(ignoringOtherApps: true)
+        // The update's windows alone, for a quick look (a scratch run of CI): PB_SNAPSHOTS_ONLY=updates.
+        if ProcessInfo.processInfo.environment["PB_SNAPSHOTS_ONLY"] == "updates" { return await updateWindows(into: folder) }
         let rows = sampleRows()
         let clicks = ClickLog()
         var actions = ProfileActions()
@@ -566,10 +569,11 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-updated", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, updatedTo: "0.1.5") // l10n: not text
         }.capture(into: folder)
-        // A newer version is out and ready: said above the profiles, not only in Settings.
+        // A newer version is out and ready: the sidebar's row says so while it waits.
         problems += await Shot(name: "profiles-update-offer", size: CGSize(width: 1180, height: 740), edges: true) {
-            ProfilesPreview(rows: rows, sync: .off, updateOffer: UpdateOffer(version: "0.1.9", stage: .ready)) // l10n: not text
+            ProfilesPreview(rows: rows, sync: .off, pendingUpdate: UpdateOffer(version: "0.1.9", stage: .ready)) // l10n: not text
         }.capture(into: folder)
+        problems += await updateWindows(into: folder)
         problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
         }.capture(into: folder)
@@ -1094,6 +1098,85 @@ enum UISnapshots {
     /// the one behind a VPN's substitute DNS, on the service's and on a working one; the Edit and
     /// Export sheets; and what a profile whose proxy did not work at its launch says. Nothing is
     /// checked here and nothing goes to the network.
+    // MARK: The update's windows
+
+    /// The update's windows (docs/UPDATES.md §7), every state, in this run's language: a release
+    /// found (and with profiles running), checking, up to date, "Installing the update" — the
+    /// download's bar, then checking, installing and restarting (the installer helper's window is
+    /// this same view, with the words the app sends it), and restarting after a Lumen opened
+    /// meanwhile stepped aside —, a download that failed, an update that did not happen at the
+    /// last quit, and the first launch of the new version over the lock screen.
+    private static func updateWindows(into folder: URL) async -> Int {
+        var problems = 0
+        let model = AppModel()
+        let russian = Localization.locale.language.languageCode?.identifier == "ru"
+        let notes = russian
+            ? "• Обновление больше не прерывается, если Lumen открыть во время установки.\n• Окно обновления показывает загрузку, проверку, установку и перезапуск.\n• Прокси, который молчит после подключения, называется так в списке."
+            : "• An update is no longer cut short when Lumen is opened while it installs.\n• The update’s window shows the download, the check, the install and the restart.\n• A proxy that stays silent after connecting is named as such in the list."
+        let item = AppcastItem(
+            version: "0.1.19", build: "19", minimumSystemVersion: "26.0",
+            url: URL(string: "https://updates.example/lumen/Lumen-0.1.19.zip")!, length: 48_210_944,
+            sha256: String(repeating: "0", count: 64), keyID: "0123456789abcdef", edSignature: Data(count: 64),
+            publishedAt: Date().addingTimeInterval(-2 * 3600), notes: notes)
+        let configuration = AppUpdater.Configuration(
+            feed: URL(string: "https://updates.example/lumen/appcast.json")!, keys: [:], version: "0.1.18",
+            build: BuildVersion("18")!, bundleIdentifier: "io.lumenbrowser.Lumen",
+            app: URL(fileURLWithPath: "/Applications/Lumen.app"), staging: URL(fileURLWithPath: "/nonexistent/updates"))
+        let size = UpdateWindowLayout.size
+        let texts = UpdateProgressTexts(AppUpdater.progressTexts)
+        let icon = UpdatePanels.icon
+
+        problems += await Shot(name: "update-found", size: size) {
+            UpdateFoundPanel(item: item, update: {}, later: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "update-found-stopping", size: size) {
+            UpdateFoundPanel(item: item, stops: [String(format: L("updates.stops.ownProcess"), "Shop DE"), // l10n: not text
+                                                 String(format: L("updates.stops.warmUp"), "Northwind")], // l10n: not text
+                             update: {}, later: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "update-checking", size: size) {
+            UpdaterStatePanel(updater: AppUpdater(preview: .checking, configuration: configuration)).environmentObject(model)
+        }.capture(into: folder)
+        problems += await Shot(name: "update-up-to-date", size: size) {
+            UpdaterStatePanel(updater: AppUpdater(preview: .upToDate(checkedAt: Date()), configuration: configuration))
+                .environmentObject(model)
+        }.capture(into: folder)
+        let downloading = UpdateDownloadProgress(received: 18_350_000, total: Int64(item.length), startedAt: Date().addingTimeInterval(-9))
+        let stages: [(name: String, stage: UpdateProgressModel.Stage, reopened: Bool)] = [
+            ("update-downloading", .downloading(fraction: downloading.fraction, detail: model.downloadDetail(downloading)), false),
+            ("update-checking-release", .step(.checking), false),
+            ("update-installing", .step(.installing), false),
+            ("update-restarting", .step(.relaunching), false),
+            ("update-installing-reopened", .step(.installing), true),
+        ]
+        for entry in stages {
+            let progress = UpdateProgressModel(version: item.version, stage: entry.stage, reopened: entry.reopened,
+                                               cancel: { })
+            problems += await Shot(name: entry.name, size: size) {
+                UpdateProgressView(model: progress, texts: texts, icon: icon)
+            }.capture(into: folder)
+        }
+        problems += await Shot(name: "update-failed", size: size) {
+            UpdateFailedPanel(release: item.version, reason: L("updates.error.network"), retry: {}, close: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "update-not-installed", size: size) {
+            UpdateNoticePanel(text: String(format: L("updates.outcome.startedAgain"), item.version), canInstall: true,
+                              install: {}, retry: {}, close: {})
+        }.capture(into: folder)
+        problems += await Shot(name: "update-not-installed-check", size: size) {
+            UpdateNoticePanel(text: String(format: L("updates.outcome.badRelease"), item.version), canInstall: false,
+                              install: {}, retry: {}, close: {})
+        }.capture(into: folder)
+        // The first launch of the new version, over the lock screen: the password's field under it
+        // keeps the keyboard.
+        let lockModel = AppModel()
+        problems += await Shot(name: "update-installed", size: CGSize(width: 1180, height: 760), edges: true) {
+            LockBackdrop { UnlockView().environmentObject(lockModel) }
+                .overlay { UpdateInstalledCard(update: InstalledUpdate(version: item.version, notes: notes), dismiss: {}, still: true) }
+        }.capture(into: folder)
+        return problems
+    }
+
     // MARK: A virtual machine's start
 
     /// The cover over a profile's machine while its start puts the profile's settings in place
@@ -2127,6 +2210,7 @@ private struct ProfilesPreview: View {
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
     var updateOffer: UpdateOffer?
+    var pendingUpdate: UpdateOffer?
     var order: ProfileListOrder = .created
 
     var body: some View {
@@ -2136,7 +2220,7 @@ private struct ProfilesPreview: View {
                        inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
-                       updateOffer: updateOffer, updatedTo: updatedTo)
+                       updateOffer: updateOffer, updatedTo: updatedTo, pendingUpdate: pendingUpdate)
     }
 }
 

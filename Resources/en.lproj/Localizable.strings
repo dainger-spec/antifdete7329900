@@ -1375,7 +1375,7 @@
 "updates.found.later" = "Later";
 "updates.found.restartNote" = "Lumen quits, installs the update and opens again by itself.";
 "updates.found.stops" = "Before installing, Lumen stops and encrypts:";
-"updates.found.background" = "Downloading in the background: %1$@ of %2$@";
+"updates.found.background" = "Downloading in the background — %@";
 "updates.checking.title" = "Checking for updates…";
 "updates.upToDate.title" = "You’re up to date";
 "updates.upToDate.text" = "Lumen %@ is the newest version.";
@@ -1394,7 +1394,11 @@
 "updates.progress.opensItself" = "Lumen opens by itself as soon as the update is installed.";
 "updates.failed.title" = "The update could not be downloaded";
 "updates.failed.text" = "Lumen %1$@ was not downloaded: %2$@";
-"updates.failed.check" = "Lumen could not check for updates: %@";
+"updates.failed.check" = "The check failed: %@";
+"updates.checking.failedTitle" = "Lumen could not check for updates";
+"updates.error.network" = "the update server could not be reached";
+"updates.error.secure" = "the secure connection to the update server failed";
+"updates.error.other" = "the update’s file could not be saved";
 "updates.retry" = "Try Again";
 "updates.installNowButton" = "Install Now";
 "updates.blocked.title" = "This update can’t be installed here";

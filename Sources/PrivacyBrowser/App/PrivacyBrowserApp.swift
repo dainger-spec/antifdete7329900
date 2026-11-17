@@ -298,14 +298,13 @@ private struct AccountMenuButton: View {
     }
 }
 
-/// The app menu's Check for Updates…: Settings › Updates, with a check started.
+/// The app menu's Check for Updates…: the update's window, with a check started.
 private struct CheckForUpdatesMenuButton: View {
     @ObservedObject var model: AppModel
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Button(L("menu.checkForUpdates")) {
-            AppCommands.checkForUpdates(model, openSettings: { openSettings() })
+            AppCommands.checkForUpdates(model)
         }
     }
 }
