@@ -210,7 +210,7 @@ enum OpenVPNFile {
 
     /// The first file of a drop, on the main thread; false when the drop holds no file.
     static func receive(_ providers: [NSItemProvider], _ take: @escaping (URL) -> Void) -> Bool {
-        guard let provider = providers.first(where: { $0.canLoadObject(ofClass: URL.self) }) else { return false }
+        guard let provider = providers.first(where: { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }) else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url else { return }
             DispatchQueue.main.async { take(url) }
