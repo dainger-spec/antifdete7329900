@@ -92,7 +92,7 @@ enum SettingsSearch {
 
         SettingsSearchEntry(.security, "settings.security.password", detail: "settings.security.password.detail"),
         SettingsSearchEntry(.security, "settings.security.lock", detail: "profiles.action.lock.help"),
-        SettingsSearchEntry(.security, "settings.security.vault"),
+        SettingsSearchEntry(.security, "settings.security.vault", detail: "settings.security.vault.detail"),
 
         SettingsSearchEntry(.automation, "automation.enabled", detail: "automation.note"),
         SettingsSearchEntry(.automation, "automation.port"),
