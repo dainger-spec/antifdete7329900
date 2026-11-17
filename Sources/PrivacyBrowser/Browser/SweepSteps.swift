@@ -586,9 +586,13 @@ enum SweepSteps {
             S.expect(false, "the toolbar has a Share button (its items: \(items))")
             return
         }
+        let windowsBefore = NSApp.windows.filter(\.isVisible).count
         let menu = await S.openMenu { await SweepInput.click(point) }
         await SweepInput.pause(0.6)
         S.note("after a click on Share: " + (menu.map { S.describeMenu($0).joined(separator: "; ") } ?? "no menu; key \(keyWindow())"))
+        // A person who clicks Share expects something to come up: a menu, a popover, a sheet.
+        S.expect(menu != nil || NSApp.windows.filter(\.isVisible).count > windowsBefore || S.browserWindow()?.attachedSheet != nil,
+                 "a click on Share brought something up")
         await S.escape()
     }
 
