@@ -90,3 +90,32 @@ _filePath]`, `-[NSFileManager safari_containerSettingsDirectory]` (extensions in
 sandbox-extension store), `-[WebBookmarkGroup davHomeURL]`, and the bookmarks database "(null)".
 Only the tracker's is known to reach a throw; the others are what the next measurement walks for —
 every file URL asked for with no path, over the whole menu walk and pages, with who asked.
+
+## Safari's stores in a profile's home
+
+Another browser hosting Safari's chrome gives each profile a complete Safari data tree in Safari's
+own formats (docs/SAFARI_PROCESS.md, "Profile state in Safari's own file formats"). In a profile's
+process Safari's container state (`NSHomeDirectory()/Library/Safari`) and its `~/Library/Safari`
+(moved by `SafariPaths`) both come to the home's `Library/Safari`, so the tree is kept there:
+`SafariStoreLayout.stores` (BrowserCore) lists it — `Bookmarks.plist`, `History.db`, `Embeddings.db`,
+`PerSitePreferences.db`, `IgnoredSiriSuggestedSites.db`, `CloudAutoFillCorrections.db`,
+`NotifyMeWhen.db`, `UserDefinedContentBlockers.db`, `BlockedBannerHighlights.db`,
+`TabSnapshots/Metadata.db`, `Metadata Cache/LPLinkMetadata.db`, `Favicon Cache/favicons.db` and
+`favicons/`, `TopSites.plist`, `Template Icons/CacheSettings.plist`, `Link Presentation Icons/`,
+`LocalStorage/`, `Databases/___IndexedDB/`, `ResourceLoadStatistics/{pcm,observations}.db`.
+
+Before Safari's frameworks load, a profile's process (`SafariStores.prepare`, from
+`SafariChromeHost.prepareForChildProcess`; every check's too) makes the home's Library folders an
+account always has, `Library/Safari` and every store's folder; makes each folder and store writable
+by its owner; and sets aside (`<name>.unreadable`, with its `-wal`, `-shm`, `-journal`) a store that
+is not one — a database without SQLite's header or whose schema SQLite cannot read, a property list
+that does not parse, a file where a folder belongs. No store's content is written: Safari's own code
+makes its stores, with its own schemas, in those folders. A profile made before this gets what it
+lacks at its next launch. Nothing outside the home is looked at.
+
+The address bar check (scripts/address_bar_check.sh) reports, in each profile's own process, before
+the typing and after Return: each store of the list (present, size, writable, what SQLite says on
+opening it read-only), what the launch made, every file under the home's Library and what each of
+Safari's path getters answered there (`SafariPaths.answers`); with `FS_TRACE=1` an fs_usage trace of
+the profiles' processes says where they looked and found nothing (ENOENT) and what they were refused
+(EPERM: the real Safari's places, closed by the sandbox) — scripts/safari_stores_trace.py.

@@ -65,7 +65,7 @@ enum AddressBarCommit {
     private(set) static var lastNavigationFrames: [String] = []
 
     /// The Return key: Return and the keypad's Enter.
-    static let returnKeyCodes: Set<UInt16> = [36, 76]
+    nonisolated static let returnKeyCodes: Set<UInt16> = [36, 76]
 
     static func install() {
         guard !isInstalled else { return }
