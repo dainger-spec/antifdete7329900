@@ -1313,6 +1313,7 @@ enum SafariChrome {
         NSApplication.shared.mainMenu = menu
         // Its menus whose delegate answers for their keys itself: a retargeted item's key is its own.
         SafariWindowGuard.guardMenuKeys(in: menu)
+        keepPrivateWindowsOutOfContextMenus()
         keepAutoFillInsertItemsOut()
         log.notice("Safari's menu bar is up: \(menu.items.count, privacy: .public) items from \(url.path, privacy: .public)")
         return true
@@ -1372,6 +1373,20 @@ enum SafariChrome {
             if let action = item.action, NSStringFromSelector(action).localizedCaseInsensitiveContains("private") {
                 menu.removeItem(item)
             }
+        }
+    }
+
+    /// The same for the menus a page's link and image bring up, whose "Open Link in New Private
+    /// Window" and "Open Image in New Private Window" are there behind ⌥ (the sweep, CI run
+    /// 43999545658, macOS 26 and 27): taken out as each menu opens.
+    private static var watchesContextMenus = false
+
+    private static func keepPrivateWindowsOutOfContextMenus() {
+        guard !watchesContextMenus else { return }
+        watchesContextMenus = true
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+            guard let menu = note.object as? NSMenu, Thread.isMainThread else { return }
+            MainActor.assumeIsolated { SafariChrome.removePrivateWindowItems(from: menu) }
         }
     }
 

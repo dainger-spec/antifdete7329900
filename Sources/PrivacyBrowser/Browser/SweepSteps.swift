@@ -379,6 +379,9 @@ enum SweepSteps {
             await S.escape()
             return
         }
+        // No private window behind ⌥ in a profile's menus: it would keep everything all the same.
+        let privateItems = menu.items.filter { $0.action.map(NSStringFromSelector)?.localizedCaseInsensitiveContains("private") == true }
+        S.expect(privateItems.isEmpty, "no private window in the menu (\(privateItems.map(\.title)))")
         let id = menuIDs[key].flatMap { $0.indices.contains(unit) ? $0[unit] : nil }
         let shown = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden && !$0.isAlternate }
         guard let item = shown.first(where: { $0.title == title }) ?? shown.first(where: { id != nil && itemID($0) == id }) else {
