@@ -1500,6 +1500,9 @@
 "transfer.export.action" = "Экспортировать…";
 "transfer.export.actionStop" = "Остановить и экспортировать…";
 "transfer.export.done" = "Сохранено: %@";
+"transfer.export.working.stopping" = "Остановка профиля и запись файла…";
+"transfer.export.working" = "Запись зашифрованного файла…";
+"transfer.reveal" = "Показать в Finder";
 "transfer.password" = "Пароль файла";
 "transfer.password.repeat" = "Повторите пароль";
 "transfer.password.note" = "Не меньше 8 символов. Без этого пароля файл не открыть, и восстановить его нельзя.";
@@ -1524,6 +1527,8 @@
 "transfer.import.trust" = "Импортируйте профили только от тех, кому доверяете: файл приносит свои данные сайтов, пароли и состояние Safari.";
 "transfer.import.action" = "Импортировать";
 "transfer.import.done" = "Профиль «%@» добавлен.";
+"transfer.import.working" = "Импорт профиля…";
+"transfer.import.working.open" = "Открытие файла…";
 "transfer.error.password" = "Неверный пароль, или файл повреждён.";
 "transfer.error.notExport" = "Это не файл профиля Lumen.";
 "recovery.homeNotSealed" = "Не удалось заново зашифровать состояние Safari профиля «%1$@»: %2$@";
@@ -1605,6 +1610,7 @@
 "cookieExport.stopped" = "Профиль не запущен: чтобы прочитать cookies, он будет запущен без окна, затем остановлен и снова зашифрован.";
 "cookieExport.action" = "Экспортировать…";
 "cookieExport.done" = "Сохранено cookies: %1$ld — %2$@";
+"cookieExport.working" = "Чтение cookies профиля…";
 "cookieExport.failed" = "Не удалось экспортировать cookies: %@";
 
 /* One proxy, one line (the profile editor, the list's Add and Edit) */

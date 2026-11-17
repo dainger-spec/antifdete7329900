@@ -1500,6 +1500,9 @@
 "transfer.export.action" = "Export…";
 "transfer.export.actionStop" = "Stop and Export…";
 "transfer.export.done" = "Saved: %@";
+"transfer.export.working.stopping" = "Stopping the profile, then writing the file…";
+"transfer.export.working" = "Writing the encrypted file…";
+"transfer.reveal" = "Show in Finder";
 "transfer.password" = "File password";
 "transfer.password.repeat" = "Repeat password";
 "transfer.password.note" = "At least 8 characters. The file cannot be opened without it, and it cannot be recovered.";
@@ -1524,6 +1527,8 @@
 "transfer.import.trust" = "Import profiles only from people you trust: the file brings its own website data, passwords and Safari state.";
 "transfer.import.action" = "Import";
 "transfer.import.done" = "Profile “%@” added.";
+"transfer.import.working" = "Importing the profile…";
+"transfer.import.working.open" = "Opening the file…";
 "transfer.error.password" = "Wrong password, or the file is damaged.";
 "transfer.error.notExport" = "This is not a Lumen profile file.";
 "recovery.homeNotSealed" = "Could not encrypt Safari's state of profile “%1$@” again: %2$@";
@@ -1605,6 +1610,7 @@
 "cookieExport.stopped" = "The profile is not running: it is started without a window to read its cookies, then stopped and encrypted again.";
 "cookieExport.action" = "Export…";
 "cookieExport.done" = "%1$ld cookies saved to %2$@";
+"cookieExport.working" = "Reading the profile's cookies…";
 "cookieExport.failed" = "The cookies could not be exported: %@";
 
 /* One proxy, one line (the profile editor, the list's Add and Edit) */
