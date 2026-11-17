@@ -2,7 +2,9 @@ import AppKit
 import BrowserCore
 import Foundation
 import os
+import SwiftUI
 import UpdateInstaller
+import UpdateProgress
 
 // Lumen Updater: Contents/Helpers/Lumen Updater.app inside the app
 // (docs/UPDATES.md §3). The app starts it through LaunchServices at the end of a quit in which every
@@ -10,6 +12,11 @@ import UpdateInstaller
 // replaces the app it is in with the release the app's request names. It takes no arguments and
 // makes no network request; what it installs is only what checks with the keys of the installed
 // app's own signed Info.plist.
+//
+// While it works it shows the update's progress window (UpdateProgress) — the same window the app
+// showed until it quit, with the app's own words from the request — and brings it to the front
+// when a Lumen opened meanwhile steps aside (UpdateStepAside): the person sees the update being
+// installed, not a Lumen that does not open. No Dock icon, no menu (LSUIElement).
 
 let log = Logger(subsystem: "PrivacyBrowser", category: "Updater")
 
@@ -38,6 +45,32 @@ guard lock >= 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
     exit(0)
 }
 
+// The window: the version and the words the app's request carries (none: nothing to install, no window).
+let request = try? UpdateRequest.read(from: staging)
+let progress = UpdateProgressModel(version: request?.item.version ?? "", stage: .step(.checking))
+let window: NSWindow? = MainActor.assumeIsolated {
+    NSApplication.shared.setActivationPolicy(.accessory)
+    guard let request else { return nil }
+    let texts = UpdateProgressTexts(request.texts ?? [:])
+    let shown = UpdateWindowLayout.window(closable: false, title: texts.title)
+    shown.contentView = NSHostingView(rootView: UpdateProgressView(model: progress, texts: texts,
+                                                                   icon: NSWorkspace.shared.icon(forFile: app.path)))
+    shown.level = .floating
+    shown.orderFrontRegardless()
+    return shown
+}
+
+// A Lumen opened during the install stepped aside and asked for Lumen: the window comes to the
+// front and says Lumen opens by itself.
+let wishWatch = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+    MainActor.assumeIsolated {
+        guard let window, !progress.reopened, UpdateRelaunchWish.read(from: staging) != nil else { return }
+        progress.reopened = true
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+}
+
 let environment = Installer.Environment(
     processes: { BundleProcess.running(inside: $0) },
     launch: { url in
@@ -47,11 +80,18 @@ let environment = Installer.Environment(
     },
     sleep: { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) },
     now: { Date() },
-    system: BuildVersion(ProcessInfo.processInfo.operatingSystemVersion))
+    system: BuildVersion(ProcessInfo.processInfo.operatingSystemVersion),
+    progress: { step in DispatchQueue.main.async { progress.stage = .step(step) } })
 
 Task {
     let outcome = await Installer(app: app, staging: staging, environment: environment).run()
     log.notice("Update: \(outcome.result.rawValue, privacy: .public), \(outcome.fromBuild, privacy: .private) → \(outcome.toBuild, privacy: .private): \(outcome.detail, privacy: .private)")
-    exit(outcome.result == .installed ? 0 : 1)
+    DispatchQueue.main.async {
+        MainActor.assumeIsolated {
+            wishWatch.invalidate()
+            window?.orderOut(nil)
+        }
+        exit(outcome.result == .installed ? 0 : 1)
+    }
 }
-dispatchMain()
+MainActor.assumeIsolated { NSApplication.shared.run() }
