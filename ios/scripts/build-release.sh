@@ -62,7 +62,10 @@ if [[ -n "${ASC_KEY_PATH:-}" ]]; then
     AUTH=(-authenticationKeyPath "$ASC_KEY_PATH" -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID")
 fi
 if [[ -n "$TEAM_ID" ]]; then
-    SIGNING=(DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Distribution")
+    # Automatic signing archives with the team's development identity; the export (method
+    # app-store-connect) signs again for distribution. "Apple Distribution" here is refused by
+    # Xcode as conflicting with automatic signing (the owner's first archive, 17 November).
+    SIGNING=(DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic CODE_SIGN_IDENTITY="Apple Development")
     PROVISIONING=(-allowProvisioningUpdates ${AUTH[@]+"${AUTH[@]}"})
 else
     SIGNING=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO)
