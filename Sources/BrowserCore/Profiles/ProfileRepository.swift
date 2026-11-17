@@ -467,8 +467,9 @@ public final class ProfileRepository: @unchecked Sendable {
         .unreadableSettings(profileID: id, profile: (try? summary(for: id))?.name ?? id.uuidString, reason: String(describing: error))
     }
 
-    /// The newest format of `config.bin` this version reads and writes (docs/UPDATES.md §4).
-    static let configurationFormat = 1
+    /// The newest format of `config.bin` this version reads and writes (docs/UPDATES.md §4): 2 once
+    /// its proxy is an OpenVPN connection (`ProfileConfiguration.format`).
+    static let configurationFormat = 2
 
     /// A configuration's JSON, refused when a newer version wrote it: its decoder is tolerant, so
     /// without this a newer version's fields would be dropped here and the rest written back.

@@ -428,7 +428,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// changed in the profile's editor — and the one never overwrites the other.
     public static func sameConnection(_ a: ProxySettings, _ b: ProxySettings) -> Bool {
         identity(of: a) == identity(of: b) && a.kind == b.kind && a.tlsToProxy == b.tlsToProxy
-            && (a.password ?? "") == (b.password ?? "")
+            && (a.password ?? "") == (b.password ?? "") && a.openVPN == b.openVPN
     }
 
     /// The entries as text, one per line, in the form the import reads back
@@ -502,7 +502,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     }
 
     /// The newest format of the file this version reads and writes.
-    static let supportedFormat = 3
+    static let supportedFormat = 4
 
     /// The format this list is written in.
     var format: Int { Self.format(for: entries) }
@@ -512,8 +512,11 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// link (or changes its IP at launch). A version from before origins would read a service's
     /// proxy as the user's and write it back without its origin, and one from before IP changes
     /// would write a proxy back without its link: each is to refuse the file instead
-    /// (docs/UPDATES.md, R4).
+    /// (docs/UPDATES.md, R4). 4 once one is an OpenVPN connection (`ProxySettings.openVPN`): a
+    /// version from before them would read it as SOCKS5 at the VPN server and drop its configuration
+    /// when it saves the list.
     static func format(for entries: [ProxyListEntry]) -> Int {
+        if entries.contains(where: { $0.proxy.openVPN != nil }) { return 4 }
         if entries.contains(where: \.hasIPChange) { return 3 }
         return entries.contains { $0.origin != .user } ? 2 : 1
     }

@@ -42,7 +42,10 @@ public enum ProfileTransfer {
     /// 3: 2 with a one-time code's generator in a saved login (`PasswordEntry.totp`), which a
     /// version that reads only 2 would import without. Written only for a profile that has one;
     /// any other profile's export is format 2, as before.
-    static let format = 3
+    /// 4: its proxy is an OpenVPN connection (`ProxySettings.openVPN`), which a version that reads only
+    /// 3 would import as SOCKS5 at the VPN server, without its configuration: it says the file is a
+    /// newer version's instead. Written only for such a profile.
+    static let format = 4
     /// The formats this version imports (R1).
     static let readableFormats = 1...format
 
@@ -166,7 +169,7 @@ public enum ProfileTransfer {
                                 bookmarkCount: documents.bookmarks?.bookmarks.count ?? 0,
                                 hasWebsiteData: kinds.contains(webDataPrefix), hasSafariState: kinds.contains(safariHomeRoot))
         let keys = try Keys(password: password, kdf: kdf)
-        let header = Header(format: documents.passwords.contains { $0.totp != nil } ? 3 : 2, kdf: kdf,
+        let header = Header(format: exportFormat(configuration: configuration, documents: documents), kdf: kdf,
                             manifest: try AEAD.seal(JSONCoding.encoder.encode(manifest), key: keys.manifest, aad: manifestAAD))
         let sealedDocuments = try AEAD.seal(JSONCoding.encoder.encode(documents), key: keys.documents, aad: documentsAAD)
         var prefix = magic
@@ -181,6 +184,12 @@ public enum ProfileTransfer {
             kinds[source] == webDataPrefix ? (destination: 0, label: webDataPrefix + label) : (destination: 0, label: safariHomeRoot)
         }
         return manifest
+    }
+
+    /// The oldest format that holds what this export carries (the formats above).
+    static func exportFormat(configuration: ProfileConfiguration, documents: Documents) -> Int {
+        if configuration.proxy?.openVPN != nil { return 4 }
+        return documents.passwords.contains { $0.totp != nil } ? 3 : 2
     }
 
     /// Settings as a file for someone else holds them: without the exit IP last seen, and without

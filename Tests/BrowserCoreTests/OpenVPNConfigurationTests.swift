@@ -292,3 +292,33 @@ final class OpenVPNConfigurationTests: XCTestCase {
         XCTAssertEqual(decoded, vpn)
     }
 }
+
+final class OpenVPNFormatTests: XCTestCase {
+    private func vpn() throws -> ProxySettings {
+        ProxySettings.openVPN(try OpenVPNConfiguration.parse(OpenVPNConfigurationTests.typical()), username: nil, password: nil)
+    }
+
+    func testAProfileOnAnOpenVPNConnectionIsWrittenAsFormat2AndOthersAsBefore() throws {
+        var configuration = ProfileConfiguration()
+        XCTAssertEqual(configuration.format, 1)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(configuration), as: UTF8.self).contains("\"format\""))
+        configuration.proxy = try vpn()
+        XCTAssertEqual(configuration.format, 2)
+        let json = try JSONEncoder().encode(configuration)
+        XCTAssertTrue(String(decoding: json, as: UTF8.self).contains("\"format\":2"))
+        // This version reads it back; a version that reads format 1 only is refused it.
+        XCTAssertEqual(try ProfileRepository.decodeConfiguration(json).proxy, configuration.proxy)
+        XCTAssertThrowsError(try DocumentFormat.check(json, supported: 1, what: "config.bin"))
+    }
+
+    func testAListWithAnOpenVPNConnectionIsFormat4AndTwoConfigurationsAreTwoConnections() throws {
+        let plain = ProxyListEntry(proxy: ProxySettings(kind: .socks5, host: "p.example.net", port: 1080))
+        XCTAssertEqual(ProxyList.format(for: [plain]), 1)
+        let first = try vpn()
+        XCTAssertEqual(ProxyList.format(for: [plain, ProxyListEntry(proxy: first)]), 4)
+        var second = first
+        second.openVPN = OpenVPNSettings(configuration: first.openVPN!.configuration.replacingOccurrences(of: "auth SHA256", with: "auth SHA512"))
+        XCTAssertNotEqual(ProxyList.identity(of: first), ProxyList.identity(of: second))
+        XCTAssertFalse(ProxyList.sameConnection(first, second))
+    }
+}
