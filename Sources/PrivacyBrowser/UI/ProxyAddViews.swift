@@ -228,9 +228,10 @@ struct ProxyEmptyState: View {
     var body: some View {
         LumenEmptyState(title: L("proxies.empty.title"), text: L("proxies.empty")) {
             VStack(spacing: 18) {
+                // Side by side down to the narrowest Profiles window; narrower still, rows.
                 ViewThatFits(in: .horizontal) {
-                    HStack(spacing: 12) { tiles(width: 184) }
-                    VStack(spacing: 10) { tiles(width: 300) }
+                    HStack(spacing: 12) { tiles(width: 168, compact: false) }
+                    VStack(spacing: 8) { tiles(width: 300, compact: true) }
                 }
                 Button(L("proxies.empty.list"), action: importList)
                     .buttonStyle(.lumenGhost)
@@ -238,9 +239,9 @@ struct ProxyEmptyState: View {
         }
     }
 
-    private func tiles(width: CGFloat) -> some View {
+    private func tiles(width: CGFloat, compact: Bool) -> some View {
         ForEach(ProxyAddChoice.allCases) { choice in
-            ProxyAddTile(choice: choice, width: width) { choose(choice) }
+            ProxyAddTile(choice: choice, width: width, compact: compact) { choose(choice) }
         }
     }
 }
@@ -251,38 +252,66 @@ struct ProxyEmptyState: View {
 private struct ProxyAddTile: View {
     let choice: ProxyAddChoice
     let width: CGFloat
+    /// A row — the symbol beside the words — where three tiles do not fit side by side.
+    var compact = false
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 0) {
-                Image(systemName: choice.symbol)
-                    .font(.system(size: 21, weight: .light))
-                    .foregroundStyle(Theme.textPrimary)
-                    .frame(width: 48, height: 48)
-                    .background(Circle().fill(Theme.raisedInset))
-                    .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
-                Text(choice.title)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.textPrimary)
-                    .lineLimit(1)
-                    .padding(.top, 14)
-                Text(choice.detail)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 5)
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 14)
-            .padding(.top, 22)
-            .padding(.bottom, 18)
-            .frame(width: width, height: 152)
+            if compact { row } else { tile }
         }
         .buttonStyle(ProxyTileStyle())
         .accessibilityLabel(choice.title)
         .accessibilityHint(choice.detail)
+    }
+
+    private var symbol: some View {
+        Image(systemName: choice.symbol)
+            .font(.system(size: compact ? 17 : 21, weight: .light))
+            .foregroundStyle(Theme.textPrimary)
+            .frame(width: compact ? 38 : 48, height: compact ? 38 : 48)
+            .background(Circle().fill(Theme.raisedInset))
+            .overlay(Circle().strokeBorder(Theme.hairline, lineWidth: 1))
+    }
+
+    private var row: some View {
+        HStack(spacing: 12) {
+            symbol
+            VStack(alignment: .leading, spacing: 2) {
+                Text(choice.title)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.textPrimary)
+                Text(choice.detail)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textTertiary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .frame(width: width, height: 62)
+    }
+
+    private var tile: some View {
+        VStack(spacing: 0) {
+            symbol
+            Text(choice.title)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(Theme.textPrimary)
+                .lineLimit(1)
+                .padding(.top, 14)
+            Text(choice.detail)
+                .font(.lumenSecondary)
+                .foregroundStyle(Theme.textTertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 5)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 22)
+        .padding(.bottom, 18)
+        .frame(width: width, height: 152)
     }
 }
 
