@@ -105,7 +105,8 @@ final class ProfileProcess {
                       preferences: BrowsingPreferences = BrowsingPreferences(),
                       menusInAppLanguage: Bool = false,
                       cameraAllowed: Bool = true,
-                      systemCameraActive: Bool = false) throws -> ProfileProcess {
+                      systemCameraActive: Bool = false,
+                      routes: [String: ProxyRoutes.Route] = [:]) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -136,6 +137,11 @@ final class ProfileProcess {
         process.standardOutput = eventPipe
         var record = try grant.encoded()
         defer { ProfileGrant.erase(&record) }
+        // Then the routes to the relays of a share link's proxy (`ProxyRoutes`): their logins, the
+        // profile's to use and no other process's — on this stream for the same reasons. Always
+        // written, an empty one too, so that the process reads exactly what is there.
+        var routesRecord = try ProxyRoutes.encodeRecord(routes)
+        defer { ProxyRoutes.erase(&routesRecord) }
         try process.run()
 
         // The profile's grant first: its key and its entry in the index, not the vault's master
@@ -143,6 +149,7 @@ final class ProfileProcess {
         // processes' memory and the pipe buffer. A child that is already gone gets none, and its
         // exit is handled as any other.
         try? keyPipe.fileHandleForWriting.write(contentsOf: record)
+        try? keyPipe.fileHandleForWriting.write(contentsOf: routesRecord)
 
         let child = ProfileProcess(profileID: profileID, isForWarmUpOnly: forWarmUpOnly, process: process)
         // The same pipe carries the commands after the grant; it stays open until the child exits.

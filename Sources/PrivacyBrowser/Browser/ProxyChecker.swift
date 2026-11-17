@@ -54,6 +54,27 @@ enum ProxyChecker {
     /// machine's start (`VMCenter.checkProxy`), which asks for the UDP: a machine's HTTP/3 and
     /// WebRTC go through the proxy only where it carries UDP.
     static func check(_ proxy: ProxySettings, latencySamples: Int = 3, triesUDP: Bool = true) async -> ProxyCheckResult {
+        // A share link's proxy is asked through a relay (`XrayRelays`): the one of a profile running on
+        // it, or one started for this check and stopped after it. Never the link's server itself.
+        guard proxy.kind == .xray, ProxyRoutes.shared.route(for: proxy) == nil else {
+            return await checkThrough(proxy, latencySamples: latencySamples, triesUDP: triesUDP)
+        }
+        let time = Date()
+        guard (try? proxy.validate()) != nil else { return .dead(.invalidSettings, at: time) }
+        let owner = UUID()
+        do {
+            try await XrayRelays.shared.start(for: proxy, owner: owner)
+        } catch {
+            var result = ProxyCheckResult.dead(.noAnswer, at: time)
+            result.diagnosis = ProxyDiagnosis(verdict: .relayNotStarted)
+            return result
+        }
+        let result = await checkThrough(proxy, latencySamples: latencySamples, triesUDP: triesUDP)
+        XrayRelays.shared.stop(owner: owner)
+        return result
+    }
+
+    private static func checkThrough(_ proxy: ProxySettings, latencySamples: Int, triesUDP: Bool) async -> ProxyCheckResult {
         let time = Date()
         // Settings that cannot be applied: nothing is sent at all (there would be nothing to send
         // the lookup through but the direct connection).
@@ -68,12 +89,13 @@ enum ProxyChecker {
         }
         // Through it, with the type it answered as.
         var found = proxy
-        if let kind = diagnosis.kinds.first, !(proxy.kind == .httpConnect && proxy.tlsToProxy) {
+        // (A link's relay answers as SOCKS5: that is the relay, not the link's type.)
+        if let kind = diagnosis.kinds.first, proxy.kind != .xray, !(proxy.kind == .httpConnect && proxy.tlsToProxy) {
             found.kind = kind
             if kind == .socks5 { found.tlsToProxy = false }
         }
         // A SOCKS5 proxy's UDP, tried for real while the lookup runs: what WebRTC through it would get.
-        let asksUDP = triesUDP && found.kind == .socks5
+        let asksUDP = triesUDP && found.carriesUDP
         async let udp: ProxyUDPSupport? = asksUDP ? await self.udp(found) : nil
         var result = self.result(of: await lookUp(found), at: time)
         result.diagnosis = diagnosis
@@ -88,9 +110,11 @@ enum ProxyChecker {
     /// the proxy's TCP leaves from (`ProxyExitLookup`, through the proxy), which its UDP must leave
     /// from too. Only the proxy is talked to; the exit is asked only of a proxy whose UDP answered.
     static func udp(_ proxy: ProxySettings) async -> ProxyUDPSupport {
-        guard proxy.kind == .socks5, let port = UInt16(exactly: proxy.port) else { return .unsupported }
-        let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: proxy.host, port: port,
-                                                                username: proxy.username, password: proxy.password))
+        // A link's UDP goes through its relay's SOCKS5 UDP, as a launch's would (`ProxyRoutes`).
+        guard let reach = ProxyRoutes.shared.connectable(proxy), reach.kind == .socks5,
+              let port = UInt16(exactly: reach.port) else { return .unsupported }
+        let outcome = await ProxyUDPCheck.run(proxy: SOCKSProxy(host: reach.host, port: port,
+                                                                username: reach.username, password: reach.password))
         guard case let .supported(egress) = outcome else { return .unsupported }
         let userAgent = ProfileConfiguration().userAgent(hostSafariVersion: HostSafari.version)
         guard let exit = await ProxyExitLookup.lookUp(proxy: proxy, userAgent: userAgent) else { return .exitUnknown }

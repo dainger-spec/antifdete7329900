@@ -146,13 +146,20 @@ enum ProfileNetworkGuard {
     static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false,
                        protectsLocalNetwork: Bool = false) throws {
         guard proxies == nil else { return }
+        // A share link's proxy is reached through its relay alone, at the route the manager handed
+        // over with the grant (`ProxyRoutes`): without one this process does not run at all.
+        let reach = proxy.flatMap { ProxyRoutes.shared.connectable($0) }
+        if proxy?.kind == .xray, reach == nil {
+            throw CoreError.invalidConfiguration("no relay was given for the profile's link")
+        }
+        let relayPort = proxy?.kind == .xray ? reach?.port : nil
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
         self.profileID = profileID
         self.protectsLocalNetwork = protectsLocalNetwork && proxies.isEmpty
         let policy = ProfileChallengePolicy(
             hasProxy: !proxies.isEmpty,
-            proxyCredential: proxy?.username.map { URLCredential(user: $0, password: proxy?.password ?? "", persistence: .forSession) })
+            proxyCredential: reach?.username.map { URLCredential(user: $0, password: reach?.password ?? "", persistence: .forSession) })
         challengePolicy = policy
         if !proxies.isEmpty {
             // Lock 3. The default privacy context is what every Network.framework connection and
@@ -162,10 +169,14 @@ enum ProfileNetworkGuard {
         // With a proxy, every session of the process carries it; with or without, none shares the
         // app's own cookie jar, cache or saved credentials with the other profiles' processes.
         missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
-        missingHooks += closeTheProcess(udp: !proxies.isEmpty, profileID: profileID)
+        missingHooks += closeTheProcess(udp: !proxies.isEmpty, profileID: profileID, relayPort: relayPort)
         // QUIC goes around any proxy: a profile with one does not run with UDP open.
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
+        }
+        // Nor does a profile on a link run with TCP open to anything but its relay's port.
+        if relayPort != nil, !closures.sorted.contains("tcp-relay-only") {
+            throw CoreError.invalidConfiguration("TCP could not be closed but to the relay of the profile's process")
         }
         // Nor does any profile run with the keychain open to its process (`closeTheProcess`).
         if !closures.sorted.contains("keychain") {
@@ -868,11 +879,18 @@ enum ProfileNetworkGuard {
     ///     (`ProfileGrant`); before, its sandbox let it read the account's tokens and read or change
     ///     another running profile's cookies and history (the security audit of 12 November 2026,
     ///     APP-10). Its own folder stays open: in a sandbox profile the last rule that matches wins.
-    nonisolated private static func closeTheProcess(udp: Bool, profileID: UUID) -> [String] {
+    nonisolated private static func closeTheProcess(udp: Bool, profileID: UUID, relayPort: Int? = nil) -> [String] {
         var rules: [String] = []
         var vaultRules: [String] = []
         let vaultNamed = closeTheVault(profileID: profileID, into: &vaultRules)
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        // A profile on a share link: TCP to its relay's port on this Mac and nowhere else, whatever in
+        // this process would connect by itself (docs/TUNNEL.md, "Links"). WebKit's network process
+        // is held by the data store's proxy, which is that relay.
+        if let relayPort, (1...65535).contains(relayPort) {
+            rules.append("(deny network-outbound (remote tcp \"*:*\"))")
+            rules.append("(allow network-outbound (remote tcp \"localhost:\(relayPort)\"))")
+        }
         rules.append("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name-regex #\"^com\\.apple\\.securityd\\.\"))")
         if let realHome = SafariPaths.realHome {
             rules.append("(deny file-read* file-write* (subpath \"\(realHome)/Library/Keychains\"))")
@@ -911,6 +929,7 @@ enum ProfileNetworkGuard {
                 let reached = KeychainCheck.securitydServices.filter { KeychainCheck.lookUp($0) == KERN_SUCCESS }
                 if reached.isEmpty { closures.insert("keychain") } else { missing.append("sandbox: securityd stays reachable (\(reached.joined(separator: ", ")))") }
                 if udp { closures.insert("udp") }
+                if relayPort != nil { closures.insert("tcp-relay-only") }
                 if placesClosed { closures.insert("safari-places") }
                 if !vaultRules.isEmpty, attempt.contains(vaultRules[0]) {
                     closures.insert("other-profiles")
@@ -958,8 +977,9 @@ enum ProfileNetworkGuard {
         return out
     }
 
-    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places",
-    /// "safari-xpc-services", "keychain", "other-profiles".
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "tcp-relay-only" (a link's
+    /// profile: TCP to its relay alone), "safari-places", "safari-xpc-services", "keychain",
+    /// "other-profiles".
     nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed

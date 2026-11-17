@@ -134,8 +134,17 @@ struct ProxyLine: Equatable {
     /// nil when there is no password in it. Where the password is not found in the text as written,
     /// the proxy's own address is shown with dots instead: the password is never shown.
     var maskedText: String? {
-        guard case .proxy(let line) = field, let password = line.proxy.password, !password.isEmpty else { return nil }
         let dots = String(repeating: "•", count: 8) // l10n: not text
+        // A share link's secret is its id or password, or the whole base64 of a form that holds them.
+        if case .proxy(let line) = field, line.proxy.kind == .xray {
+            var shown = ShareLink.masked(text)
+            if let range = ProxyListImport.passwordRange(in: text) {
+                shown = text
+                shown.replaceSubrange(range, with: dots)
+            }
+            return shown.split(whereSeparator: { $0.isNewline || $0.isWhitespace }).joined(separator: " ")
+        }
+        guard case .proxy(let line) = field, let password = line.proxy.password, !password.isEmpty else { return nil }
         var shown: String
         if let range = ProxyListImport.passwordRange(in: text) {
             shown = text
@@ -225,11 +234,17 @@ struct ProxyLineReadingView: View {
     static func summary(_ proxy: ProxySettings, kind: String) -> String {
         var parts = [kind, proxy.displayAddress]
         if let user = proxy.username, !user.isEmpty { parts.append(String(format: L("proxyLine.user"), user)) }
+        // A link: its name as the provider gave it, and how it reaches its server.
+        if let link = proxy.shareLink {
+            if !link.name.isEmpty { parts.append("“" + link.name + "”") } // l10n: not text
+            parts.append(ShareLinkText.transport(link))
+            parts.append(contentsOf: ShareLinkText.notes(link))
+        }
         return parts.joined(separator: " · ") // l10n: not text
     }
 
     static func kindText(_ proxy: ProxySettings, _ source: ProxyLine.KindSource) -> String {
-        let name = ProxyReport.kindName(proxy.kind, tls: proxy.tlsToProxy)
+        let name = ProxyReport.kindName(of: proxy)
         switch source {
         case .scheme: return name
         case .check: return String(format: L("proxyLine.kind.found"), name)
@@ -292,7 +307,8 @@ struct ProxyLineCheckView: View {
     private func headline(state: ProxyState, result: ProxyCheckResult) -> String {
         guard state.isWorking, let proxy else { return state.title }
         let kind = result.diagnosis?.kinds.first ?? proxy.kind
-        var parts = [state.title, ProxyReport.kindName(kind, tls: kind == .httpConnect && proxy.tlsToProxy)]
+        var parts = [state.title, proxy.kind == .xray ? ProxyReport.kindName(of: proxy)
+                                                      : ProxyReport.kindName(kind, tls: kind == .httpConnect && proxy.tlsToProxy)]
         let latency = ProxyCheckText.latency(result)
         if !latency.isEmpty { parts.append(latency) }
         return parts.joined(separator: " · ") // l10n: not text

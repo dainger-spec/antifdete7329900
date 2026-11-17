@@ -858,10 +858,26 @@ final class VMCenter: ObservableObject {
         }
         running[id] = Running(phase: .checkingProxy)
         Task { [weak self] in
+            // A share link's machine goes through a relay of its own for as long as it runs
+            // (`XrayRelays`, docs/TUNNEL.md, "Links"): started first, so the check asks through it.
+            if proxy.kind == .xray {
+                do {
+                    try await XrayRelays.shared.start(for: proxy, owner: id) { [weak self] _ in self?.relayEnded(id) }
+                } catch {
+                    guard let self, self.running[id]?.phase == .checkingProxy else { return }
+                    self.running[id] = nil
+                    self.problems[id] = L("vm.error.relay")
+                    return
+                }
+            }
             let check = await VMCenter.checkProxy(proxy)
-            guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else { return }
+            guard let self, self.running[id]?.phase == .checkingProxy, var profile = self.list.profile(id) else {
+                XrayRelays.shared.stop(owner: id)
+                return
+            }
             self.exits[id] = check
             guard check.isAlive else {
+                XrayRelays.shared.stop(owner: id)
                 self.running[id] = nil
                 self.problems[id] = VMCenter.proxyProblem(proxy, check: check)
                 return
@@ -877,6 +893,7 @@ final class VMCenter: ObservableObject {
             self.running[id]?.udp = udp
             // The limit again: another machine may have started while the proxy was asked.
             guard self.runningCount < VMRequirements.runningLimit else {
+                XrayRelays.shared.stop(owner: id)
                 self.running[id] = nil
                 self.problems[id] = L("vm.error.limit")
                 return
@@ -884,6 +901,7 @@ final class VMCenter: ObservableObject {
             // And the base again: it may have been opened meanwhile, and a machine not made yet
             // would be a copy of a disk the base is writing.
             if self.activity == .guestSetup, !self.library.machine(for: id).isComplete {
+                XrayRelays.shared.stop(owner: id)
                 self.running[id] = nil
                 self.problems[id] = L("vm.error.baseOpen")
                 return
@@ -943,9 +961,21 @@ final class VMCenter: ObservableObject {
                 let display = profile.display, share = files.share
                 Task.detached(priority: .userInitiated) { VMWallpaper.place(for: display, in: share) }
             }
+            // A share link's machine is given its relay, as the SOCKS5 proxy it is to this Mac, never
+            // the link: the helper reaches nothing but that. No relay: no start — a machine whose
+            // proxy is nil would go out as this Mac.
+            var routed = profile
+            if let proxy = profile.proxy, proxy.kind == .xray {
+                guard let reach = ProxyRoutes.shared.connectable(proxy) else {
+                    running[id] = nil
+                    problems[id] = L("vm.error.relay")
+                    return
+                }
+                routed.proxy = reach
+            }
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
-            var request = VMHelperRequest.run(profile: profile, library: library,
+            var request = VMHelperRequest.run(profile: routed, library: library,
                                               hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts,
                                               udp: udp)
             // The app's own "animations off": the start's cover moves nothing, as under Reduce Motion.
@@ -1012,7 +1042,16 @@ final class VMCenter: ObservableObject {
         }
     }
 
+    /// A machine's link relay ended and did not start again: the machine stops, and says why. Its
+    /// connections failed meanwhile; none went another way.
+    private func relayEnded(_ id: UUID) {
+        guard running[id] != nil else { return }
+        problems[id] = L("vm.error.relayEnded")
+        forceStop(id)
+    }
+
     private func ended(_ id: UUID, failure: String?) {
+        XrayRelays.shared.stop(owner: id)
         helpers[id] = nil
         running[id] = nil
         hosts[id] = nil
@@ -1085,6 +1124,7 @@ final class VMCenter: ObservableObject {
         guard let state = running[id] else { return }
         if state.phase == .checkingProxy {
             running[id] = nil
+            XrayRelays.shared.stop(owner: id)
             return
         }
         running[id]?.phase = .stopping

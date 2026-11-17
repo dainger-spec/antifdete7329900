@@ -7,6 +7,7 @@
 #   scripts/build-xray.sh --record                      # both architectures; prints the SHA-256 lines and
 #                                                       # writes Resources/Xray/NOTICE.txt anew (after a pin change)
 #   scripts/build-xray.sh --goos linux --arch amd64 --out … --no-check   # a Linux build, for testing configurations
+#   scripts/build-xray.sh --check-notices --out <a build>   # Resources/Xray/NOTICE.txt is what this pin needs
 #
 # What makes the bytes the same on every host: the source at the pinned commit (refused if the tag now
 # names another), its modules as its go.sum names them (`go mod verify`), the pinned Go toolchain
@@ -31,6 +32,7 @@ OUT=""
 CHECK=1
 RECORD=0
 CLEAN=0
+CHECK_NOTICES=0
 BUILD_ROOT="${BUILD_ROOT:-$PWD/build/xray-src}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -40,6 +42,7 @@ while [[ $# -gt 0 ]]; do
     --no-check) CHECK=0; shift ;;
     --record) RECORD=1; shift ;;
     --clean) CLEAN=1; shift ;;
+    --check-notices) CHECK_NOTICES=1; shift ;;
     *) echo "usage: $0 [--arch arm64|amd64] [--goos darwin|linux] [--out path] [--no-check] [--record] [--clean]" >&2; exit 64 ;;
   esac
 done
@@ -94,6 +97,12 @@ build_one() {
     -o "$out" ./main)
   sha256 "$out"
 }
+
+if [[ "$CHECK_NOTICES" == "1" ]]; then
+  [[ -n "$OUT" && -f "$OUT" ]] || { echo "error: --check-notices needs --out <a build of this pin>" >&2; exit 1; }
+  scripts/xray_notices.py --source "$SRC" --binary "$OUT" --lock "$LOCK" --out "$NOTICE" --check
+  exit 0
+fi
 
 if [[ "$RECORD" == "1" ]]; then
   for arch in arm64 amd64; do

@@ -207,6 +207,8 @@ func translatedErrorText(_ error: Error) -> String? {
                           L("profiles.menu.syncNow"), L("profiles.menu.more"))
         }
     }
+    // A share link that cannot be used (`ShareLink`): what is wrong with it, never its secret.
+    if let error = error as? ShareLinkError { return shareLinkText(error) }
     // A sync server's refusal that names its code (`HTTPSyncTransport`): said as `syncServer` is, the
     // code in place of the body. Through the Lumen account the app says each in words of its own
     // (`AccountSyncText`).
@@ -236,4 +238,40 @@ func translatedErrorText(_ error: Error) -> String? {
         }
     }
     return nil
+}
+
+/// What is wrong with a share link, in the person's language (`ShareLinkError`).
+func shareLinkText(_ error: ShareLinkError) -> String {
+    switch error {
+    case .empty: return L("error.shareLink.empty")
+    case .tooLong: return String(format: L("error.shareLink.tooLong"), ShareLink.maximumLength)
+    case .containsWhitespace: return L("error.shareLink.containsWhitespace")
+    case .unsupportedScheme(let scheme): return String(format: L("error.shareLink.unsupportedScheme"), scheme)
+    case .hasPath: return L("error.shareLink.hasPath")
+    case .missingCredentials: return L("error.shareLink.missingCredentials")
+    case .invalidUserID: return L("error.shareLink.invalidUserID")
+    case .invalidPassword: return L("error.shareLink.invalidPassword")
+    case .invalidHost(let host): return String(format: L("error.shareLink.invalidHost"), host)
+    case .missingPort: return L("error.shareLink.missingPort")
+    case .invalidPort(let text): return String(format: L("error.shareLink.invalidPort"), text)
+    case .invalidParameter(let name): return String(format: L("error.shareLink.invalidParameter"), name)
+    case .removedTransport(let name): return String(format: L("error.shareLink.removedTransport"), name)
+    case .unsupportedTransport(let name): return String(format: L("error.shareLink.unsupportedTransport"), name)
+    case .unsupportedSecurity(let name): return String(format: L("error.shareLink.unsupportedSecurity"), name)
+    case .unsupportedFlow(let name): return String(format: L("error.shareLink.unsupportedFlow"), name)
+    case .visionNeedsTLS: return L("error.shareLink.visionNeedsTLS")
+    case .unsupportedEncryption(let name): return String(format: L("error.shareLink.unsupportedEncryption"), name)
+    case .unsupportedCipher(let name): return String(format: L("error.shareLink.unsupportedCipher"), name)
+    case .invalidShadowsocksKey(let bytes): return String(format: L("error.shareLink.invalidShadowsocksKey"), bytes)
+    case .shadowsocksPlugin(let name): return String(format: L("error.shareLink.shadowsocksPlugin"), name)
+    case .invalidBase64: return L("error.shareLink.invalidBase64")
+    case .invalidVMessJSON: return L("error.shareLink.invalidVMessJSON")
+    case .vmessAlterID: return L("error.shareLink.vmessAlterID")
+    case .missingRealityKey: return L("error.shareLink.missingRealityKey")
+    case .invalidRealityKey: return L("error.shareLink.invalidRealityKey")
+    case .invalidShortID: return L("error.shareLink.invalidShortID")
+    case .missingServerName: return L("error.shareLink.missingServerName")
+    case .invalidPinnedCertificate: return L("error.shareLink.invalidPinnedCertificate")
+    case .unsupportedParameter(let name, let value): return String(format: L("error.shareLink.unsupportedParameter"), name, value)
+    }
 }

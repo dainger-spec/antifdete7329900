@@ -166,6 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
+        // Links' relays an earlier run of the app left when it crashed (XrayRelays).
+        XrayRelays.endLeftovers()
         // `--settings-window-check` (CI): nothing otherwise.
         SettingsWindowCheck.start()
     }
@@ -177,6 +179,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// too: a quit with no profile running does not lock first (`QuitCoordinator`).
     func applicationWillTerminate(_ notification: Notification) {
         CameraPreview.discardAll()
+        // Every link's relay still running (a check's, a machine's): the profiles' stopped with them.
+        XrayRelays.shared.stopAll()
     }
 
     /// Clicking the dock icon with no visible window brings the Profiles window back.

@@ -31,6 +31,15 @@
 #   VM=check scripts/build-app.sh   # builds the helper and starts it once, for CI; the app is as
 #                                   # without it
 #
+#   XRAY=1 SANDBOX=0 scripts/build-app.sh   # with the relay of VLESS, VMess, Trojan and Shadowsocks links
+#                                   # (docs/TUNNEL.md, "Links"): Xray-core, built from its pinned source
+#                                   # by scripts/build-xray.sh (needs git and Go) and checked against the
+#                                   # SHA-256 scripts/xray.lock records, as Contents/MacOS/LumenXray —
+#                                   # signed apart with no entitlement — with its licences in
+#                                   # Resources/Xray-NOTICE.txt. XRAY_BINARY=path takes a build made
+#                                   # already (CI's), checked the same way. Without it a link's profile
+#                                   # does not start, and says why.
+#
 # A profile's process — and every process that runs Safari's code — is started from
 # Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
 # validation off: never the app's application identifier, app group or network extension rights,
@@ -62,6 +71,7 @@ APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
 CAM="${CAM:-0}"
 VM="${VM:-0}"
+XRAY="${XRAY:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
@@ -368,6 +378,43 @@ if [[ "$VM" == "1" || "$VM" == "check" ]]; then
   fi
 fi
 
+# The relay of links (docs/TUNNEL.md, "Links"): Xray-core from its pinned source, the same bytes
+# scripts/xray.lock records for each architecture this app is built for (a universal app gets a
+# universal relay), whoever built it.
+XRAY_HELPER=""
+if [[ "$XRAY" == "1" ]]; then
+  [[ "$SANDBOX" != "1" ]] || { echo "error: XRAY=1 needs SANDBOX=0 (a sandboxed app's child would inherit the App Sandbox)" >&2; exit 1; }
+  XRAY_DIR="$PWD/build/xray"
+  mkdir -p "$XRAY_DIR"
+  XRAY_PARTS=()
+  for arch in $(lipo -archs "$BIN_DIR/PrivacyBrowser"); do
+    case "$arch" in
+      arm64) goarch=arm64 ;;
+      x86_64) goarch=amd64 ;;
+      *) echo "error: no relay for the architecture $arch" >&2; exit 1 ;;
+    esac
+    part="$XRAY_DIR/xray-darwin-$goarch"
+    if [[ -n "${XRAY_BINARY:-}" ]]; then
+      cp "$XRAY_BINARY" "$part"
+    else
+      scripts/build-xray.sh --arch "$goarch" --out "$part"
+    fi
+    expected="$(awk -F= -v key="SHA256_darwin_$goarch" '$1 == key { print $2 }' scripts/xray.lock)"
+    actual="$(shasum -a 256 "$part" | awk '{ print $1 }')"
+    [[ -n "$expected" && "$actual" == "$expected" ]] \
+      || { echo "error: the relay for $arch is $actual, and scripts/xray.lock records ${expected:-nothing}: refused" >&2; exit 1; }
+    XRAY_PARTS+=("$part")
+  done
+  XRAY_HELPER="$APP/Contents/MacOS/LumenXray"
+  if [[ "${#XRAY_PARTS[@]}" == "1" ]]; then
+    cp "${XRAY_PARTS[0]}" "$XRAY_HELPER"
+  else
+    lipo -create "${XRAY_PARTS[@]}" -output "$XRAY_HELPER"
+  fi
+  chmod 755 "$XRAY_HELPER"
+  cp Resources/Xray/NOTICE.txt "$APP/Contents/Resources/Xray-NOTICE.txt"
+fi
+
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
 # without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
 # is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
@@ -400,6 +447,12 @@ codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER
 codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID" \
   --entitlements "$PROFILE_ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$PROFILE_EXECUTABLE"
+# The links' relay: under a name of its own (the network guard takes it for no profile, and lets it
+# ask nothing of it), with no entitlement at all, the hardened runtime on.
+if [[ -n "$XRAY_HELPER" ]]; then
+  codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID.Xray" \
+    --sign "$SIGN_IDENTITY" "$XRAY_HELPER"
+fi
 # The machines' helper: under a name of its own (the network guard takes it for no profile), with
 # the virtualization right alone.
 if [[ -n "$VM_HELPER" ]]; then
@@ -425,6 +478,19 @@ if [[ -n "$VM_HELPER" ]]; then
     fi
   done
   "$VM_HELPER" --check
+fi
+if [[ -n "$XRAY_HELPER" ]]; then
+  codesign --verify --strict "$XRAY_HELPER"
+  # No entitlement of any kind: read back from its signature.
+  if [[ -n "$(codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | tr -d '[:space:]')" ]] \
+     && codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | grep -F "<key>" >/dev/null; then
+    echo "error: the links' relay is signed with an entitlement: it holds none" >&2; exit 1
+  fi
+  [[ "$(codesign -d -v "$XRAY_HELPER" 2>&1 | awk -F= '/^Identifier=/ { print $2 }')" == "$BUNDLE_ID.Xray" ]] \
+    || { echo "error: the links' relay is not signed as $BUNDLE_ID.Xray" >&2; exit 1; }
+  # It starts, and is the pinned version.
+  "$XRAY_HELPER" version | grep -F "Xray $(awk -F= '$1 == "XRAY_TAG" { sub(/^v/, "", $2); print $2 }' scripts/xray.lock) " >/dev/null \
+    || { echo "error: the links' relay does not start as the pinned Xray" >&2; exit 1; }
 fi
 # No executable holds a relaxation of the hardened runtime beside the network extension's right: the
 # kernel kills it at its start, after it was notarized (0.1.1, 3 November). Read from every
