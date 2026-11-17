@@ -924,6 +924,7 @@ enum UISnapshots {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
         problems += await welcome(into: folder)
+        problems += await firstRun(into: folder, model: lockModel)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()
         }.capture(into: folder)
@@ -943,42 +944,60 @@ enum UISnapshots {
 
     // MARK: The launch screen
 
-    /// The launch screen (WelcomeSplash), still at chosen moments: a later launch's greeting written
-    /// and settled, in Russian and in English; the Russian one 60 % written; the first launch's, with
-    /// its button; and the Russian one in the glass drawn where Metal is missing. The Metal glass is
-    /// drawn here as a picture (a cached picture of a window holds no Metal layer), by the same shader.
+    /// The launch screen (WelcomeSplash), still at chosen moments, in the run's language: a later
+    /// launch's, settled; the first launch's, with its button; and the first launch's mid-way, the
+    /// title fading in above the arc.
     private static func welcome(into folder: URL) async -> Int {
-        guard let russian = WelcomeLettering.all.first(where: { $0.code == "ru" }),
-              let english = WelcomeLettering.all.first(where: { $0.code == "en" }) else {
-            print("FAIL the launch screen has no greeting in Russian or English")
-            return 1
-        }
-        func settled(_ greeting: WelcomeLettering) -> Double {
-            WelcomeTiming(duration: greeting.duration, reduced: false).settledAt + 0.5
-        }
-        if WelcomeGlassRenderer.prepareNow() == nil {
-            print("NOTE the launch screen's Metal glass cannot be made here: its pictures show the drawn glass")
-        }
+        let settled = WelcomeTiming(reduced: false).settledAt + 0.5
         let size = CGSize(width: 1180, height: 740)
         var problems = 0
-        problems += await Shot(name: "welcome-ru", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {}, still: settled(russian))
+        problems += await Shot(name: "welcome", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: false, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-ru-writing", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {},
-                          still: WelcomeTiming.penStart + russian.duration * 0.6)
+        problems += await Shot(name: "welcome-first", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-en", size: size, edges: true) {
-            WelcomeSplash(greeting: english, firstLaunch: false, opening: {}, finished: {}, still: settled(english))
+        problems += await Shot(name: "welcome-first-rising", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: 0.55)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-en-first", size: size, edges: true) {
-            WelcomeSplash(greeting: english, firstLaunch: true, opening: {}, finished: {}, still: settled(english))
+        problems += await Shot(name: "welcome-first-small", size: CGSize(width: 900, height: 560), edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-ru-drawn-glass", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: true, opening: {}, finished: {}, still: settled(russian),
-                          fallbackGlass: true)
+        return problems
+    }
+
+    // MARK: The first run's steps
+
+    /// After the vault is made (FirstRun): the Touch ID offer — asked, on, not recognised — and the
+    /// protection setup — to install, waiting in System Settings, done, the camera not in the plan,
+    /// and inside a virtual machine; and the Profiles window with no profile yet and the guard missing.
+    private static func firstRun(into folder: URL, model: AppModel) async -> Int {
+        var problems = 0
+        let size = CGSize(width: 1180, height: 820)
+        let touchID: [(String, FirstRunTouchIDOutcome?)] = [
+            ("firstrun-touchid", nil), ("firstrun-touchid-on", .on),
+            ("firstrun-touchid-failed", .failed(L("firstRun.touchID.notRecognised"))),
+        ]
+        for (name, outcome) in touchID {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunTouchIDView(done: {}, preview: outcome).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        let protection: [(String, FirstRunProtectionView.Preview)] = [
+            ("firstrun-protection", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true)),
+            ("firstrun-protection-waiting", .init(guardState: .awaitingApproval, cameraState: .awaitingApproval, cameraAllowed: true)),
+            ("firstrun-protection-done", .init(guardState: .ready, cameraState: .active, cameraAllowed: true)),
+            ("firstrun-protection-no-camera-plan", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: false)),
+            ("firstrun-protection-vm", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true, virtualMachine: true)),
+        ]
+        for (name, preview) in protection {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunProtectionView(done: {}, preview: preview).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        problems += await Shot(name: "profiles-empty-guard-reminder", size: CGSize(width: 1180, height: 640), edges: true) {
+            ProfilesPreview(rows: [], sync: .notYet, guardNotice: .notInstalled)
         }.capture(into: folder)
-        WelcomeGlassRenderer.release()
         return problems
     }
 

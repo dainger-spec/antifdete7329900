@@ -39,8 +39,4 @@ final class WelcomeSplashPolicyTests: XCTestCase {
             }
         }
     }
-
-    func testTheGreetingIsTheEnglishOne() {
-        XCTAssertEqual(WelcomeSplashPolicy.greetingLanguage, "en")
-    }
 }

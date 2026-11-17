@@ -172,7 +172,8 @@ struct SecuritySettings: View {
                     .buttonStyle(.lumenSecondary)
                     .disabled(model.phase != .unlocked)
             }
-            SettingRow(L("settings.security.vault"), detail: model.vaultPathDescription, effect: nil) {
+            // The folder by its words, not its path (the owner: no technical tails); Show in Finder opens it.
+            SettingRow(L("settings.security.vault"), detail: L("settings.security.vault.detail"), effect: nil) {
                 Button(L("index.reveal")) { model.revealVaultFolder() }
                     .buttonStyle(.lumenGhost)
             }

@@ -20,7 +20,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet { if errorMessage == nil { errorTitle = nil } }
+    }
+    /// What the alert of `errorMessage` is titled: what happened ("Update not installed"), when
+    /// whoever raised it said so (`showError(_:title:)`); nil — and the generic «Error» — when it did
+    /// not, or when messages of different titles are shown together.
+    @Published private(set) var errorTitle: String?
+    /// The error alert's title.
+    var errorAlertTitle: String { errorTitle ?? L("common.error") }
     /// Why the master password just typed is not accepted (§10.1): it is the account's password or
     /// the license's key. Shown under its field, on the setup screen and in "Change master password";
     /// cleared as the password changes.
@@ -125,6 +133,9 @@ final class AppModel: ObservableObject {
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
+    /// The first run's steps still to show after the vault was made, before the profiles: the
+    /// Touch ID offer and the system extensions' setup (`FirstRun`, `planFirstRun`).
+    @Published var firstRunSteps: [FirstRunStep] = []
     /// Safari on this Mac runs a newer engine than profiles, and OK was not yet pressed for this
     /// pair of versions (`EngineWarning`).
     @Published private(set) var engineWarning: EngineWarning.Facts?
@@ -332,6 +343,8 @@ final class AppModel: ObservableObject {
             }.value
             try self.didUnlock(vault)
             self.license.forgetComparisons()
+            // The first run goes on: Touch ID and the system extensions, offered once (`FirstRun`).
+            self.planFirstRun()
         }
     }
 
@@ -346,6 +359,7 @@ final class AppModel: ObservableObject {
             masterPasswordWarning = warning
             masterPasswordRefusal = nil
             license.forgetComparisons()
+            planFirstRun()
         } catch {
             showError(errorText(error))
         }
@@ -699,7 +713,7 @@ final class AppModel: ObservableObject {
             } else {
                 deviceSettingsUnreadable = true
                 Logger(subsystem: "PrivacyBrowser", category: "Vault").error("settings.bin could not be read: \(error.logKind, privacy: .public); kept, the defaults shown")
-                showError(L("settings.device.unreadable"))
+                showError(L("settings.device.unreadable"), title: L("settings.device.unreadable.title"))
             }
         }
         restartAutomation()
@@ -745,6 +759,8 @@ final class AppModel: ObservableObject {
     /// after every seal attempt is force-sealed instead of left decrypted (also when the quit
     /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
     func lock(forQuit: Bool = false) async {
+        // What the first run had left to offer is offered no more: the lock screen comes.
+        firstRunSteps = []
         if forQuit {
             recordProfilesToReopen()
             manager?.prepareForQuit()
@@ -882,10 +898,10 @@ final class AppModel: ObservableObject {
             let (transport, scoped) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             folder = scoped
             if try await SyncEngine(repository: repository, transport: transport).publishVaultHeader() != .published {
-                showError(L("changepw.sync.notThere"))
+                showError(L("changepw.sync.notThere"), title: L("changepw.sync.title"))
             }
         } catch {
-            showError(String(format: L("changepw.sync.later"), errorText(error)))
+            showError(String(format: L("changepw.sync.later"), errorText(error)), title: L("changepw.sync.title"))
         }
     }
 
@@ -1959,7 +1975,7 @@ final class AppModel: ObservableObject {
         do {
             try updateDeviceSettings { $0.automation = settings }
         } catch {
-            showError(String(format: L("automation.error.save"), error.localizedDescription))
+            showError(String(format: L("automation.error.save"), errorText(error)))
             return
         }
         restartAutomation()
@@ -2081,7 +2097,7 @@ final class AppModel: ObservableObject {
                 showUpdateWindow(.notice(String(format: L("updates.outcome.\(outcome.kind.rawValue)"), outcome.version)), focus: false)
             }
         case .deferred(.gate)?:
-            showUpdateWindow(.notice(L("updates.notice.deferred")), focus: false)
+            showUpdateWindow(.notice(UpdateNoticeText.deferred("")), focus: false)
         case .deferred(.installer)?:
             showUpdateWindow(.notice(L("updates.notice.installerDidNotStart")), focus: false)
         case nil:
@@ -2252,11 +2268,16 @@ final class AppModel: ObservableObject {
     /// Shows `message` in the error alert. What arrives while it is up is shown with it (a launch
     /// can report several things at once: an exit-IP change, a new time zone, a language note),
     /// not instead of it; a message already shown is not repeated, and the latest few are kept.
-    func showError(_ message: String) {
+    /// `title`: what happened, as the alert's title (`errorAlertTitle`); kept while what is shown
+    /// with it has the same one.
+    func showError(_ message: String, title: String? = nil) {
         var shown = errorMessage?.components(separatedBy: "\n\n") ?? []
         guard !shown.contains(message) else { return }
+        let alone = shown.isEmpty
         shown.append(message)
+        let shownTitle = alone || errorTitle == title ? title : nil
         errorMessage = shown.suffix(5).joined(separator: "\n\n")
+        errorTitle = shownTitle
     }
 
     /// `id`: the profile the work is on — what goes wrong is then said with its name

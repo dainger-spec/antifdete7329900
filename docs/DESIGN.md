@@ -94,31 +94,24 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   when it takes effect, control at the right), `SettingCustomRow` (more than a sentence under the
   title). No section is the system's form: Sync, WebRTC and Automation are pages of rows, and the
   sheets that open them from the Profiles window show the same rows (`embedded`).
-- Launch screen (`WelcomeSplash.swift`, `WelcomeGlass.swift`; when: `App/WelcomeLaunch.swift`,
-  BrowserCore's `WelcomeSplashPolicy`): before the first screen or the lock screen, in the same
-  window, once: at the first start a person makes of the app (it remembers it was shown, so a
-  person who quits before making a vault goes straight to the setup next time) — and at every start
-  with Settings → Appearance → "Greet with the welcome window at every start" on (off by default;
-  the owner, 16 November: "only at the first start after all, and a setting for whoever wants it").
-  Never for a profile's process, the self-test, the snapshots, CI's runs or the app's own restarts
-  (Settings › Language, an update's installer), nor for a window opened again. The greeting is Pacifico's own outline (`design/fonts/Pacifico`, SIL OFL 1.1; the licence
-  ships in `Resources/ThirdPartyNotices.txt`), revealed by a pen moving along its letters in
-  1.8–2.4 s, in clear glass lit by the eclipse's horizon (`LumenHorizon`, the virtual machines'
-  desktop's): a Metal shader compiled from source as the app starts, Core Graphics masks blurred by
-  Metal Performance Shaders, four samples a pixel; where Metal is missing, the outline drawn in
-  SwiftUI. Then one light along the greeting, "LUMEN"; the first launch's "Get started", or a
-  0.9 s hold; then the opening (0.6 s: the screen eases up 30 pt and fades, the window's content
-  scales in from 98 % over it). Any click or key goes on at once. On a start with a vault the lock
-  screen is under it from the start, its password's field holding the keyboard: the launch screen
-  takes no focus, fades off the lock screen (its backdrop too) as that scales in, and a key opens
-  it and goes on to the field — a password typed at once is typed whole (the launch screen had
-  swallowed its first key); Touch ID is asked once the launch screen has gone. It always writes the English
-  "welcome" (the owner, 16 November); the other languages' outlines stay in the file and are not
-  shown.
-  `design/tools/welcome_lettering.py` makes the outlines, the pen's way (from the outline's skeleton)
-  and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
-  (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
-  records it).
+- Launch screen (`WelcomeSplash.swift`; when: `App/WelcomeLaunch.swift`, BrowserCore's
+  `WelcomeSplashPolicy`): before the first screen or the lock screen, in the same window, once: at
+  the first start a person makes of the app (it remembers it was shown, so a person who quits before
+  making a vault goes straight to the setup next time) — and at every start with Settings →
+  Appearance → "Show the greeting at every start" on (off by default). Never for a profile's
+  process, the self-test, the snapshots, CI's runs or the app's own restarts, nor for a window
+  opened again. The lock screen's dark backdrop and the eclipse's horizon (`LumenHorizon`); above
+  the arc's light, never on it, the Lumen mark, "Lumen" and one line in the interface's language
+  (`welcome.tagline`) fade in; at the first launch one button, «Начать» / "Get started" (Lumen's
+  main button), then the setup; at a later launch a short hold, then the opening by itself (0.5 s:
+  the screen eases up 30 pt and fades, the window's content scales in from 98 % over it). About a
+  second and a half in all; under Reduce Motion nothing moves and the opening has no transition.
+  Any click or key goes on at once. On a start with a vault the lock screen is under it from the
+  start, its password's field holding the keyboard: the launch screen takes no focus, fades off the
+  lock screen as that scales in, and a key opens it and goes on to the field — a password typed at
+  once is typed whole; Touch ID is asked once the launch screen has gone. The owner, 17 November:
+  this replaced the handwritten «welcome» in liquid glass (Pacifico's outline, a Metal shader),
+  whose renderer, font and prototype were removed.
 - Lock and first launch (`VaultViews.swift`), on the launch screen's horizon (the owner, 15 November): the
   Lumen disc without its tile, the title on one line where the window has room and the sentence stand in
   the sky; the horizon's light (`LockHorizon`, `LumenHorizon` with the disc placed) runs 26 pt under the

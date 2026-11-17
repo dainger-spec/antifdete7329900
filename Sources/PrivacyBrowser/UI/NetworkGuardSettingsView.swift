@@ -12,6 +12,7 @@ struct NetworkGuardSettingsView: View {
     @ObservedObject private var networkGuard = NetworkGuard.shared
     @Environment(\.dismiss) private var dismiss
     @State private var explaining = false
+    @State private var showingHow = false
 
     var body: some View {
         Group {
@@ -94,10 +95,13 @@ struct NetworkGuardSettingsView: View {
             .overlay(alignment: .top) { Rectangle().fill(Theme.divider).frame(height: 1) }
             .accessibilityElement(children: .contain)
 
-            SettingsCaption(L("settings.webRTC.how"))
-            SettingRow(L("guard.how.relay.title"), detail: L("guard.how.relay"), effect: nil) { EmptyView() }
-            SettingRow(L("guard.how.guard.title"), detail: L("guard.how.guard"), effect: nil) { EmptyView() }
-            SettingRow(L("guard.how.limits.title"), detail: L("guard.how.limits"), effect: nil) { EmptyView() }
+            // How it works: on demand (the owner: no paragraphs the person did not ask for).
+            SettingsMoreButton(title: L("settings.webRTC.how"), expanded: $showingHow)
+            if showingHow {
+                SettingRow(L("guard.how.relay.title"), detail: L("guard.how.relay"), effect: nil) { EmptyView() }
+                SettingRow(L("guard.how.guard.title"), detail: L("guard.how.guard"), effect: nil) { EmptyView() }
+                SettingRow(L("guard.how.limits.title"), detail: L("guard.how.limits"), effect: nil) { EmptyView() }
+            }
         }
     }
 

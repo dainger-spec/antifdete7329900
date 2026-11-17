@@ -286,7 +286,7 @@ private struct ModelErrors: ViewModifier {
     @Environment(\.controlActiveState) private var activeState
 
     func body(content: Content) -> some View {
-        content.alert(L("common.error"),
+        content.alert(model.errorAlertTitle,
                       isPresented: Binding(get: { model.errorMessage != nil && activeState == .key },
                                            set: { if !$0 { model.errorMessage = nil } })) {
             Button(L("common.ok"), role: .cancel) {}

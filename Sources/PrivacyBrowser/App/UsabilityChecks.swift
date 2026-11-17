@@ -72,13 +72,13 @@ enum UsabilityChecks {
             ("en", "download folder", .downloads, nil),
             ("en", "token", .automation, "automation.token"),
             ("en", "updates", .updates, nil),
-            ("en", "welcome every start", .appearance, "settings.appearance.welcome"),
+            ("en", "greeting every start", .appearance, "settings.appearance.welcome"),
             ("ru", "масштаб", .behavior, "settings.behavior.zoom"),
             ("ru", "выход", .startup, "settings.startup.confirmQuit"),
             ("ru", "мастер-пароль", .security, "settings.security.password"),
             ("ru", "загрузок", .downloads, nil),
             ("ru", "обновления", .updates, nil),
-            ("ru", "welcome при каждом запуске", .appearance, "settings.appearance.welcome"),
+            ("ru", "приветствие при каждом запуске", .appearance, "settings.appearance.welcome"),
             // What can be added to the proxy list, by name (the owner did not find OpenVPN or the
             // links in 0.1.18).
             ("en", "openvpn", .proxies, "settings.proxies.add"),

@@ -61,7 +61,7 @@ struct RootView: View {
         // Every sheet of the window takes the size it asks for, but never more than this room.
         .providesSheetRoom()
         .tint(Theme.accentFill)
-        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
+        .alert(model.errorAlertTitle, isPresented: Binding(get: { model.errorMessage != nil },
                                                        set: { if !$0 { model.errorMessage = nil } })) {
             Button(L("common.ok"), role: .cancel) {}
         } message: {
@@ -71,7 +71,7 @@ struct RootView: View {
 
     /// The launch screen of this start, before the window's screens or over them.
     private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
-        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+        WelcomeSplash(firstLaunch: welcome.firstLaunch,
                       opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
                       overScreens: !welcome.firstLaunch)
             // Its window closed meanwhile: a window opened again starts at the first screen.
@@ -103,7 +103,7 @@ struct RootView: View {
     /// The window's screens: the first launch's, the lock screen, "Vault open", the profiles.
     private var screens: some View {
         ZStack {
-            if model.phase == .unlocked && showsProfiles {
+            if model.phase == .unlocked && showsProfiles && model.firstRunSteps.isEmpty {
                 ProfileListView().transition(.opacity)
             } else {
                 // One backdrop for setup, unlock and "open": its eclipses close in while the
@@ -118,19 +118,22 @@ struct RootView: View {
                             .transition(.opacity)
                     case .setup: SetupView().transition(.opacity)
                     case .locked: UnlockView().transition(.opacity)
+                    // The first run's Touch ID and protection steps, before the profiles (FirstRun).
+                    case .unlocked where !model.firstRunSteps.isEmpty: FirstRunView().transition(.opacity)
                     case .unlocked: VaultOpenView().transition(.opacity)
                     }
                 }
                 .transition(.opacity)
                 .overlay {
                     // "Vault open": a key or a click goes on to the profiles at once.
-                    if model.phase == .unlocked && !showsProfiles {
+                    if model.phase == .unlocked && !showsProfiles && model.firstRunSteps.isEmpty {
                         SkipLayer(skip: { showProfiles() })
                     }
                 }
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
+        .animation(Theme.appearAnimation, value: model.firstRunSteps)
         .animation(.easeOut(duration: 0.25), value: showsProfiles)
     }
 
@@ -469,7 +472,9 @@ struct ProfileListView: View {
                        },
                        guardNotice: model.guardNoticeHidden ? nil : WebRTCProtectionNotice.notice(
                            state: networkGuard.state, checking: networkGuard.checking,
-                           profilesWantingIt: model.details.values.contains(where: \.wantsNetworkGuard)),
+                           // Also before any profile wants it (area A, the owner: a fresh Mac was
+                           // never asked); never in a virtual machine (`AppModel.guardReminderWanted`).
+                           profilesWantingIt: model.guardReminderWanted),
                        openGuardSettings: {
                            model.settingsSection = .webRTC
                            openSettings()
@@ -3109,13 +3114,8 @@ private struct EmptyProfilesView: View {
                     }
                 }
                 .padding(.top, 10)
-                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 380)
-                    .padding(.top, 14)
+                // No paragraph under the buttons (the owner, 17 November): the title, its line and
+                // the three ways in say it.
             }
         }
     }

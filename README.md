@@ -552,9 +552,8 @@ Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Tests/UpdateInstallerTests/        the installer on real signed bundles (macOS)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist,
                                    Updater/Info.plist (the installer helper), ThirdPartyNotices.txt (the
-                                   licences of others' work the app carries: Pacifico's, SIL OFL 1.1, for the
-                                   launch screen's letters; copied into the app by build-app.sh)
-design/fonts/Pacifico/             the font the launch screen's greetings are drawn from, with its OFL.txt
+                                   licences of others' work the app carries: OpenVPN, lwIP, Xray; copied
+                                   into the app by build-app.sh)
 scripts/                           build-app.sh, release.sh (a release, or a dry run of one), test-shims.mjs,
                                    selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,

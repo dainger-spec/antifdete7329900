@@ -144,9 +144,13 @@ enum Localization {
         var components = Locale.Components(locale: current)
         components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
                                                                    script: nil, region: current.region)
-        // A Russian interface on a Mac of a 12-hour region said "9:36 AM" among Russian words
-        // (Russian has no words of its own for AM and PM): its times are on the 24-hour clock.
-        if languageCode == "ru" { components.hourCycle = .zeroToTwentyThree }
+        // Russian's own conventions in a Russian interface: a Mac of the United States made it say
+        // «8:38 AM» and «41.3 МБ» (the region's 12 hours and decimal point, ru snapshots of full
+        // run 44041802860). Russian writes the time in 24 hours and a decimal comma.
+        if languageCode == "ru" {
+            components.region = Locale.Region("RU")
+            components.hourCycle = .zeroToTwentyThree
+        }
         return Locale(components: components)
     }()
 }
@@ -189,11 +193,13 @@ func translatedErrorText(_ error: Error) -> String? {
         case .wrongPassword: return L("error.core.wrongPassword")
         case .vaultAlreadyExists: return L("error.core.vaultAlreadyExists")
         case .vaultNotFound: return L("error.core.vaultNotFound")
-        case .corruptData(let detail): return String(format: L("error.core.corruptData"), detail)
-        case .cryptoFailure(let detail): return String(format: L("error.core.cryptoFailure"), detail)
-        case .invalidConfiguration(let detail): return String(format: L("error.core.invalidConfiguration"), detail)
+        // The detail is the code's, in English: said in the person's words when it is one they can
+        // act on, else left out (`ErrorDetailText`) — never an error number or a type's name.
+        case .corruptData(let detail): return detailed("error.core.corruptData", detail)
+        case .cryptoFailure(let detail): return detailed("error.core.cryptoFailure", detail)
+        case .invalidConfiguration(let detail): return ErrorDetailText.text(detail) ?? L("error.core.invalidConfiguration.plain")
         case .profileNotFound: return L("error.core.profileNotFound")
-        case .unsupportedFormat(let detail): return String(format: L("error.core.unsupportedFormat"), detail)
+        case .unsupportedFormat(let detail): return ErrorDetailText.text(detail) ?? L("error.core.unsupportedFormat.plain")
         // A file that a newer version of the app wrote, with what to do about it (docs/UPDATES.md §4).
         case .newerFormat(let what, _, _): return String(format: L("error.newerFormat"), what)
         case .unsafeArchivePath(let path): return String(format: L("error.core.unsafeArchivePath"), path)
@@ -201,8 +207,11 @@ func translatedErrorText(_ error: Error) -> String? {
         case .syncServer(let status, let message):
             if status == 401 || status == 403 { return String(format: L("error.core.syncServerToken"), status) }
             return String(format: L("error.core.syncServer"), status, message.isEmpty ? "—" : message)
-        case .io(let detail): return String(format: L("error.core.io"), detail)
-        case .notGranted(let detail): return String(format: L("error.core.notGranted"), detail)
+        case .io(let detail):
+            // A sync request the network did not carry is no file's: said alone.
+            if let network = ErrorDetailText.networkText(detail) { return network }
+            return detailed("error.core.io", detail)
+        case .notGranted: return L("error.core.notGranted.plain")
         // Settings that could not be read (R1): the profile does not start, and how to get them
         // back — a backup's copy of the file, or the server's through Sync Now (named as its menu
         // item is).
@@ -242,6 +251,13 @@ func translatedErrorText(_ error: Error) -> String? {
         }
     }
     return nil
+}
+
+/// `key`'s sentence with the detail after it when the detail can be said in the person's words
+/// (`ErrorDetailText`), else the sentence alone (`key.plain`).
+private func detailed(_ key: String, _ detail: String) -> String {
+    guard let text = ErrorDetailText.text(detail) else { return L(key + ".plain") }
+    return String(format: L(key), text)
 }
 
 /// What is wrong with a share link, in the person's language (`ShareLinkError`).
