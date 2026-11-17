@@ -71,7 +71,7 @@ struct RootView: View {
 
     /// The launch screen of this start, before the window's screens or over them.
     private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
-        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+        WelcomeSplash(firstLaunch: welcome.firstLaunch,
                       opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
                       overScreens: !welcome.firstLaunch)
             // Its window closed meanwhile: a window opened again starts at the first screen.

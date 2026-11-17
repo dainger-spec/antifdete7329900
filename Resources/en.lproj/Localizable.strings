@@ -1318,8 +1318,9 @@
 "unlock.subtitle" = "Enter your master password to continue.";
 "unlock.title" = "Vault locked";
 "welcome.start" = "Get started";
+"welcome.tagline" = "Profiles on real Safari";
 "welcome.skip" = "Continue";
-"welcome.hint" = "Lumen's welcome. Any key goes on.";
+"welcome.hint" = "Press any key to continue.";
 "unlock.vault.info" = "Opened the vault created %1$@, in:\n%2$@\nIf you set your password in another build (from Cursor or swift run, unsandboxed, or with another bundle id), that build has its own vault with its own password.";
 "unlock.vault.test" = "This looks like a test vault: it was created by the CI migration check (password “migration-check”), not by the app.";
 "unlock.working" = "Unlocking…";
