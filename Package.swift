@@ -89,6 +89,42 @@ var targets: [Target] = [
         dependencies: ["VMNetCore"],
         path: "Tests/VMNetCoreTests"
     ),
+    // The OpenVPN tunnel's TCP/IP stack (docs/OPENVPN.md): lwIP 2.2.1 (BSD-3-Clause, lwip/COPYING),
+    // its core vendored unchanged, behind one C file of Lumen's (include/LumenLwIP.h).
+    .target(
+        name: "CLwIP",
+        path: "Sources/CLwIP",
+        exclude: ["lwip/COPYING", "README.md"],
+        cSettings: [.headerSearchPath("lwip/src/include"), .headerSearchPath("port")]
+    ),
+    // What the app and the tunnel's program share (docs/OPENVPN.md): the local port's credential
+    // check, the loopback forwarders that are OpenVPN's only way to its servers, addresses and system
+    // calls. Platform-independent, no lwIP; tested with OpenVPNStack.
+    .target(
+        name: "OpenVPNLink",
+        dependencies: coreDependencies,
+        path: "Sources/OpenVPNLink"
+    ),
+    // The OpenVPN tunnel's own side (docs/OPENVPN.md): the authenticated SOCKS5 server on 127.0.0.1
+    // that a profile is given, its connections and its resolver through the tunnel, over CLwIP.
+    // Platform-independent, tested on Linux and macOS; run by LumenTunnel.
+    .target(
+        name: "OpenVPNStack",
+        dependencies: ["CLwIP", "OpenVPNLink"],
+        path: "Sources/OpenVPNStack"
+    ),
+    .testTarget(
+        name: "OpenVPNStackTests",
+        dependencies: ["OpenVPNStack", "OpenVPNLink"],
+        path: "Tests/OpenVPNStackTests"
+    ),
+    // The program OpenVPN starts as its tun device (`--dev-node unix:`): OpenVPNStack on the socket
+    // OpenVPN hands it. macOS and Linux (the Linux test against a real OpenVPN server).
+    .executableTarget(
+        name: "LumenTunnel",
+        dependencies: ["OpenVPNStack"],
+        path: "Sources/LumenTunnel"
+    ),
     .executableTarget(
         name: "pbupdate",
         dependencies: ["BrowserCore"],
@@ -101,7 +137,9 @@ var products: [Product] = [
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
     .library(name: "NetworkGuardCore", targets: ["NetworkGuardCore"]),
     .library(name: "VMNetCore", targets: ["VMNetCore"]),
+    .library(name: "OpenVPNLink", targets: ["OpenVPNLink"]),
     .executable(name: "pbupdate", targets: ["pbupdate"]),
+    .executable(name: "LumenTunnel", targets: ["LumenTunnel"]),
 ]
 
 #if os(Linux)
@@ -159,7 +197,7 @@ targets.append(contentsOf: [
     .executableTarget(
         name: "PrivacyBrowser",
         dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering",
-                       "MachineCover"],
+                       "MachineCover", "OpenVPNLink"],
         path: "Sources/PrivacyBrowser"
     ),
     .target(

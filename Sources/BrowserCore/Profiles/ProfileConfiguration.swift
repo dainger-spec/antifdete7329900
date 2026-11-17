@@ -400,8 +400,14 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
              localRequests, languageOverride, localeSource, menusInAppLanguage,
-             cameraSubstitution
+             cameraSubstitution, format
     }
+
+    /// The format `config.bin` is written in (docs/UPDATES.md §4): 2 while the proxy is an OpenVPN
+    /// connection (`ProxySettings.openVPN`) — a version from before them would read that proxy as
+    /// SOCKS5 at the VPN server's address and could write it back without its configuration, so it
+    /// is to refuse the whole file as a newer version's; 1 otherwise, written as before (no key).
+    public var format: Int { proxy?.openVPN != nil ? 2 : 1 }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
     /// configurations written by older builds keep decrypting and decoding.
@@ -460,6 +466,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and not confused with "field absent" (→ default) when decoding.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        if format > 1 { try c.encode(format, forKey: .format) }
         try c.encodeIfPresent(startURL, forKey: .startURL)
         try c.encodeIfPresent(userAgent, forKey: .userAgent)
         try c.encodeIfPresent(proxy, forKey: .proxy)
@@ -550,9 +557,14 @@ public struct ProxySettings: Codable, Equatable, Sendable {
     public var tlsToProxy: Bool
     /// Domains that bypass the proxy. Empty by default: everything goes via the proxy.
     public var excludedDomains: [String]
+    /// An OpenVPN connection instead of a proxy server (docs/OPENVPN.md): `host` and `port` are then
+    /// its first server's, `kind` SOCKS5 — what the profile is given at a launch, the tunnel's local
+    /// port — and `username`/`password` its auth-user-pass. Nil for every other proxy, and not
+    /// written then: a version without it reads the settings as before.
+    public var openVPN: OpenVPNSettings?
 
     public init(kind: Kind, host: String, port: Int, username: String? = nil, password: String? = nil,
-                tlsToProxy: Bool = false, excludedDomains: [String] = []) {
+                tlsToProxy: Bool = false, excludedDomains: [String] = [], openVPN: OpenVPNSettings? = nil) {
         self.kind = kind
         self.host = host
         self.port = port
@@ -560,6 +572,7 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         self.password = password
         self.tlsToProxy = tlsToProxy
         self.excludedDomains = excludedDomains
+        self.openVPN = openVPN
     }
 
     public func validate() throws {
@@ -575,6 +588,7 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         if (username == nil) != (password == nil) {
             throw CoreError.invalidConfiguration("proxy username and password must both be set or both empty")
         }
+        try validateOpenVPN()
     }
 }
 

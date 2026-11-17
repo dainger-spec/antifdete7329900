@@ -195,11 +195,14 @@ final class ProfileManager: ObservableObject {
         /// A process of the profile that an earlier run of the app left behind is still sealing
         /// its data (`launch`).
         case stillSealing(name: String)
+        /// The profile's OpenVPN connection did not come up (docs/OPENVPN.md): why, in words.
+        case openVPN(name: String, reason: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
             case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
             case .stillSealing(let name): return String(format: L("launch.error.stillSealing"), name)
+            case .openVPN(let name, let reason): return String(format: L("launch.error.openVPN"), name, reason)
             }
         }
     }
@@ -212,6 +215,31 @@ final class ProfileManager: ObservableObject {
         // profiles stop — nothing of theirs runs on without it.
         NetworkGuard.shared.onHoldsLost = { [weak self] pids in
             self?.guardLost(pids)
+        }
+        // A profile's OpenVPN tunnel went down and did not come back: the profile stops, said.
+        OpenVPNTunnels.shared.onLost = { [weak self] id, failure in
+            self?.tunnelLost(id, failure)
+        }
+    }
+
+    private func tunnelLost(_ id: UUID, _ failure: OpenVPNTunnels.Failure) {
+        guard !runsInProfileProcess, isRunning(id) else { return }
+        let name = (try? repository.summary(for: id).name) ?? ""
+        log.error("The OpenVPN tunnel of \(id.uuidString, privacy: .public) is gone: the profile stops")
+        onError?(String(format: L("launch.openVPNLost"), name, failure.text))
+        Task { try? await self.stop(id) }
+    }
+
+    /// Starts the OpenVPN tunnel of a profile whose proxy is an OpenVPN connection, for this
+    /// launch, and returns the local port the profile is given instead (docs/OPENVPN.md).
+    private func startTunnel(for id: UUID, name: String, _ proxy: ProxySettings) async throws -> ProxySettings {
+        guard ProfileProcess.isEnabled else {
+            throw LaunchError.openVPN(name: name, reason: OpenVPNTunnels.Failure.needsOwnProcess.text)
+        }
+        do {
+            return try await OpenVPNTunnels.shared.start(profile: id, proxy: proxy)
+        } catch let failure as OpenVPNTunnels.Failure {
+            throw LaunchError.openVPN(name: name, reason: failure.text)
         }
     }
 
@@ -344,7 +372,24 @@ final class ProfileManager: ObservableObject {
         AppEnvironment.removeUnsealLeftovers(vault: repository.root, of: id)
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
-        let stored = try repository.loadConfiguration(id, key: key)
+        var stored = try repository.loadConfiguration(id, key: key)
+        // An OpenVPN connection (docs/OPENVPN.md): from here on the profile's proxy is its tunnel's
+        // local port — started here for this launch, or, in the profile's own process, the one its
+        // manager started and handed over (`OpenVPNHandoff`). A launch that ends without a process
+        // of the profile running stops the tunnel it started.
+        var tunnelProxy: ProxySettings?
+        if let proxy = stored.proxy, proxy.isOpenVPN {
+            if runsInProfileProcess {
+                stored.proxy = try OpenVPNHandoff.effective(proxy)
+            } else {
+                let local = try await startTunnel(for: id, name: summary.name, proxy)
+                tunnelProxy = local
+                stored.proxy = local
+            }
+        }
+        defer {
+            if tunnelProxy != nil, children[id] == nil, sessions[id] == nil { OpenVPNTunnels.shared.stop(profile: id) }
+        }
         // Settings → Proxies → "Do not start it": the proxy is asked before anything is decrypted,
         // and a profile whose proxy does not work stays stopped; the Profiles window says why.
         var probedBeforeLaunch = false
@@ -384,10 +429,12 @@ final class ProfileManager: ObservableObject {
                 if let result = await Self.value(of: lookup, within: Self.firstLookupWait), result.location != nil {
                     proxyLookupFinished(result, for: id, name: summary.name, stored: stored)
                     stored = (try? repository.loadConfiguration(id, key: key)) ?? stored
+                    if let tunnelProxy { stored.proxy = tunnelProxy }
                     foundNow = true
                 }
             }
-            try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow, proxyLocationFound: foundNow)
+            try startInOwnProcess(id, summary: summary, stored: stored, forWarmUpOnly: !openingWindow, proxyLocationFound: foundNow,
+                                  tunnelProxy: tunnelProxy)
             return
         }
         // Refuse a proxy that cannot be applied before decrypting anything: the profile must not
@@ -577,7 +624,8 @@ final class ProfileManager: ObservableObject {
     /// answer applies at its next launch. For a profile that does not follow its proxy, the user's
     /// own languages, as Safari uses them.
     private func startInOwnProcess(_ id: UUID, summary: ProfileSummary, stored: ProfileConfiguration,
-                                   forWarmUpOnly: Bool = false, proxyLocationFound: Bool = false) throws {
+                                   forWarmUpOnly: Bool = false, proxyLocationFound: Bool = false,
+                                   tunnelProxy: ProxySettings? = nil) throws {
         // LumenProfile, never the app's own executable: in a build with the network guard that one
         // carries the app's keychain, which every profile would then share (`ProfileExecutable`).
         let executable: URL
@@ -624,7 +672,8 @@ final class ProfileManager: ObservableObject {
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
             cameraAllowed: cameraAllowed(),
-            systemCameraActive: systemCameraActive)
+            systemCameraActive: systemCameraActive,
+            tunnelProxy: tunnelProxy)
         // The process object is held by `children` and, until its exit has been handled, by its own
         // termination handler — never by what it calls: each of these held it, and it and its
         // pipes were never freed (`ProfileProcess.didExit`).
@@ -711,6 +760,7 @@ final class ProfileManager: ObservableObject {
             self.children[id] = nil
             self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
+            OpenVPNTunnels.shared.stop(profile: id)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
             self.runningProfileIDs.remove(id)
@@ -1425,6 +1475,8 @@ final class ProfileManager: ObservableObject {
             child.onExit = nil
             child.terminate()
             await child.waitUntilExit(timeout: 30)
+            // Its tunnel, once nothing of the profile can use it any more.
+            OpenVPNTunnels.shared.stop(profile: id)
             if let status = child.terminationStatus { onChildStopped?(id, status) }
             if let key = try? repository.profileKey(for: id) {
                 try safariHomeVault.seal(profileID: id, key: key)

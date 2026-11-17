@@ -31,6 +31,14 @@
 #   VM=check scripts/build-app.sh   # builds the helper and starts it once, for CI; the app is as
 #                                   # without it
 #
+#   OVPN=1 SANDBOX=0 scripts/build-app.sh # with OpenVPN connections (docs/OPENVPN.md): Contents/MacOS/
+#                                   # openvpn (OpenVPN 2.7 from pinned sources, unmodified:
+#                                   # scripts/build-openvpn.sh) and Contents/MacOS/LumenTunnel (its tun),
+#                                   # each signed with no entitlement; their licenses and sources in
+#                                   # Contents/Resources/ThirdParty/OpenVPN. Without it the app cannot
+#                                   # run an OpenVPN connection and says so.
+#   OVPN=check scripts/build-app.sh # builds both and starts each once, for CI; the app is as without them
+#
 # A profile's process — and every process that runs Safari's code — is started from
 # Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
 # validation off: never the app's application identifier, app group or network extension rights,
@@ -62,6 +70,7 @@ APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
 CAM="${CAM:-0}"
 VM="${VM:-0}"
+OVPN="${OVPN:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
@@ -368,6 +377,30 @@ if [[ "$VM" == "1" || "$VM" == "check" ]]; then
   fi
 fi
 
+# OpenVPN connections (docs/OPENVPN.md): openvpn and LumenTunnel beside the app's executable, with
+# the licenses and sources that must ship with them. Neither holds any entitlement: OpenVPN runs
+# confined by a sandbox the app applies, without root.
+OVPN_PROGRAMS=()
+if [[ "$OVPN" == "1" || "$OVPN" == "check" ]]; then
+  scripts/build-openvpn.sh build/openvpn
+  swift build -c "$CONFIG" --product LumenTunnel
+  # Each started once: a program that does not load is found here, not at a person's launch.
+  "$BIN_DIR/LumenTunnel" --version
+  # `openvpn --version` ends with status 1 by design: its words are what is checked.
+  OVPN_VERSION_LINE="$(build/openvpn/openvpn --version 2>&1 || true)"
+  [[ "$OVPN_VERSION_LINE" == "OpenVPN 2."* ]] || { echo "error: build/openvpn/openvpn does not start" >&2; exit 1; }
+  echo "${OVPN_VERSION_LINE%%$'\n'*}"
+  if [[ "$OVPN" == "1" ]]; then
+    [[ "$SANDBOX" != "1" ]] || { echo "error: OVPN=1 needs SANDBOX=0 (a profile's tunnel is for a profile in its own process)" >&2; exit 1; }
+    cp build/openvpn/openvpn "$APP/Contents/MacOS/openvpn"
+    cp "$BIN_DIR/LumenTunnel" "$APP/Contents/MacOS/LumenTunnel"
+    mkdir -p "$APP/Contents/Resources/ThirdParty/OpenVPN"
+    cp build/openvpn/licenses/* "$APP/Contents/Resources/ThirdParty/OpenVPN/"
+    cp Sources/CLwIP/lwip/COPYING "$APP/Contents/Resources/ThirdParty/OpenVPN/lwIP-COPYING.txt"
+    OVPN_PROGRAMS=("$APP/Contents/MacOS/openvpn" "$APP/Contents/MacOS/LumenTunnel")
+  fi
+fi
+
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
 # without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
 # is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
@@ -407,6 +440,12 @@ if [[ -n "$VM_HELPER" ]]; then
     --entitlements Resources/LumenVM.entitlements \
     --sign "$SIGN_IDENTITY" "$VM_HELPER"
 fi
+# OpenVPN's programs: under names of their own (the network guard takes them for no profile), with
+# no entitlement at all.
+for program in ${OVPN_PROGRAMS[@]+"${OVPN_PROGRAMS[@]}"}; do
+  codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID.$(basename "$program")" \
+    --sign "$SIGN_IDENTITY" "$program"
+done
 codesign --force --options runtime "$TIMESTAMP" \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$APP"
@@ -426,6 +465,15 @@ if [[ -n "$VM_HELPER" ]]; then
   done
   "$VM_HELPER" --check
 fi
+for program in ${OVPN_PROGRAMS[@]+"${OVPN_PROGRAMS[@]}"}; do
+  codesign --verify --strict "$program"
+  # Read back: no entitlement, the debugger's included.
+  if codesign -d --entitlements - --xml "$program" 2>/dev/null | grep -q "<key>"; then
+    echo "error: $program is signed with entitlements: it holds none" >&2; exit 1
+  fi
+  [[ "$("$program" --version 2>&1 || true)" == *"2."* || "$("$program" --version 2>&1 || true)" == "LumenTunnel "* ]] \
+    || { echo "error: $program does not start as signed" >&2; exit 1; }
+done
 # No executable holds a relaxation of the hardened runtime beside the network extension's right: the
 # kernel kills it at its start, after it was notarized (0.1.1, 3 November). Read from every
 # executable's signature (scripts/relaxation_check.sh holds the measured list; allow-jit is not on

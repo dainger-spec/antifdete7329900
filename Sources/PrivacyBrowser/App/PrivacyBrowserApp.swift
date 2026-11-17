@@ -168,6 +168,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate(ignoringOtherApps: true)
         // `--settings-window-check` (CI): nothing otherwise.
         SettingsWindowCheck.start()
+        // OpenVPN processes a run of the app that crashed left behind (docs/OPENVPN.md).
+        OpenVPNTunnels.endLeftovers()
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
@@ -177,6 +179,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// too: a quit with no profile running does not lock first (`QuitCoordinator`).
     func applicationWillTerminate(_ notification: Notification) {
         CameraPreview.discardAll()
+        OpenVPNTunnels.shared.stopAll()
     }
 
     /// Clicking the dock icon with no visible window brings the Profiles window back.

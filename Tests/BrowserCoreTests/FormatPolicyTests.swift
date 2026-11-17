@@ -251,20 +251,21 @@ final class FormatPolicyTests: XCTestCase {
         try assertRefused("index.bin", keeps: url) { try repository.replaceIndex(incoming) }
     }
 
+    /// `config.bin` is at format 2 since a profile's proxy can be an OpenVPN connection (`ProfileConfiguration.format`).
     func testSettingsOfANewerVersion() throws {
         let url = repository.configURL(for: id)
-        try SecureFile.write(AEAD.seal(newer, key: key, aad: ProfileRepository.configAAD(id)), to: url)
-        try assertRefused("config.bin", keeps: url) { _ = try repository.loadConfiguration(id, key: key) }
-        try assertRefused("config.bin", keeps: url) { _ = try repository.loadConfiguration(id) }
-        try assertRefused("config.bin", keeps: url) { try repository.saveConfiguration(ProfileConfiguration(), for: id) }
+        try SecureFile.write(AEAD.seal(newerThan2, key: key, aad: ProfileRepository.configAAD(id)), to: url)
+        try assertRefused("config.bin", keeps: url, supported: 2) { _ = try repository.loadConfiguration(id, key: key) }
+        try assertRefused("config.bin", keeps: url, supported: 2) { _ = try repository.loadConfiguration(id) }
+        try assertRefused("config.bin", keeps: url, supported: 2) { try repository.saveConfiguration(ProfileConfiguration(), for: id) }
     }
 
     /// R4: the settings' decoder takes what it knows from any JSON and defaults the rest, so a newer
     /// version's settings would be read as this version's — and written back without what that
     /// version added. The format is what stops it.
     func testATolerantReaderIsWhyTheFormatIsChecked() {
-        XCTAssertNoThrow(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: newer))
-        XCTAssertThrowsError(try ProfileRepository.decodeConfiguration(newer))
+        XCTAssertNoThrow(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: newerThan2))
+        XCTAssertThrowsError(try ProfileRepository.decodeConfiguration(newerThan2))
     }
 
     func testPasswordsOfANewerVersion() throws {
@@ -392,7 +393,7 @@ final class FormatPolicyTests: XCTestCase {
         let length = bytes[start..<start + 4].reduce(0) { ($0 << 8) | Int($1) }
         var header = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(bytes[start + 4..<start + 4 + length])) as? [String: Any])
         XCTAssertEqual(header["format"] as? Int, 2)
-        header["format"] = 4
+        header["format"] = 5
         let patched = try JSONSerialization.data(withJSONObject: header)
         var rewritten = Data(bytes.prefix(start))
         withUnsafeBytes(of: UInt32(patched.count).bigEndian) { rewritten.append(contentsOf: $0) }
@@ -401,8 +402,8 @@ final class FormatPolicyTests: XCTestCase {
         try rewritten.write(to: file)
 
         let profiles = repository.list().count
-        try assertRefused("Newer.pbprofile", keeps: file, supported: 3) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
-        try assertRefused("Newer.pbprofile", keeps: file, supported: 3) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 4) { _ = try ProfileTransfer.manifest(of: file, password: "pw") }
+        try assertRefused("Newer.pbprofile", keeps: file, supported: 4) { _ = try ProfileTransfer.importProfile(from: file, password: "pw", into: repository) }
         XCTAssertEqual(repository.list().count, profiles)
     }
 
