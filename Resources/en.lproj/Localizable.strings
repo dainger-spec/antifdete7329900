@@ -820,9 +820,9 @@
 "profiles.delete.message" = "Cookies, history, passwords and all the profile's data will be deleted.";
 "profiles.delete.title" = "Delete profile “%@”?";
 "profiles.delete.unreadable" = "Damaged files go with it (%1$ld): %2$@.";
-"profiles.kept.title" = "Deleted profiles whose data is kept here";
+"profiles.kept.title" = "Deleted profiles";
 "profiles.kept.text" = "These profiles were deleted, but their data is kept here. Bring one back or delete its data.";
-"profiles.kept.broughtBack" = "brought back as a new profile; the old folder is kept";
+"profiles.kept.broughtBack" = "brought back; the old folder is kept";
 "profiles.kept.unreadable" = "won't open — the folder is kept";
 "profiles.kept.reveal" = "Show in Finder";
 "profiles.kept.removeOld" = "Remove Old Folder";

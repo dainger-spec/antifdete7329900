@@ -820,9 +820,9 @@
 "profiles.delete.message" = "Cookies, история, пароли и все данные профиля будут удалены.";
 "profiles.delete.title" = "Удалить профиль «%@»?";
 "profiles.delete.unreadable" = "Вместе с ним удалятся и повреждённые файлы (%1$ld): %2$@.";
-"profiles.kept.title" = "Удалённые профили, данные которых здесь сохранены";
+"profiles.kept.title" = "Удалённые профили";
 "profiles.kept.text" = "Профили удалены, но их данные хранятся здесь. Верните профиль или удалите данные.";
-"profiles.kept.broughtBack" = "возвращён новым профилем, старая папка сохранена";
+"profiles.kept.broughtBack" = "возвращён, старая папка сохранена";
 "profiles.kept.unreadable" = "не открывается — папка сохранена";
 "profiles.kept.reveal" = "Показать в Finder";
 "profiles.kept.removeOld" = "Удалить старую папку";
