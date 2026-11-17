@@ -546,6 +546,8 @@ struct ProfileEditorView: View {
     @State private var topic: ProfileEditorForm.Topic = .profile
     /// A check run from the editor: Check, or Save finding a proxy's type.
     @State private var checking = false
+    /// Add to the list, from the connection's part (`ProxyAddSheet`).
+    @State private var addingProxy: ProxyAddRequest?
     @State private var choosingCookieFile = false
     @State private var choosingCameraImage = false
     @State private var choosingCameraVideo = false
@@ -583,6 +585,11 @@ struct ProfileEditorView: View {
         }
         .onChange(of: draft.camera) { cameraMirror.camera = draft.camera }
         .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
+        .sheet(item: $addingProxy) { request in
+            if let proxies = model.proxyList {
+                ProxyAddSheet(proxies: proxies, request: request, onAdded: useAddedProxy)
+            }
+        }
         .sheet(isPresented: $showingWhatSitesSee) {
             if case .existing(let profile) = target {
                 WhatSitesSeeView(name: profile.name, snapshot: WhatSitesSee(profileID: profile.id, manager: { model.manager },
@@ -668,6 +675,7 @@ struct ProfileEditorView: View {
                           guardReady: networkGuard.state == .ready, guardState: networkGuard.state,
                           onCancel: cancel, onSave: save, onGuardSettings: { showingGuard = true },
                           savedProxies: saved, checkingProxy: checking, onCheckProxy: checkProxy,
+                          onAddProxy: { addingProxy = ProxyAddRequest(choice: $0) },
                           knownTags: knownTags, visibleScreen: WindowSizing.visibleScreen,
                           onChooseCookieFile: { choosingCookieFile = true }, onDropCookieFile: readCookieFile,
                           onChooseCameraImage: { choosingCameraImage = true },
@@ -800,6 +808,20 @@ struct ProfileEditorView: View {
         draft.proxyLine.check = ProxyLine.Check(proxy: proxy, result: result)
         if draft.proxyLine.currentCheck?.proxy == proxy, let resolved = draft.proxyLine.proxy {
             draft.remember(result, for: resolved)
+        }
+    }
+
+    /// What was just added to the list, for this profile: chosen from the list — or, a proxy whose
+    /// type no check has found yet (it cannot be chosen there), as its line under New, which Save
+    /// checks first.
+    private func useAddedProxy(_ id: UUID) {
+        guard let entry = model.proxyList?.list.entry(id) else { return }
+        if entry.kindKnown {
+            draft.proxyMode = .saved
+            draft.choose(entry)
+        } else {
+            draft.proxyMode = .new
+            draft.proxyLine = ProxyLine(proxy: entry.proxy, kindKnown: false)
         }
     }
 

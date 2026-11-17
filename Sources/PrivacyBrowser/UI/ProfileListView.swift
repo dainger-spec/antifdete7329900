@@ -309,6 +309,11 @@ struct ProfileListView: View {
                 model.proxiesRequest = false
                 showProxies(selecting: [])
             }
+            // Add, from Settings or a .ovpn opened in the Finder: the section, which takes it.
+            .onReceive(model.$proxyAddRequest) { request in
+                guard request != nil, model.proxyList != nil else { return }
+                showProxies(selecting: [])
+            }
             // File › Scenarios, from any window: this one's section.
             .onChange(of: model.scenariosRequested) { _, _ in section = .scenarios }
             .sheet(item: $assigningProxies) { request in ProxyAssignView(request: request) }

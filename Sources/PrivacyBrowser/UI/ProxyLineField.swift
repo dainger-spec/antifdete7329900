@@ -99,6 +99,8 @@ struct ProxyLine: Equatable {
         case .empty:
             return .empty
         case .several(let count):
+            // A .ovpn file's text pasted: said what to do with it, not "several lines".
+            if Self.looksLikeOpenVPN(text) { return .problem(L("proxyLine.error.openVPN")) }
             return .problem(String(format: L("proxyLine.error.several"), count))
         case .problem(let reason):
             return .problem(reason.words)
@@ -158,6 +160,14 @@ struct ProxyLine: Equatable {
         return shown.split(whereSeparator: { $0.isNewline || $0.isWhitespace }).joined(separator: " ")
     }
 
+    /// The text of an OpenVPN configuration: a `remote` line, and `client`, a `dev` line or a
+    /// certificate block (OpenVPN's own directives).
+    static func looksLikeOpenVPN(_ text: String) -> Bool {
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        guard lines.contains(where: { $0.hasPrefix("remote ") }) else { return false } // l10n: not text
+        return lines.contains { $0 == "client" || $0.hasPrefix("dev ") || $0 == "<ca>" } // l10n: not text
+    }
+
     static func scheme(_ proxy: ProxySettings) -> String {
         proxy.kind == .socks5 ? "socks5://" : (proxy.tlsToProxy ? "https://" : "http://") // l10n: not text
     }
@@ -179,12 +189,14 @@ struct ProxyLineField: View {
     /// A check from this field is running.
     var checking: Bool
     var onCheck: () -> Void
+    /// What the empty field shows; nil: every form it takes, proxies and links.
+    var placeholder: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TextField(L("proxyLine.field"), text: $line.text, prompt: Text(verbatim: ""))
-                    .lumenField(L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText)
+                    .lumenField(placeholder ?? L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText)
                     .accessibilityLabel(L("proxyLine.field"))
                 Button(action: onCheck) {
                     Label(L("proxyLine.check"), systemImage: "checkmark.shield")
@@ -218,7 +230,10 @@ struct ProxyLineReadingView: View {
                 Label(message, systemImage: "exclamationmark.circle.fill")
                     .foregroundStyle(Theme.danger)
             case .proxy(let proxy, let source):
-                Label(Self.summary(proxy, kind: Self.kindText(proxy, source)), systemImage: "checkmark.circle")
+                // "Recognised: VLESS · REALITY + TCP + Vision · server nl1.example.com:443": what the
+                // line was taken for, at once, before any check.
+                Label(String(format: L("proxyLine.recognized"), Self.summary(proxy, kind: Self.kindText(proxy, source))),
+                      systemImage: "checkmark.circle")
                     .foregroundStyle(Theme.textSecondary)
             case .kindUnknown(let proxy):
                 Label(Self.summary(proxy, kind: L("proxyLine.kind.unknown")), systemImage: "questionmark.circle")
@@ -231,16 +246,21 @@ struct ProxyLineReadingView: View {
         .textSelection(.enabled)
     }
 
-    /// "SOCKS5 · 1.2.3.4:1080 · user alice".
+    /// "SOCKS5 · 1.2.3.4:1080 · user alice"; a link: "VLESS · REALITY + TCP + Vision · server
+    /// nl1.example.com:443 · “Amsterdam”" — how it reaches its server, the server, its name as the
+    /// provider gave it.
     static func summary(_ proxy: ProxySettings, kind: String) -> String {
-        var parts = [kind, proxy.displayAddress]
-        if let user = proxy.username, !user.isEmpty { parts.append(String(format: L("proxyLine.user"), user)) }
-        // A link: its name as the provider gave it, and how it reaches its server.
+        var parts = [kind]
         if let link = proxy.shareLink {
+            let transport = ShareLinkText.transport(link)
+            if !transport.isEmpty { parts.append(transport) }
+            parts.append(String(format: L("proxyLine.server"), proxy.displayAddress))
             if !link.name.isEmpty { parts.append("“" + link.name + "”") } // l10n: not text
-            parts.append(ShareLinkText.transport(link))
             parts.append(contentsOf: ShareLinkText.notes(link))
+            return parts.joined(separator: " · ") // l10n: not text
         }
+        parts.append(proxy.displayAddress)
+        if let user = proxy.username, !user.isEmpty { parts.append(String(format: L("proxyLine.user"), user)) }
         return parts.joined(separator: " · ") // l10n: not text
     }
 

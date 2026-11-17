@@ -733,6 +733,13 @@ private struct ProxySettingsPane: View {
                     .buttonStyle(.lumenSecondary)
                     .disabled(model.proxyList == nil)
             }
+            // What can be added, by name — OpenVPN, VLESS, VMess, Trojan, Shadowsocks — so that the
+            // search finds it; Add… opens the section's own choices.
+            SettingRow(L("settings.proxies.add"), detail: L("settings.proxies.add.detail"), effect: nil) {
+                Button(L("settings.proxies.add.open")) { model.requestProxyAdd(ProxyAddRequest()) }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled(model.proxyList == nil)
+            }
             SettingRow(L("settings.proxies.checks"), detail: L("settings.proxies.checks.detail"), effect: .always) {
                 Text(L("settings.proxies.checks.value"))
                     .font(.lumenBody)

@@ -76,6 +76,7 @@ enum SettingsSearch {
         SettingsSearchEntry(.downloads, "settings.downloads.ask", detail: "settings.downloads.ask.detail"),
 
         SettingsSearchEntry(.proxies, "settings.proxies.list", detail: "settings.proxies.list.detail"),
+        SettingsSearchEntry(.proxies, "settings.proxies.add", detail: "settings.proxies.add.detail"),
         SettingsSearchEntry(.proxies, "settings.proxies.checks", detail: "settings.proxies.checks.detail"),
         SettingsSearchEntry(.proxies, "settings.proxies.failure", detail: "settings.proxies.failure.detail"),
 

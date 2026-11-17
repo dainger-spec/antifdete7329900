@@ -142,6 +142,10 @@ enum UISnapshots {
         problems += await Shot(name: "settings-search", size: SettingsView.size, edges: true) {
             SettingsView(section: .behavior, search: L("settings.behavior.zoom")).environmentObject(model)
         }.capture(into: folder)
+        // "OpenVPN" typed: Proxies, with Add a proxy, a link or OpenVPN marked.
+        problems += await Shot(name: "settings-search-openvpn", size: SettingsView.size, edges: true) {
+            SettingsView(section: .proxies, search: "OpenVPN").environmentObject(model) // l10n: not text
+        }.capture(into: folder)
         // The command palette with the same typed: the single setting, and the page it is on.
         problems += await Shot(name: "palette-setting", size: CommandPaletteView.size, titled: false) {
             CommandPaletteView(commands: paletteSample(sampleRows()), query: L("settings.behavior.zoom"))
@@ -1258,9 +1262,10 @@ enum UISnapshots {
                                                                                 "Amsterdam", [138, 142, 160]))
             }
             let addLine = added
-            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 470), titled: false) {
-                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine)
+            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 680), titled: false) {
+                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine, onOpenVPN: { _ in })
             }.capture(into: folder)
+            problems += await proxyAdding(into: folder, proxies: proxies, rows: rows)
             problems += await Shot(name: "sheet-proxy-add-unreadable", size: CGSize(width: 560, height: 380), titled: false) {
                 ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: ProxyLine(text: "1.2.3.4:1080:alice"))
             }.capture(into: folder)
@@ -1281,6 +1286,91 @@ enum UISnapshots {
             print("FAIL could not make the sample proxy list: \(error)")
             return 1
         }
+    }
+
+    // MARK: Adding: a proxy, a link, OpenVPN
+
+    /// What Add offers (the owner did not find OpenVPN or the links in 0.1.18): its choices, as
+    /// under the header's Add; Add's sheet empty (the field's example names every form) and with
+    /// a VLESS link recognised; OpenVPN's sheet empty and with a file read; the empty list, which
+    /// offers the same choices; the profile editor's connection with Add to List…, under New and
+    /// under From the List with the list empty.
+    private static func proxyAdding(into folder: URL, proxies: ProxyListModel, rows: [ProfileRowItem]) async -> Int {
+        var problems = 0
+        problems += await Shot(name: "proxies-add-choices", size: CGSize(width: 320, height: 300), titled: false) {
+            ProxyAddChoicesView(choose: { _ in }, importList: {})
+                .background(Theme.raised)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-proxy-add-empty", size: CGSize(width: 560, height: 680), titled: false) {
+            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, onOpenVPN: { _ in })
+        }.capture(into: folder)
+        let link = "vless://b831381d-6324-4d53-ad4f-8cda48b30811@nl1.example.com:443?encryption=none&flow=xtls-rprx-vision" // l10n: not text
+            + "&security=reality&sni=www.example.com&pbk=SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc&sid=6ba85179e30d4fc2&type=tcp#Amsterdam" // l10n: not text
+        problems += await Shot(name: "sheet-proxy-add-link", size: CGSize(width: 560, height: 470), titled: false) {
+            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: ProxyLine(text: link), choice: .link, onOpenVPN: { _ in })
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-openvpn-add", size: CGSize(width: 560, height: 420), titled: false) {
+            OpenVPNImportView(proxies: proxies)
+        }.capture(into: folder)
+        // A provider's file, read as the sheet opens (dropped on Add's sheet, or opened in the Finder).
+        let ovpnFolder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-ovpn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: ovpnFolder) }
+        let ovpn = ovpnFolder.appendingPathComponent("Amsterdam-UDP.ovpn")
+        let certificate = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0E=\n-----END CERTIFICATE-----" // l10n: not text
+        let configuration = ["client", "dev tun", "remote nl1.vpn.example.net 1194 udp", "remote nl2.vpn.example.net 443 tcp", // l10n: not text
+                             "nobind", "persist-tun", "remote-cert-tls server", "cipher AES-256-GCM", "auth-user-pass", // l10n: not text
+                             "<ca>", certificate, "</ca>"].joined(separator: "\n") // l10n: not text
+        do {
+            try FileManager.default.createDirectory(at: ovpnFolder, withIntermediateDirectories: true)
+            try configuration.write(to: ovpn, atomically: true, encoding: .utf8)
+            problems += await Shot(name: "sheet-openvpn-add-file", size: CGSize(width: 560, height: 560), titled: false) {
+                OpenVPNImportView(proxies: proxies, file: ovpn)
+            }.capture(into: folder)
+            // Stressed: a long file name, many servers, many notices.
+            let long = ovpnFolder.appendingPathComponent("Provider-Netherlands-Amsterdam-Mobile-4G-Rotating-Pool-UDP-1194-very-long-name.ovpn")
+            let stressed = ["client", "dev tun"] + (1...12).map { "remote nl\($0).vpn.example.net 1194 udp" } // l10n: not text
+                + ["nobind", "persist-tun", "persist-key", "resolv-retry infinite", "verb 3", "mute 20", "route-delay 2", // l10n: not text
+                   "redirect-gateway def1", "user nobody", "group nogroup", "remote-cert-tls server", "auth-user-pass", // l10n: not text
+                   "<ca>", certificate, "</ca>"] // l10n: not text
+            try stressed.joined(separator: "\n").write(to: long, atomically: true, encoding: .utf8)
+            problems += await Shot(name: "sheet-openvpn-add-long", size: CGSize(width: 560, height: 600), titled: false) {
+                OpenVPNImportView(proxies: proxies, file: long)
+            }.capture(into: folder)
+        } catch {
+            print("FAIL could not write the sample .ovpn: \(error)")
+            problems += 1
+        }
+        // The empty list: a vault of its own, with no proxy.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-empty-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
+            let empty = ProxyListModel(vault: vault) { print("FAIL sample empty proxy list: \($0)") }
+            problems += await Shot(name: "proxies-empty", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
+                                proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-empty-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 760), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
+                                proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
+            }.capture(into: folder)
+        } catch {
+            print("FAIL could not make the empty proxy list: \(error)")
+            problems += 1
+        }
+        // The editor: New, empty (the field's example names the links), and From the List with
+        // the list empty — Add to List… beside the connection's choice in both.
+        var fresh = ProfileDraft()
+        fresh.name = "Northwind"
+        fresh.proxyMode = .new
+        var savedEmpty = fresh
+        savedEmpty.proxyMode = .saved
+        for (name, sample) in [("editor-network-add", fresh), ("editor-network-saved-empty", savedEmpty)] {
+            problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
+                EditorPreview(draft: sample, topic: .connection, isNew: true)
+            }.capture(into: folder)
+        }
+        return problems
     }
 
     // MARK: The list after a profile comes back

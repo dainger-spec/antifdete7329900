@@ -71,6 +71,9 @@ struct ProfileEditorForm: View {
     /// A check run from the editor (Check, or Save finding a type) is under way.
     var checkingProxy = false
     var onCheckProxy: () -> Void = {}
+    /// Add to the list, beside the connection's choice — a proxy, a link, OpenVPN — the profile
+    /// then using what was added (`ProfileEditorView`).
+    var onAddProxy: (ProxyAddChoice) -> Void = { _ in }
     /// The tags of the other profiles, offered under the tag field.
     var knownTags: [String] = []
     /// This Mac's screen less its menu bar and Dock: a window size larger than it is said to be.
@@ -517,10 +520,16 @@ struct ProfileEditorForm: View {
     private var connection: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorField(L("editor.proxy.connection")) {
-                LumenSegmented(selection: $draft.proxyMode,
-                               options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel(L("editor.proxy.connection"))
+                HStack(spacing: 10) {
+                    LumenSegmented(selection: $draft.proxyMode,
+                                   options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(L("editor.proxy.connection"))
+                    Spacer(minLength: 8)
+                    // A proxy, a link (VLESS, VMess, Trojan, Shadowsocks) or OpenVPN — the same
+                    // choices as the Proxies section's Add; what is added is this profile's.
+                    ProxyAddButton(title: L("editor.proxy.add"), prominent: false, choose: onAddProxy)
+                }
             }
             switch draft.proxyMode {
             case .direct:
