@@ -678,7 +678,7 @@ final class AppModel: ObservableObject {
             } else {
                 deviceSettingsUnreadable = true
                 Logger(subsystem: "PrivacyBrowser", category: "Vault").error("settings.bin could not be read: \(error.logKind, privacy: .public); kept, the defaults shown")
-                showError(L("settings.device.unreadable"))
+                showError(L("settings.device.unreadable"), title: L("settings.device.unreadable.title"))
             }
         }
         restartAutomation()
@@ -861,10 +861,10 @@ final class AppModel: ObservableObject {
             let (transport, scoped) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             folder = scoped
             if try await SyncEngine(repository: repository, transport: transport).publishVaultHeader() != .published {
-                showError(L("changepw.sync.notThere"))
+                showError(L("changepw.sync.notThere"), title: L("changepw.sync.title"))
             }
         } catch {
-            showError(String(format: L("changepw.sync.later"), errorText(error)))
+            showError(String(format: L("changepw.sync.later"), errorText(error)), title: L("changepw.sync.title"))
         }
     }
 
@@ -1938,7 +1938,7 @@ final class AppModel: ObservableObject {
         do {
             try updateDeviceSettings { $0.automation = settings }
         } catch {
-            showError(String(format: L("automation.error.save"), error.localizedDescription))
+            showError(String(format: L("automation.error.save"), errorText(error)))
             return
         }
         restartAutomation()
