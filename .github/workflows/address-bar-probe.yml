@@ -1,0 +1,82 @@
+name: Address bar probe
+
+# Typing into Safari's address bar in a profile's process and pressing Return
+# (scripts/address_bar_check.sh), with Safari's stores and the profiles' file-system calls traced,
+# first on the runner as it comes (no Safari data), then after the real Safari was used on it.
+# Two legs on xcode-27, whose image is macOS 27.0.1 or 27.2 by the machine. A scratch measurement
+# for one branch only.
+on:
+  push:
+    branches: ['claude/addressbar-probe2']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: Address bar (${{ matrix.os }} ${{ matrix.leg }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: xcode-27
+            leg: d
+          - os: xcode-27
+            leg: e
+          - os: macos-26
+            leg: f
+    runs-on: ${{ matrix.os }}
+    env:
+      AX_POLLER: "1"
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        continue-on-error: true
+        run: |
+          sw_vers
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleVersion || true
+          ls -la ~/Library/Safari 2>&1 | head -30
+          ls -la ~/Library/Containers/com.apple.Safari/Data/Library/Safari 2>&1 | head -30
+      - name: Build the app without the App Sandbox
+        timeout-minutes: 40
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: Type and press Return in the address bar, every engine (the runner as it comes)
+        continue-on-error: true
+        timeout-minutes: 30
+        run: FS_TRACE=1 TITLE="address bar ${{ matrix.os }} ${{ matrix.leg }} fresh" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/fresh
+      - name: Use the real Safari (pages, a search, a bookmark), then quit it
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          for address in https://example.com/ https://www.wikipedia.org/ https://www.apple.com/ "https://www.google.com/search?q=google" https://github.com/; do
+            open -a Safari "$address"; sleep 7
+          done
+          # A bookmark, as a person adds one (Bookmarks > Add Bookmark, then Add).
+          osascript -e 'tell application "Safari" to activate' -e 'delay 1' \
+            -e 'tell application "System Events" to keystroke "d" using command down' -e 'delay 2' \
+            -e 'tell application "System Events" to key code 36' 2>&1 || echo "no bookmark by the keyboard"
+          sleep 4
+          osascript -e 'quit app "Safari"' 2>&1 || pkill -x Safari
+          sleep 6
+          pgrep -lx Safari || echo "Safari has quit"
+          ls -la ~/Library/Safari 2>&1 | head -40
+          ls -la ~/Library/Containers/com.apple.Safari/Data/Library/Safari 2>&1 | head -40
+          ls ~/Library/Containers/com.apple.Safari/Data/Library 2>&1 | head -40
+      - name: Type and press Return again (the real Safari's data on this Mac)
+        continue-on-error: true
+        timeout-minutes: 20
+        run: FS_TRACE=1 QUICK=1 TITLE="address bar ${{ matrix.os }} ${{ matrix.leg }} after Safari" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar/used google,bing,yandex
+      - name: The profile processes' exception log
+        if: always()
+        continue-on-error: true
+        run: |
+          mkdir -p build/address-bar
+          log show --last 90m --style compact --predicate 'subsystem == "PrivacyBrowser" AND (category == "Exception" OR category == "SafariChrome" OR category == "SafariStores")' \
+            > build/address-bar/exception-log.txt 2>&1 || true
+          grep -E "caught by the run loop|thrown|Caught in|threw after Return|loads what was asked|Safari's stores|set aside" build/address-bar/exception-log.txt | cut -c1-400 | head -120 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: address-bar-${{ matrix.os }}-${{ matrix.leg }}
+          path: build/address-bar
+          if-no-files-found: ignore
