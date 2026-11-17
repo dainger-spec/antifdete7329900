@@ -55,8 +55,17 @@ final class VMHelperProcess {
         // A helper that has ended is written to at most once more: an error, not a signal that
         // ends the app.
         _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+        let line = Data((try request.line() + "\n").utf8)
         try process.run()
-        try input.fileHandleForWriting.write(contentsOf: Data((try request.line() + "\n").utf8))
+        // A helper the system ended as it started (its signature refused, a Mac that will not
+        // run it) has closed its input: the write fails, and its end — read below, with its
+        // status — is what is said, in the person's words. Thrown from here, it was the system's
+        // "Broken pipe" alone, and the process was never waited for.
+        do {
+            try input.fileHandleForWriting.write(contentsOf: line)
+        } catch {
+            log.error("The machines' helper did not take its request: \(error.logKind, privacy: .public)")
+        }
 
         // What the helper says beside its events — what a machine's network did, in kinds and
         // counts (never a name or an address) — goes where this app's own words go: its standard
