@@ -215,7 +215,7 @@ private struct VirtualMachinesScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             if !allowed {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VMNote(L("vm.plan.machines"), tone: .warning)
+                    VMNote.keyed("vm.plan.machines", tone: .warning)
                     Button(L("vm.plan.choose"), action: choosePlan)
                         .buttonStyle(.lumenSecondary)
                 }
@@ -228,16 +228,16 @@ private struct VirtualMachinesScreen: View {
                 VMNote(error, tone: .danger)
             }
             if center.isReady, let setupError = center.setupError {
-                VMNote(setupError, tone: .danger)
+                VMNote(setupError, storage: { showingStorage = true })
             }
             if center.isReady, center.activity == .guestSetup {
-                VMNote(L("vm.base.isOpen"), tone: .plain, symbol: "macwindow")
+                VMNote.keyed("vm.base.isOpen", tone: .plain, symbol: "macwindow")
             }
             if center.isReady, center.activity == nil,
                VMGuestTools.mustBeInstalledAgain(center.library.baseInfo()?.toolsVersion) {
                 // The way to the base system beside what asks for it, not only under ⋯.
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VMNote(L("vm.tools.old"), tone: .warning)
+                    VMNote.keyed("vm.tools.old", tone: .warning)
                     Button(L("vm.base.open")) { center.openBase() }
                         .buttonStyle(.lumenSecondary)
                         .disabled(!allowed)
@@ -249,7 +249,7 @@ private struct VirtualMachinesScreen: View {
             if let taken = center.memoryTakenIfTight {
                 // Each machine fits on its own; two at once on a Mac with 8 GB take all of it.
                 VMNote(String(format: L("vm.memory.tight"), VMText.memory(Int64(clamping: ProcessInfo.processInfo.physicalMemory)),
-                              VMText.memory(taken)), tone: .warning, symbol: "memorychip")
+                              VMText.memory(taken)), tone: .warning, symbol: "memorychip", detail: L("vm.memory.tight.detail"))
             }
             if center.profiles.isEmpty {
                 VStack(spacing: 14) {
@@ -278,13 +278,14 @@ private struct VirtualMachinesScreen: View {
                               guestFullScreen: { center.toggleGuestFullScreen(profile.id) },
                               edit: { editing = VMEditorView.Draft(profile: profile, isNew: false) },
                               delete: { deleting = profile },
+                              openStorage: { showingStorage = true },
                               canDuplicate: center.loadError == nil && allowed && center.isReady,
                               duplicate: { newMachine(like: profile) })
                     }
                 }
             }
             baseLine
-            VMNote(L("vm.note.disks"), tone: .plain, symbol: "lock.open")
+            VMNote.keyed("vm.note.disks", tone: .plain, symbol: "lock.open")
         }
         .frame(maxWidth: 980, alignment: .leading)
     }
@@ -298,13 +299,13 @@ private struct VirtualMachinesScreen: View {
                 VMSetupPanel(center: center, compact: true)
             } else if allowed {
                 HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    VMNote(L("vm.base.missing"), tone: .plain, symbol: "internaldrive")
+                    VMNote.keyed("vm.base.missing", tone: .plain, symbol: "internaldrive")
                     Button(L("vm.base.add")) { center.continueSetup() }
                         .buttonStyle(.lumenSecondary)
                         .disabled(center.requirements.contains(where: VMRequirements.stops))
                 }
                 if let setupError = center.setupError {
-                    VMNote(setupError, tone: .danger)
+                    VMNote(setupError, storage: { showingStorage = true })
                 }
             }
         }
@@ -404,16 +405,47 @@ enum VMText {
     }
 }
 
+/// A note of the section or of a machine: one short line, what to do behind «Подробнее», and the
+/// one action that helps, where there is one. Errors were three or four red lines at once.
 struct VMNote: View {
     enum Tone { case plain, warning, danger }
     let text: String
     var tone: Tone = .plain
     var symbol: String?
+    var detail: String?
+    var actionTitle: String?
+    var action: (() -> Void)?
+    /// Open at first (the snapshots).
+    var expanded = false
+    @State private var showsDetail: Bool?
 
-    init(_ text: String, tone: Tone = .plain, symbol: String? = nil) {
+    init(_ text: String, tone: Tone = .plain, symbol: String? = nil, detail: String? = nil,
+         actionTitle: String? = nil, action: (() -> Void)? = nil, expanded: Bool = false) {
         self.text = text
         self.tone = tone
         self.symbol = symbol
+        self.detail = detail
+        self.actionTitle = actionTitle
+        self.action = action
+        self.expanded = expanded
+    }
+
+    /// A problem (`VMProblem`) with its action: the machine's proxy, or the disk.
+    init(_ problem: VMProblem, tone: Tone = .danger, editProxy: (() -> Void)? = nil, storage: (() -> Void)? = nil, expanded: Bool = false) {
+        var title: String?
+        var action: (() -> Void)?
+        switch problem.action {
+        case .editProxy?: if let editProxy { title = L("vm.action.editProxy"); action = editProxy }
+        case .storage?: if let storage { title = L("vm.action.storage"); action = storage }
+        case nil: break
+        }
+        self.init(problem.text, tone: tone, detail: problem.detail, actionTitle: title, action: action, expanded: expanded)
+    }
+
+    /// A line at `key`, with what the table has at `key.detail`.
+    static func keyed(_ key: String, tone: Tone = .plain, symbol: String? = nil) -> VMNote {
+        let problem = VMProblem.keyed(key)
+        return VMNote(problem.text, tone: tone, symbol: symbol, detail: problem.detail)
     }
 
     private var color: Color {
@@ -424,12 +456,40 @@ struct VMNote: View {
         }
     }
 
+    private var isOpen: Bool { showsDetail ?? expanded }
+
     var body: some View {
-        Label(text, systemImage: symbol ?? (tone == .plain ? "info.circle" : "exclamationmark.triangle.fill"))
-            .font(.lumenSecondary)
-            .foregroundStyle(color)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Label(text, systemImage: symbol ?? (tone == .plain ? "info.circle" : "exclamationmark.triangle.fill"))
+                    .font(.lumenSecondary)
+                    .foregroundStyle(color)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .layoutPriority(1)
+                if detail != nil {
+                    Button(isOpen ? L("vm.row.less") : L("vm.row.more")) { showsDetail = !isOpen }
+                        .buttonStyle(.plain)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textTertiary)
+                        .fixedSize()
+                        .accessibilityHint(detail ?? "")
+                }
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .buttonStyle(.lumenGhost)
+                        .fixedSize()
+                }
+            }
+            if isOpen, let detail {
+                Text(detail)
+                    .font(.lumenSecondary)
+                    .foregroundStyle(Theme.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 21)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -438,7 +498,7 @@ struct VMNote: View {
 private struct VMRow: View {
     let profile: VMProfile
     let state: VMCenter.Running?
-    let problem: String?
+    let problem: VMProblem?
     let exit: ProxyCheckResult?
     let guest: VMGuestStatus?
     let disk: Int64?
@@ -458,6 +518,10 @@ private struct VMRow: View {
     var guestFullScreen: () -> Void = {}
     let edit: () -> Void
     let delete: () -> Void
+    /// The section's Storage sheet: a problem of room says how to have it back.
+    var openStorage: () -> Void = {}
+    /// The notes' «Подробнее» open at first (the snapshots).
+    var expanded = false
     /// A new machine can be made now (the base system is there, the plan has machines).
     var canDuplicate = true
     var duplicate: () -> Void = {}
@@ -487,6 +551,7 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.textSecondary)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .help(allDetails)
                 }
                 if !profile.notes.isEmpty {
                     Text(profile.notes)
@@ -496,66 +561,37 @@ private struct VMRow: View {
                         .truncationMode(.tail)
                 }
                 if let problem {
-                    Text(problem)
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.danger)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VMNote(problem, editProxy: edit, storage: openStorage, expanded: expanded)
                 }
                 if let guest, VMGuestTools.mustBeInstalledAgain(guest.toolsVersion) {
                     // A machine made from a base with the first tools: its boot script takes no
                     // newer one, so what later versions set is not applied in it.
-                    Text(L("vm.row.tools.old"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.warning)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VMNote.keyed("vm.row.tools.old", tone: .warning)
                 } else if profile.lumenWallpaper, let guest, guest.wallpaperFailed {
-                    Text(String(format: L("vm.row.wallpaper.failed"), guest.wallpaperNote ?? "—"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.warning)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    // What the guest's macOS said is English, and kept in its status file: not shown.
+                    VMNote(L("vm.row.wallpaper.failed"), tone: .warning)
                 }
                 if let wakeNote, state?.phase == .running {
                     // A machine with instant wake that started its macOS anew: why.
-                    Text(L("vm.row.notWoken.\(wakeNote.rawValue)"))
-                        .font(.lumenSecondary)
-                        .foregroundStyle(wakeNote == .unsupported ? Theme.warning : Theme.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    VMNote.keyed("vm.row.notWoken.\(wakeNote.rawValue)", tone: wakeNote == .unsupported ? .warning : .plain)
                 }
                 if let guest, state?.phase == .running {
                     // What the machine's macOS has, read back by its script, where it is not what
                     // was asked for: said, not assumed.
                     let differences = guest.differences(from: VMGuestSettings(profile: profile))
                     if !differences.isEmpty {
-                        Text(String(format: L("vm.row.differs"), differences.map { difference in
+                        VMNote(String(format: L("vm.row.differs"), differences.map { difference in
                             String(format: L("vm.row.differs.\(difference.what.rawValue)"), difference.has, difference.asked)
-                        }.joined(separator: "; ")))
-                            .font(.lumenSecondary)
-                            .foregroundStyle(Theme.warning)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
+                        }.joined(separator: "; ")), tone: .warning, detail: L("vm.row.differs.detail"))
                     }
                     if let note = nextStartNote {
-                        Text(note)
-                            .font(.lumenSecondary)
-                            .foregroundStyle(Theme.textSecondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                        VMNote(note, detail: closeShutsDown ? L("vm.row.next.wake.detail") : nil)
                     }
                 }
                 if let trouble = state?.trouble, state?.phase == .running {
                     // A machine without a proxy that reaches nothing: why, in the person's words.
-                    Label(L("vm.row.trouble.\(trouble.rawValue)"), systemImage: "wifi.exclamationmark")
-                        .font(.lumenSecondary)
-                        .foregroundStyle(Theme.danger)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if let detail = state?.troubleDetail, !detail.isEmpty {
-                        // The helper's own words, as they are: for whoever is asked what is wrong.
-                        Text(String(format: L("vm.row.trouble.detail"), detail))
-                            .font(.lumenSecondary)
-                            .foregroundStyle(Theme.textTertiary)
-                            .textSelection(.enabled)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                    // The helper's own words for it (a range, an error's name) are in the log, not here.
+                    VMNote.keyed("vm.row.trouble.\(trouble.rawValue)", tone: .danger, symbol: "wifi.exclamationmark")
                 } else if state?.viaSystemProxy == true, state?.phase == .running {
                     Text(L("vm.row.viaSystemProxy"))
                         .font(.lumenSecondary)
@@ -631,8 +667,25 @@ private struct VMRow: View {
         }
     }
 
-    /// "Germany · 203.0.113.7 · MacBook Air 13″ · 4 GB · macOS 26.1, Safari 26.1 · 6.2 GB on disk".
+    /// "Germany · 203.0.113.7 · MacBook Air 13″ · macOS 26.1": where it goes out and which Mac it
+    /// is. Its memory, Safari and what it takes on disk are in the line's tooltip (`allDetails`):
+    /// six facts in a row were more than a row is read for.
     private var details: String {
+        var parts: [String] = []
+        if let proxy = profile.proxy {
+            if let country { parts.append(CountryNames.name(for: country)) }
+            parts.append(exit?.exitIP ?? "\(proxy.host):\(proxy.port)")
+        } else {
+            parts.append(L("vm.row.direct"))
+            if let country { parts.append(CountryNames.name(for: country)) }
+        }
+        parts.append(profile.display.name)
+        if let system = guest?.systemVersion, !system.isEmpty { parts.append(String(format: L("vm.row.system"), system)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Every fact of the machine: "Germany · 203.0.113.7 · MacBook Air 13″ · 4 GB · macOS 26.1, Safari 26.1 · 6.2 GB on disk".
+    private var allDetails: String {
         var parts: [String] = []
         if let proxy = profile.proxy {
             if let country { parts.append(CountryNames.name(for: country)) }
@@ -731,11 +784,13 @@ struct VMListPreview: View {
     struct Sample: Identifiable {
         var profile: VMProfile
         var state: VMCenter.Running?
-        var problem: String?
+        var problem: VMProblem?
         var exit: ProxyCheckResult?
         var guest: VMGuestStatus?
         var disk: Int64?
         var asleep = false
+        /// Its notes' «Подробнее» open.
+        var expanded = false
         var id: UUID { profile.id }
     }
 
@@ -746,7 +801,7 @@ struct VMListPreview: View {
             ForEach(samples) { sample in
                 VMRow(profile: sample.profile, state: sample.state, problem: sample.problem, exit: sample.exit,
                       guest: sample.guest, disk: sample.disk, asleep: sample.asleep, canStart: true,
-                      start: {}, stop: {}, forceStop: {}, edit: {}, delete: {})
+                      start: {}, stop: {}, forceStop: {}, edit: {}, delete: {}, expanded: sample.expanded)
             }
         }
         .padding(28)

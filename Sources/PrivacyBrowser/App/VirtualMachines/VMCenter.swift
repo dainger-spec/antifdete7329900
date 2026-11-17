@@ -12,6 +12,34 @@ import os
 /// machine runs in a helper process of its own (`VMHelperProcess`); at most
 /// `VMRequirements.runningLimit` at once, Apple's limit for macOS guests. Lock and Quit shut the
 /// machines down first (`stopAll`).
+/// Why a machine did not start or stopped, or why the setup did not go on: one short line, what to
+/// do behind «Подробнее», and the one action that helps where there is one. A row said all of it
+/// at once, in three or four red lines.
+struct VMProblem: Equatable {
+    enum Action: Equatable {
+        /// The machine's editor, for its proxy.
+        case editProxy
+        /// The section's Storage sheet.
+        case storage
+    }
+
+    var text: String
+    var detail: String?
+    var action: Action?
+
+    init(_ text: String, detail: String? = nil, action: Action? = nil) {
+        self.text = text
+        self.detail = detail
+        self.action = action
+    }
+
+    /// The line at `key`, what to do at `key.detail` (when the table has it).
+    static func keyed(_ key: String, action: Action? = nil) -> VMProblem {
+        let detail = L(key + ".detail")
+        return VMProblem(L(key), detail: detail == key + ".detail" ? nil : detail, action: action)
+    }
+}
+
 @MainActor
 final class VMCenter: ObservableObject {
     // MARK: Whether this Mac and this build can
@@ -87,12 +115,12 @@ final class VMCenter: ObservableObject {
     /// How far the setup got, from what is on disk.
     @Published private(set) var setup: VMSetupState
     @Published private(set) var activity: SetupActivity?
-    @Published private(set) var setupError: String?
+    @Published private(set) var setupError: VMProblem?
     /// The macOS Apple offered when it was last asked.
     @Published private(set) var offeredImage: VMRestoreImage?
     @Published private(set) var running: [UUID: Running] = [:]
     /// Why a profile's machine did not start, or ended, the last time; cleared by its next start.
-    @Published private(set) var problems: [UUID: String] = [:]
+    @Published private(set) var problems: [UUID: VMProblem] = [:]
     /// Where each profile's proxy came out at its last start (since unlock).
     @Published private(set) var exits: [UUID: ProxyCheckResult] = [:]
     /// What each machine's macOS said of itself the last time it ran (its version, Safari's).
@@ -262,7 +290,7 @@ final class VMCenter: ObservableObject {
     func continueSetup() {
         guard activity == nil, Self.availability == .available else { return }
         guard isAllowed() else {
-            setupError = L("vm.error.notInPlan")
+            setupError = .keyed("vm.error.notInPlan")
             return
         }
         setupError = nil
@@ -296,7 +324,7 @@ final class VMCenter: ObservableObject {
             guard let self, self.setupRun == run else { return }
             self.setupHelper = nil
             guard let image, failure == nil else {
-                return self.setupFailed(failure ?? L("vm.error.unknown"))
+                return self.setupFailed(failure ?? .keyed("vm.error.unknown"))
             }
             self.offeredImage = image
             self.download(image)
@@ -328,7 +356,7 @@ final class VMCenter: ObservableObject {
                 MainActor.assumeIsolated {
                     guard let self, self.setupRun == run else { return }
                     self.downloader = nil
-                    if let failure { return self.setupFailed(failure) }
+                    if let failure { return self.setupFailed(VMProblem(failure)) }
                     self.install()
                 }
             }
@@ -360,7 +388,7 @@ final class VMCenter: ObservableObject {
     func useImageFile(_ source: URL) {
         guard activity == nil, Self.availability == .available else { return }
         guard isAllowed() else {
-            setupError = L("vm.error.notInPlan")
+            setupError = .keyed("vm.error.notInPlan")
             return
         }
         switch library.setupState() {
@@ -370,7 +398,7 @@ final class VMCenter: ObservableObject {
             break
         }
         if let problem = VMImageImport.problem(with: source) {
-            setupError = Self.text(of: problem)
+            setupError = VMProblem(Self.text(of: problem))
             return
         }
         setupError = nil
@@ -389,7 +417,7 @@ final class VMCenter: ObservableObject {
                 // A reason the app has words for is a whole sentence, with what to do; the
                 // system's own words are said as what is wrong with the file.
                 if known, let failure { return self.setupFailed(failure) }
-                return self.setupFailed(String(format: L("vm.import.error.notAnImage"), failure ?? L("vm.error.unknown")))
+                return self.setupFailed(VMProblem(L("vm.import.error.notAnImage"), detail: failure?.text))
             }
             self.offeredImage = image
             self.takeImage(from: source, run: run)
@@ -417,7 +445,7 @@ final class VMCenter: ObservableObject {
                     self.importer = nil
                     self.importingFile = false
                     if let failure {
-                        return self.setupFailed((failure as? VMImageImport.Problem).map(Self.text(of:)) ?? errorText(failure))
+                        return self.setupFailed(VMProblem((failure as? VMImageImport.Problem).map(Self.text(of:)) ?? errorText(failure)))
                     }
                     self.measureDisk()
                     self.install()
@@ -458,13 +486,13 @@ final class VMCenter: ObservableObject {
             self.setupHelper = nil
             guard failure == nil else {
                 self.removeUnfinishedInstallation()
-                return self.setupFailed(failure ?? L("vm.error.unknown"))
+                return self.setupFailed(failure ?? .keyed("vm.error.unknown"))
             }
             do {
                 try self.library.saveBaseInfo(VMBaseInfo(stage: .installed, version: installed?.version ?? "",
                                                          build: installed?.build ?? ""))
             } catch {
-                return self.setupFailed(errorText(error))
+                return self.setupFailed(VMProblem(errorText(error)))
             }
             // The restore image stays until the base is set up: starting the setup over is then
             // an installation, not another download of its gigabytes.
@@ -525,11 +553,11 @@ final class VMCenter: ObservableObject {
         guard activity == nil, Self.availability == .available, library.base.isComplete, let info = library.baseInfo() else { return }
         let network: VMHelperRequest.Network = (online ?? (info.stage == .ready)) ? .direct : .absent
         guard isAllowed() else {
-            setupError = L("vm.error.notInPlan")
+            setupError = .keyed("vm.error.notInPlan")
             return
         }
         guard runningCount < VMRequirements.runningLimit else {
-            setupError = L("vm.error.limit")
+            setupError = .keyed("vm.error.limit")
             return
         }
         // A machine that is being made right now is a copy of the base's disk: the base is not
@@ -537,14 +565,14 @@ final class VMCenter: ObservableObject {
         guard !running.contains(where: { id, state in
             (state.phase == .checkingProxy || state.phase == .starting) && !library.machine(for: id).isComplete
         }) else {
-            setupError = L("vm.error.machineStarting")
+            setupError = .keyed("vm.error.machineStarting")
             return
         }
         setupError = nil
         do {
             try placeGuestTools()
         } catch {
-            setupError = errorText(error)
+            setupError = VMProblem(errorText(error))
             return
         }
         // A base not set up yet says in its own window what is left to do in it.
@@ -589,7 +617,7 @@ final class VMCenter: ObservableObject {
             do {
                 try self.library.saveBaseInfo(ready)
             } catch {
-                self.setupError = errorText(error)
+                self.setupError = VMProblem(errorText(error))
             }
         }
         self.setup = self.library.setupState()
@@ -619,11 +647,11 @@ final class VMCenter: ObservableObject {
             try helper.start(request)
             setupHelper = helper
         } catch {
-            setupFailed(errorText(error))
+            setupFailed(VMProblem(errorText(error)))
         }
     }
 
-    private func setupFailed(_ text: String) {
+    private func setupFailed(_ problem: VMProblem) {
         setupRun = nil
         setupHelper = nil
         downloader = nil
@@ -632,9 +660,9 @@ final class VMCenter: ObservableObject {
         importingFile = false
         activity = nil
         holdAwake(false)
-        setupError = text
+        setupError = problem
         setup = library.setupState()
-        log.error("The virtual machines' setup stopped: \(text, privacy: .private)")
+        log.error("The virtual machines' setup stopped: \(problem.text, privacy: .private)")
     }
 
     private func removeDownloads() {
@@ -781,24 +809,24 @@ final class VMCenter: ObservableObject {
         // free the disk); one not made yet needs it, to be cloned from.
         guard running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
         guard Self.availability == .available else {
-            problems[id] = Self.availability == .insideVirtualMachine ? L("vm.unavailable.insideVM") : L("vm.unavailable.build")
+            problems[id] = VMProblem(Self.availability == .insideVirtualMachine ? L("vm.unavailable.insideVM") : L("vm.unavailable.build"))
             return
         }
         guard isReady || library.machine(for: id).isComplete else {
-            problems[id] = L("vm.error.noBase")
+            problems[id] = .keyed("vm.error.noBase")
             return
         }
         guard isAllowed() else {
-            problems[id] = L("vm.error.notInPlan")
+            problems[id] = .keyed("vm.error.notInPlan")
             return
         }
         guard runningCount < VMRequirements.runningLimit else {
-            problems[id] = L("vm.error.limit")
+            problems[id] = .keyed("vm.error.limit")
             return
         }
         // A machine not made yet is a clone of the base's disk: not of one the base is writing now.
         if activity == .guestSetup, !library.machine(for: id).isComplete {
-            problems[id] = L("vm.error.baseOpen")
+            problems[id] = .keyed("vm.error.baseOpen")
             return
         }
         // Not onto a disk that is nearly full — a machine's macOS writes all the time, and writes
@@ -839,16 +867,16 @@ final class VMCenter: ObservableObject {
                         try? self.save(profile)
                     }
                 } else {
-                    self.problems[id] = L("vm.note.connectionUnknown")
+                    self.problems[id] = .keyed("vm.note.connectionUnknown")
                 }
                 guard self.runningCount < VMRequirements.runningLimit else {
                     self.running[id] = nil
-                    self.problems[id] = L("vm.error.limit")
+                    self.problems[id] = .keyed("vm.error.limit")
                     return
                 }
                 if self.activity == .guestSetup, !self.library.machine(for: id).isComplete {
                     self.running[id] = nil
-                    self.problems[id] = L("vm.error.baseOpen")
+                    self.problems[id] = .keyed("vm.error.baseOpen")
                     return
                 }
                 self.running[id]?.phase = .starting
@@ -859,7 +887,7 @@ final class VMCenter: ObservableObject {
         // An OpenVPN connection is a profile's (docs/OPENVPN.md): a machine is not given one, and
         // does not start rather than reach for the VPN server as if it were a proxy.
         if proxy.isOpenVPN {
-            problems[id] = L("vm.error.openVPN")
+            problems[id] = .keyed("vm.error.openVPN", action: .editProxy)
             return
         }
         running[id] = Running(phase: .checkingProxy)
@@ -872,7 +900,7 @@ final class VMCenter: ObservableObject {
                 } catch {
                     guard let self, self.running[id]?.phase == .checkingProxy else { return }
                     self.running[id] = nil
-                    self.problems[id] = L("vm.error.relay")
+                    self.problems[id] = .keyed("vm.error.relay", action: .editProxy)
                     return
                 }
             }
@@ -901,7 +929,7 @@ final class VMCenter: ObservableObject {
             guard self.runningCount < VMRequirements.runningLimit else {
                 XrayRelays.shared.stop(owner: id)
                 self.running[id] = nil
-                self.problems[id] = L("vm.error.limit")
+                self.problems[id] = .keyed("vm.error.limit")
                 return
             }
             // And the base again: it may have been opened meanwhile, and a machine not made yet
@@ -909,7 +937,7 @@ final class VMCenter: ObservableObject {
             if self.activity == .guestSetup, !self.library.machine(for: id).isComplete {
                 XrayRelays.shared.stop(owner: id)
                 self.running[id] = nil
-                self.problems[id] = L("vm.error.baseOpen")
+                self.problems[id] = .keyed("vm.error.baseOpen")
                 return
             }
             self.running[id]?.phase = .starting
@@ -933,10 +961,11 @@ final class VMCenter: ObservableObject {
     /// Why a machine whose proxy did not pass its check was not started: what the check found, in
     /// the words the Proxies section has for it (`ProxyReport`) — a login the proxy rejects is not
     /// a proxy that is down, and asks something else of the person — and what to do about it.
-    static func proxyProblem(_ proxy: ProxySettings, check: ProxyCheckResult) -> String {
+    static func proxyProblem(_ proxy: ProxySettings, check: ProxyCheckResult) -> VMProblem {
         let report = ProxyReport(proxy: proxy, check: check)
-        guard let explanation = report.explanation else { return L("vm.error.proxyDown") }
-        return ([L("vm.error.proxyFailed"), explanation] + [report.advice].compactMap { $0 }).joined(separator: " ")
+        guard let explanation = report.explanation else { return .keyed("vm.error.proxyDown", action: .editProxy) }
+        return VMProblem(report.state.title, detail: ([explanation] + [report.advice].compactMap { $0 }).joined(separator: " "),
+                         action: .editProxy)
     }
 
     /// `udp`: where the machine's UDP goes in this run (`VMUDPRoute`); nil keeps it off.
@@ -974,7 +1003,7 @@ final class VMCenter: ObservableObject {
             if let proxy = profile.proxy, proxy.kind == .xray {
                 guard let reach = ProxyRoutes.shared.connectable(proxy) else {
                     running[id] = nil
-                    problems[id] = L("vm.error.relay")
+                    problems[id] = .keyed("vm.error.relay", action: .editProxy)
                     return
                 }
                 routed.proxy = reach
@@ -993,7 +1022,7 @@ final class VMCenter: ObservableObject {
             if (try? updated.save(to: vault)) != nil { list = updated }
         } catch {
             running[id] = nil
-            problems[id] = errorText(error)
+            problems[id] = VMProblem(errorText(error))
         }
     }
 
@@ -1052,11 +1081,11 @@ final class VMCenter: ObservableObject {
     /// connections failed meanwhile; none went another way.
     private func relayEnded(_ id: UUID) {
         guard running[id] != nil else { return }
-        problems[id] = L("vm.error.relayEnded")
+        problems[id] = .keyed("vm.error.relayEnded")
         forceStop(id)
     }
 
-    private func ended(_ id: UUID, failure: String?) {
+    private func ended(_ id: UUID, failure: VMProblem?) {
         XrayRelays.shared.stop(owner: id)
         helpers[id] = nil
         running[id] = nil
@@ -1245,39 +1274,46 @@ final class VMCenter: ObservableObject {
         }
     }
 
-    /// What a failure the helper reports is said as. For a kind the app has words for
-    /// (`VMFailureKind`): those words — in the person's language, with what to do — and under
-    /// them the system's own, as a technical detail. For any other: the system's words alone, as
-    /// they always were.
-    static func failureText(kind: VMFailureKind?, message: String?) -> String {
+    /// What a failure the helper reports is said as: for a kind the app has words for
+    /// (`VMFailureKind`), a short line and what to do; for any other, that the machine did not
+    /// start. The system's own words, English whatever the interface, go to the log, never to the
+    /// screen (a row said "Техническая подробность: The maximum supported number of active
+    /// virtual machines has been reached.").
+    static func failureText(kind: VMFailureKind?, message: String?) -> VMProblem {
         let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        // A failure of no kind the app has words for still gets a sentence in the person's
-        // language: the system's (or the helper's) words alone were English in a Russian
-        // interface, with a domain and a number for all they said.
-        guard let kind else {
-            return detail.isEmpty ? L("vm.error.unknown") : L("vm.failure.other") + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+        if !detail.isEmpty {
+            let log = Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
+            if let kind {
+                log.error("A machine's failure (\(kind.rawValue, privacy: .public)): \(detail, privacy: .private)")
+            } else {
+                log.error("A machine's failure of no kind the app knows: \(detail, privacy: .private)")
+            }
         }
-        let words = L("vm.failure.\(kind.rawValue)")
-        return detail.isEmpty ? words : words + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+        guard let kind else { return .keyed(detail.isEmpty ? "vm.error.unknown" : "vm.failure.other") }
+        return .keyed("vm.failure.\(kind.rawValue)", action: kind == .noRoom ? .storage : nil)
     }
 
     /// What the row says of a machine with instant wake that was shut down instead of kept as it
-    /// was, because its state could not be saved: a full disk by name, anything else with the
-    /// system's words for it.
-    static func notKeptText(kind: VMFailureKind?, message: String?) -> String {
-        if kind == .noRoom { return L("vm.row.notKept.noRoom") }
-        let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return detail.isEmpty ? L("vm.row.notKept") : L("vm.row.notKept") + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+    /// was, because its state could not be saved: a full disk by name, anything else as that.
+    static func notKeptText(kind: VMFailureKind?, message: String?) -> VMProblem {
+        if kind == .noRoom { return .keyed("vm.row.notKept.noRoom", action: .storage) }
+        if let message, !message.isEmpty {
+            Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
+                .error("A machine's state was not kept: \(message, privacy: .private)")
+        }
+        return .keyed("vm.row.notKept")
     }
 
     /// Why a machine is not started onto a disk that is nearly full (`VMStartRoom`), with the
     /// numbers.
-    static func roomText(of problem: VMStartRoom.Problem) -> String {
+    static func roomText(of problem: VMStartRoom.Problem) -> VMProblem {
         switch problem {
         case .full(let needed, let free):
-            return String(format: L("vm.error.diskFull"), VMText.bytes(free), VMText.bytes(needed))
+            return VMProblem(String(format: L("vm.error.diskFull"), VMText.bytes(needed), VMText.bytes(free)),
+                             detail: L("vm.error.diskFull.detail"), action: .storage)
         case .copy(let needed, let free):
-            return String(format: L("vm.error.diskCopy"), VMText.bytes(needed), VMText.bytes(free))
+            return VMProblem(String(format: L("vm.error.diskCopy"), VMText.bytes(needed), VMText.bytes(free)),
+                             detail: L("vm.error.diskCopy.detail"), action: .storage)
         }
     }
 

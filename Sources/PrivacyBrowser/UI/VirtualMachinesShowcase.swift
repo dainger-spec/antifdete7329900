@@ -294,7 +294,7 @@ struct VMHero: View {
     var footnote: String?
     var facts: [VMFact] = []
     var problems: [VMRequirements.Problem] = []
-    var error: String?
+    var error: VMProblem?
     /// The section's width: a narrow one puts the picture under the words.
     let width: CGFloat
     /// Under the button, a second way: its title and what it does.
@@ -363,7 +363,7 @@ struct VMHero: View {
                 .padding(.bottom, 16)
             }
             if let error {
-                VMNote(error, tone: .danger).padding(.bottom, 16)
+                VMNote(error).padding(.bottom, 16)
             }
             HStack(spacing: 10) {
                 Button(action: action) { Label(actionTitle, systemImage: actionSymbol) }
@@ -679,7 +679,7 @@ struct VMSetupPanel: View {
     @ViewBuilder
     private var problems: some View {
         if let error = center.setupError {
-            VMNote(error, tone: .danger)
+            VMNote(error)
         }
         if center.activity == nil {
             let stopping = center.requirements.filter(VMRequirements.stops)

@@ -1120,8 +1120,9 @@ enum UISnapshots {
     /// The virtual machines' rows as they say what happened (no vault, no machine): one running;
     /// one asleep; one whose proxy rejected its login at the start, said as the check found it;
     /// one not started onto a disk that is nearly full; one macOS refused for Apple's limit, in
-    /// the interface's words with the system's under them; one shut down instead of kept as it
-    /// was, for want of room for its state.
+    /// the interface's words (the system's go to the log); one shut down instead of kept as it
+    /// was, for want of room for its state. Each a line with its action; the proxy's with what to
+    /// do opened under «Подробнее».
     private static func machinesList(into folder: URL) async -> Int {
         let guest = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_MACOS_VERSION=26.1\nLUMEN_SAFARI_VERSION=26.1\n")
         func proxy(_ host: String) -> ProxySettings {
@@ -1146,7 +1147,8 @@ enum UISnapshots {
                   exit: sampleWorks(.socks5, "198.51.100.7", "US", "America/New_York", "New York", [140]), guest: guest,
                   disk: 4 * gigabyte, asleep: true),
             .init(profile: machine("Mail FR", "fr.proxy.example", "FR"), // l10n: not text
-                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte),
+                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte,
+                  expanded: true),
             .init(profile: machine("Bank UK", "uk.proxy.example", "GB", display: "imac-24"), // l10n: not text
                   problem: VMCenter.roomText(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
                   guest: guest, disk: 7 * gigabyte),
