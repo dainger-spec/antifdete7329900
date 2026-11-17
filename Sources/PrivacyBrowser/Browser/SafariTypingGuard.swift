@@ -288,7 +288,14 @@ enum SafariTypingGuard {
         var count: UInt32 = 0
         guard let list = class_copyMethodList(cls, &count) else { return }
         defer { free(list) }
-        let isText = (cls as? NSText.Type) != nil || (cls as? NSTextField.Type) != nil
+        // Read from the class's own record, never by a message or a Swift cast: either would run
+        // +initialize of each of Safari's thousands of classes, at the process's start.
+        var isText = false
+        var ancestor: AnyClass? = class_getSuperclass(cls)
+        while let current = ancestor, !isText {
+            isText = ObjectIdentifier(current) == ObjectIdentifier(NSText.self) || ObjectIdentifier(current) == ObjectIdentifier(NSTextField.self)
+            ancestor = class_getSuperclass(current)
+        }
         for index in 0..<Int(count) {
             let method = list[index]
             let selectorName = NSStringFromSelector(method_getName(method))
