@@ -75,7 +75,15 @@ final class SessionRuntime: ObservableObject {
         #if DEBUG
         // The measurement of 17 November (MeasureTests): does WebKit start the processes it starts
         // after this in the zone the app's environment names, as the Mac's does?
-        if TestHooks.enabled, let zone = ProcessInfo.processInfo.environment["LUMEN_TEST_SESSION_XPC_TZ"] { setenv("__XPC_TZ", zone, 1) }
+        // A session named "… @Zone" names its own zone (a second session of the same run).
+        if TestHooks.enabled {
+            let environment = ProcessInfo.processInfo.environment
+            let named = session.name.split(separator: "@").dropFirst().first.map { String($0) }
+            if let zone = named ?? environment["LUMEN_TEST_SESSION_XPC_TZ"] { setenv("__XPC_TZ", zone, 1) }
+            if let languages = environment["LUMEN_TEST_SESSION_LANGS"] {
+                UserDefaults.standard.set(languages.split(separator: ",").map { String($0) }, forKey: "AppleLanguages")
+            }
+        }
         #endif
         // What is kept of it (HistoryRetention: the Mac's 90 days, at most 10 000 visits).
         let saved = store.loadHistory(of: session.id)

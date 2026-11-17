@@ -124,11 +124,11 @@ LONG_SCRIPTS = {
 }
 
 
-# /zone: the time zone the engine itself gives the page and workers loaded from a URL — dedicated,
+# /zone: the time zone (and language) the engine itself gives the page and workers loaded from a URL — dedicated,
 # shared and service — which no page script reaches (the measurement of 17 November: does WebKit on
 # the iPhone start its processes in a zone the app's environment names, as the Mac's does?).
 ZONE_WORKER = r"""
-const z = Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset();
+const z = Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset() + ' ' + navigator.language;
 if (self.ServiceWorkerGlobalScope && self instanceof ServiceWorkerGlobalScope) {
   self.addEventListener('install', () => self.skipWaiting());
   self.addEventListener('activate', e => e.waitUntil(self.clients.claim()));
@@ -139,7 +139,7 @@ if (self.ServiceWorkerGlobalScope && self instanceof ServiceWorkerGlobalScope) {
 """
 ZONE_SCRIPT = r"""
 const put = (id, text) => { document.getElementById(id).textContent = text; };
-put('pz', 'page zone: ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset());
+put('pz', 'page zone: ' + Intl.DateTimeFormat().resolvedOptions().timeZone + ' ' + new Date(0).getTimezoneOffset() + ' ' + navigator.language);
 try { const w = new Worker('/zone-worker.js'); w.onmessage = e => put('wz', 'worker zone: ' + e.data); w.onerror = () => put('wz', 'worker zone: error'); }
 catch (e) { put('wz', 'worker zone: ' + e.name); }
 try { const s = new SharedWorker('/zone-worker.js'); s.port.onmessage = e => put('sz', 'shared zone: ' + e.data); s.port.start(); }
@@ -452,7 +452,8 @@ async def site(reader, writer, scheme="http"):
                             extra=["Cache-Control: no-store"])
             elif path == "/zone":
                 out = reply("200 OK", page("zone", "<h1>Пояс</h1><p id=pz>page zone: …</p><p id=wz>worker zone: …</p>"
-                                                   "<p id=sz>shared zone: …</p><p id=vz>service zone: …</p>", ZONE_SCRIPT),
+                                                   "<p id=sz>shared zone: …</p><p id=vz>service zone: …</p>"
+                                                   f"<p>at: {html.escape(target)}</p>", ZONE_SCRIPT),
                             extra=["Cache-Control: no-store"])
             elif path == "/zone-worker.js":
                 out = reply("200 OK", ZONE_WORKER, "text/javascript", ["Cache-Control: no-store"])
