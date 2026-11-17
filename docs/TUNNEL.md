@@ -761,7 +761,10 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   profile runs, and a link by name whose server's name was not asked; its controls — a DNS question the
   app asks on purpose, seen and named after the app; each relay's packets counted for its pid — must be
   seen. The page's requests to this Mac's own loopback, which the capture leaves out, are seen by the
-  self-test proxy's canary there, which must take none.
+  self-test proxy's canary there, which must take none. Passed on macOS 26.7.2 and 27.0.1 in run
+  44024780666 (the first that knocked on the relay's sandbox from outside found its loopback rule too
+  wide, run 44020981433; the first runs found the CI-only faults the commits name, and an Xcode 26
+  build's SDK fetching the AIA canary, run 44012119541).
 
 ### Limits
 
