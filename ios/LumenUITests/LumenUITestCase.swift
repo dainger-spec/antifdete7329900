@@ -81,17 +81,24 @@ class LumenUITestCase: XCTestCase {
     @discardableResult
     func reveal(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         for attempt in 0..<16 {
-            if element.exists && element.isHittable { return element }
+            if reachable(element) { return element }
             // A form still sliding in: a moment before the first drag, which would otherwise go back
             // and pull the sheet down.
             if attempt == 0, element.exists {
                 usleep(700_000)
-                if element.isHittable { return element }
+                if reachable(element) { return element }
             }
             scroll(towardStart: isAbove(element) || (attempt >= 10 && !element.exists))
         }
-        XCTAssertTrue(element.exists && element.isHittable, what, file: file, line: line)
+        XCTAssertTrue(reachable(element), what, file: file, line: line)
         return element
+    }
+
+    /// `element` takes a touch where a person sees it: hittable, and not tucked under the bars at the
+    /// top. XCUITest calls a row hittable by the sliver of it left under the status bar (devices run
+    /// 150: the sign-out row, scrolled up behind the bars, "took a touch"; the touch opened nothing).
+    func reachable(_ element: XCUIElement) -> Bool {
+        element.exists && element.isHittable && !isAbove(element)
     }
 
     /// `element` is there, above the part of the screen below the bar.

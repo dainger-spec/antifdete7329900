@@ -96,11 +96,11 @@ final class DeviceTests: LumenUITestCase {
         // The plan, below the account's rows: scrolled to, as a person does, once the server named it.
         let plan = app.staticTexts["planName"]
         let named = Date().addingTimeInterval(30)
-        while !(plan.exists && plan.isHittable), Date() < named {
+        while !reachable(plan), Date() < named {
             scroll(towardStart: isAbove(plan))
             usleep(500_000)
         }
-        XCTAssertTrue(plan.exists && plan.isHittable, "the plan is named once signed in")
+        XCTAssertTrue(reachable(plan), "the plan is named once signed in")
         XCTAssertEqual(plan.label, "Тариф: Профессиональный")
         onScreen(reveal(app.buttons["signOut"], "the account's screen offers to sign out"), "the sign-out button", wholly: false)
         shot("\(leg) 09 signed in")
