@@ -397,6 +397,35 @@ struct SettingsCaption: View {
     }
 }
 
+/// "More": what a page explains beyond its settings, shown on demand (the owner: details only when
+/// asked for, not a paragraph under every control). A caption-like line with a chevron.
+struct SettingsMoreButton: View {
+    let title: String
+    @Binding var expanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(Theme.appearAnimation) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .lumenCaps()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 26)
+        .padding(.bottom, 12)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(L(expanded ? "settings.more.expanded" : "settings.more.collapsed"))
+    }
+}
+
 /// One setting (the design's row): its title, a sentence on what it does, when that takes effect,
 /// and its control at the right.
 struct SettingRow<Control: View>: View {
