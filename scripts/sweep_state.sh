@@ -10,6 +10,8 @@
 #   default        the runner as it is: English, light, its own screen, the profile behind an HTTP proxy
 #   russian        a Russian Mac: the system's language and region Russian, the Russian – PC keyboard
 #                  selected, the profile in Russian with Yandex, behind a SOCKS5 proxy, dark appearance
+#   first-run      the app as a new tester first opens it (scripts/first_run_sweep.swift): the welcome,
+#                  the master password, the account's screens, the first profile
 #   fresh-mac      a Mac whose Safari never ran (its folders, container, preferences and caches gone),
 #                  a 1280×800 screen, Increase Contrast, Reduce Transparency, Reduce Motion and larger
 #                  text, light appearance, and three other profiles running beside the swept one
@@ -39,7 +41,7 @@ run defaults delete -g AppleLocale
 appearance false
 
 case "$STATE" in
-  default)
+  default|first-run)
     echo "export PB_SWEEP_PROXY=http"
     ;;
   russian)

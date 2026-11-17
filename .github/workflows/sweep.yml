@@ -19,8 +19,8 @@ on:
         description: 'Runner images, as JSON (macos-26: macOS 26; xcode-27: macOS 27)'
         default: '["macos-26","xcode-27"]'
       groups:
-        description: 'Groups of states, one job each, as JSON (default, russian, fresh-mac)'
-        default: '["default","russian fresh-mac"]'
+        description: 'Groups of states, one job each, as JSON (default, russian, fresh-mac, first-run)'
+        default: '["first-run default","russian fresh-mac"]'
       phases:
         description: 'Phases to run, comma-separated (address,tabs,page,context,library,window,keys,menu,quit); empty: all'
         default: ''
@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         image: ${{ fromJSON(inputs.images || '["macos-26","xcode-27"]') }}
-        group: ${{ fromJSON(inputs.groups || '["default","russian fresh-mac"]') }}
+        group: ${{ fromJSON(inputs.groups || '["first-run default","russian fresh-mac"]') }}
     runs-on: ${{ matrix.image }}
     timeout-minutes: 150
     steps:
@@ -60,7 +60,21 @@ jobs:
             mkdir -p "$out"
             exports="$(scripts/sweep_state.sh "$state" "$out")"
             echo "$exports"
-            ( eval "$exports"; python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out "$out" --state "${{ matrix.image }} $state" ) || status=1
+            if [ "$state" = first-run ]; then
+              # The app's own first run, with real input from outside it (scripts/first_run_sweep.swift).
+              since="$(date '+%Y-%m-%d %H:%M:%S')"
+              swiftc -O -o build/first-run-sweep scripts/first_run_sweep.swift \
+                && build/first-run-sweep build/unsandboxed/Lumen.app "$out" | tee "$out/first-run.txt" || status=1
+              log show --start "$since" --style compact --predicate 'subsystem == "PrivacyBrowser" AND category == "Exception"' \
+                > "$out/exceptions-log.txt" 2>&1 || true
+              grep -E "caught by the run loop|not caught|uncaught" "$out/exceptions-log.txt" | head -20 \
+                | sed 's/^/::error title=first run - an exception::/' || true
+              find ~/Library/Logs/DiagnosticReports -name '*Lumen*.ips' -newer build/first-run-sweep -exec python3 scripts/crash_summary.py {} + \
+                | tee "$out/crashes.txt" | head -40
+              grep -q '^CRASH' "$out/crashes.txt" && status=1
+            else
+              ( eval "$exports"; python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out "$out" --state "${{ matrix.image }} $state" ) || status=1
+            fi
             echo "::endgroup::"
           done
           exit $status
