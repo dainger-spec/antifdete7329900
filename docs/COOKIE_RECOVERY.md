@@ -124,7 +124,13 @@ up, and a store found to have lost cookies is recorded for sync as one (`CookieJ
 
 - **No deletion** is recorded for what it lacks: the loss is not the person's, and recorded it would
   take those cookies off every other device. The synced cookies applied next put back what the
-  snapshot did not have.
+  snapshot did not have — but for what the newest snapshot, when it is at least as new as the
+  baseline, says was deleted since (`CookieJarDocument.atLaunch(afterLoss:)`): a sign-out, or a
+  deletion through Lumen copied at once, that the lost store had not written. Those are recorded as
+  deletions of the baseline's time, as a run that ended without a stop records them; without that,
+  the synced cookies applied to the emptied store brought them back (measured: CI run 965, cookies
+  deleted through WebDriver, the process killed, its store removed). A store whose cookie file was
+  damaged but lost none records no deletion either.
 - What it holds that the baseline did not, or held otherwise — the crashed run's changes, as the
   snapshot had them — is recorded as changes **of the baseline's time**, the earliest they can be.
   Any change another device made since this one last recorded wins over them, in the document and on
@@ -168,4 +174,7 @@ end with the run. A profile made ephemeral loses its snapshots at the save.
   process killed with SIGKILL and its cookie file damaged: the cookies are back at the next launch, the
   notice shown in its window; then deleted through WebDriver, killed and its store removed: nothing
   comes back. Measured on macOS 26.7.2 (CI run 953, a scratch branch): every one of these passed but
-  the last, whose first form damaged a cookie file that an emptied store no longer has.
+  the last, whose first form damaged a cookie file that an emptied store no longer has. Run 965 then
+  found the synced cookies bringing the deleted cookies back into the removed store, which sync's
+  record after a loss now takes from the snapshot (above). A deletion through WebDriver is also
+  written to disk at once.

@@ -29,6 +29,20 @@ final class CookieSnapshotKeeper {
         var noticeShown = false
     }
 
+    /// What a launch found of the profile's store, for sync's record of the run before
+    /// (`CookieJarDocument.atLaunch(afterLoss:)`).
+    struct LaunchFinding {
+        /// What was put back, when the store lost cookies.
+        var report: Report?
+        /// The store came up having lost the profile's cookies: its website data missing, or cookies
+        /// put back from the newest snapshot. What it lacks is then not the person's deletion.
+        var lost = false
+        /// Its cookie file did not hold together (perhaps without a cookie lost).
+        var damaged = false
+        /// The newest snapshot as the launch found it.
+        var latest: CookieSnapshot?
+    }
+
     /// How often a running profile's store is looked at; the self-test shortens it.
     static var checkInterval: TimeInterval = CookieRecovery.checkInterval
 
@@ -88,10 +102,10 @@ final class CookieSnapshotKeeper {
     }
 
     /// At a launch, once the store exists and before anything is applied to it: whether it lost the
-    /// profile's cookies (`CookieRecovery.decide`), and those put back. Nil when it lost none —
-    /// otherwise the report, even when WebKit kept none of them: the store is then not the
-    /// person's to record for sync (`CookieJarDocument.LaunchStore.recovered`).
-    func recover(_ id: UUID, store: WKHTTPCookieStore, state: CookieRecovery.StoreState, note: String) async -> Report? {
+    /// profile's cookies (`CookieRecovery.decide`), and those put back — the report, even when WebKit
+    /// kept none of them: the store is then not the person's to record for sync.
+    func recover(_ id: UUID, store: WKHTTPCookieStore, state: CookieRecovery.StoreState, note: String) async -> LaunchFinding {
+        var finding = LaunchFinding(lost: state == .missing, damaged: state == .damaged)
         let end = repository.lastCookieRunEnd(for: id)
         let snapshots: CookieSnapshots
         do {
@@ -100,22 +114,25 @@ final class CookieSnapshotKeeper {
             // Moved aside, not deleted, at the next copy (`addCookieSnapshot`).
             log.error("The cookie snapshots of \(id.uuidString, privacy: .public) could not be read: \(error.logKind, privacy: .public)")
             latest[id] = .some(nil)
-            return nil
+            return finding
         }
         latest[id] = .some(snapshots.latest)
+        finding.latest = snapshots.latest
         let current = await CookieStoreSync.persistentCookies(in: store)
         let now = Date()
         switch CookieRecovery.decide(store: current, state: state, end: end, latest: snapshots.latest, now: now) {
         case .keep(let why):
             log.info("Cookies of \(id.uuidString, privacy: .public) kept as the store has them: \(why.rawValue, privacy: .public); the store \(state.rawValue, privacy: .public) (\(note, privacy: .public)), the last run \(end.rawValue, privacy: .public), \(current.count) in the store")
-            return nil
+            return finding
         case let .restore(cookies, snapshot, cause):
             let result = await CookieStoreImport.apply(cookies, to: store)
             let age = Int(now.timeIntervalSince(snapshot.takenAt))
             log.notice("Cookies of \(id.uuidString, privacy: .public) put back from the snapshot of \(age) s before: \(result.stored) of \(cookies.count), \(result.refused.count) refused; \(cause.rawValue, privacy: .public), the store \(state.rawValue, privacy: .public) (\(note, privacy: .public)), the last run \(end.rawValue, privacy: .public), \(current.count) in the store")
             let report = Report(restored: result.stored, refused: result.refused.count, snapshotTakenAt: snapshot.takenAt, cause: cause)
             if result.stored > 0 { untold[id] = (report: report, told: false) }
-            return report
+            finding.report = report
+            finding.lost = true
+            return finding
         }
     }
 

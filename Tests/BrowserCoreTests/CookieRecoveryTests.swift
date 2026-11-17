@@ -550,3 +550,63 @@ final class BinaryCookiesFileTests: XCTestCase {
         XCTAssertEqual(BinaryCookiesFile.check(Data(otherPage)), .unrecognized)
     }
 }
+
+/// What sync records at a launch whose store was found lost, with this Mac's newest snapshot in hand.
+final class CookieRecoverySyncTests: XCTestCase {
+    private let baselineTime = Date(timeIntervalSince1970: 1_899_990_000)
+    private let now = Date(timeIntervalSince1970: 1_900_000_000)
+    private var later: Date { now.addingTimeInterval(30 * 86_400) }
+
+    private func cookie(_ name: String, _ value: String = "v") -> ImportedCookie {
+        ImportedCookie(name: name, value: value, domain: "\(name).test", hostOnly: true, expires: later)
+    }
+
+    private func document(_ cookies: [ImportedCookie], at time: Date) -> CookieJarDocument {
+        CookieJarDocument(cookies: cookies.map { CookieJarDocument.Entry(cookie: $0, updatedAt: time) })
+    }
+
+    func testCookiesDeletedThroughLumenBeforeACrashAreNotBroughtBackBySyncWhenTheStoreIsLost() {
+        // Recorded at the last launch; deleted since through WebDriver (copied at once); killed; the
+        // store went missing before the next launch.
+        let baseline = CookieBaseline(cookies: [cookie("a"), cookie("b")], savedAt: baselineTime)
+        let loaded = document(baseline.cookies, at: baselineTime)
+        let cleared = CookieSnapshot(takenAt: baselineTime.addingTimeInterval(60), trigger: .change, cookies: [])
+        let jar = loaded.atLaunch(afterLoss: [], snapshot: cleared, baseline: baseline, now: now)
+        XCTAssertEqual(jar.cookies, [])
+        XCTAssertEqual(jar.deleted.map(\.key.name).sorted(), ["a", "b"])
+        XCTAssertEqual(jar.changes(over: [], at: now).set, [], "nothing put back into the store")
+        // Without the snapshot (or one older than the baseline), the loss is no deletion: they come back.
+        let older = CookieSnapshot(takenAt: baselineTime.addingTimeInterval(-60), trigger: .close, cookies: [])
+        for snapshot in [nil, older] {
+            let kept = loaded.atLaunch(afterLoss: [], snapshot: snapshot, baseline: baseline, now: now)
+            XCTAssertEqual(kept.deleted, [])
+            XCTAssertEqual(kept.changes(over: [], at: now).set.map(\.name).sorted(), ["a", "b"])
+        }
+    }
+
+    func testAStoreGivenBackItsSnapshotRecordsWhatTheRunLeftAndNothingWebKitRefusedAsDeleted() {
+        let baseline = CookieBaseline(cookies: [cookie("a"), cookie("b"), cookie("signedOut")], savedAt: baselineTime)
+        let loaded = document(baseline.cookies, at: baselineTime)
+        // The run before renewed a, set c, signed out of one site; the snapshot has it so. After the
+        // loss the store kept x (set after the snapshot) and got a and c back; WebKit refused b.
+        let snapshot = CookieSnapshot(takenAt: baselineTime.addingTimeInterval(120), trigger: .periodic,
+                                      cookies: [cookie("a", "renewed"), cookie("b"), cookie("c")])
+        let store = [cookie("a", "renewed"), cookie("c"), cookie("x")]
+        let jar = loaded.atLaunch(afterLoss: store, snapshot: snapshot, baseline: baseline, now: now)
+        XCTAssertEqual(jar.deleted.map(\.key.name), ["signedOut"], "the sign-out, not the cookie WebKit refused")
+        XCTAssertEqual(jar.cookies.map { "\($0.cookie.name)=\($0.cookie.value)" }.sorted(), ["a=renewed", "b=v", "c=v", "x=v"])
+        XCTAssertTrue(jar.cookies.allSatisfy { $0.updatedAt == baselineTime }, "as of the baseline: anything newer elsewhere wins")
+    }
+
+    func testAnotherDevicesNewerChangeStillWinsOverTheSnapshot() {
+        let baseline = CookieBaseline(cookies: [cookie("sid"), cookie("gone")], savedAt: baselineTime)
+        let newer = baselineTime.addingTimeInterval(3_600)
+        // Merged by sync while stopped: another Mac renewed sid, and set gone again after this one deleted it.
+        let loaded = CookieJarDocument(cookies: [CookieJarDocument.Entry(cookie: cookie("sid", "other-mac"), updatedAt: newer),
+                                                 CookieJarDocument.Entry(cookie: cookie("gone", "again"), updatedAt: newer)])
+        let snapshot = CookieSnapshot(takenAt: baselineTime.addingTimeInterval(60), trigger: .change, cookies: [cookie("sid", "this-mac")])
+        let jar = loaded.atLaunch(afterLoss: [], snapshot: snapshot, baseline: baseline, now: now)
+        XCTAssertEqual(jar.cookies.map { "\($0.cookie.name)=\($0.cookie.value)" }.sorted(), ["gone=again", "sid=other-mac"])
+        XCTAssertEqual(jar.deleted, [])
+    }
+}

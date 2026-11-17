@@ -1220,9 +1220,10 @@ final class ProfileManager: ObservableObject {
         do {
             let executor = try await webDriverExecutor(for: id, session)
             let value = try await executor.perform(call)
-            // Cookies set or deleted through WebDriver are Lumen's own change: copied at once, so that a
-            // crash right after neither loses them nor brings back the ones deleted.
+            // Cookies set or deleted through WebDriver are Lumen's own change: on disk and copied at once,
+            // so that a crash right after neither loses them nor brings back the ones deleted.
             if Self.webDriverCookieCommands.contains(call.command), let store = session.dataStore?.httpCookieStore {
+                await CookieStoreImport.flush(store)
                 await cookieSnapshots.snapshot(id, store: store, trigger: .change)
             }
             return WebDriverAnswer(id: call.id, value: value, error: nil)
@@ -1912,8 +1913,9 @@ final class ProfileManager: ObservableObject {
     /// nothing recorded yet (sync just turned on), as old as can be: they fill in what the synced
     /// cookies lack, and any synced change wins over them — unless the store came up with nothing
     /// (`storeRestored` false: no archive, no plaintext), which is not every cookie deleted
-    /// (CookieJarDocument.atLaunch); a store that lost cookies records no deletion either
-    /// (`LaunchStore.recovered`). Then the document (with what sync brought from the other devices)
+    /// (CookieJarDocument.atLaunch); a store that lost cookies records no deletion either, but for
+    /// what the newest snapshot says was deleted since the baseline (`atLaunch(afterLoss:)`). Then the
+    /// document (with what sync brought from the other devices)
     /// is applied to the store, then the cookies imported while the profile was stopped go in and
     /// are recorded as changes of now. With sync off, the profile keeps no synced cookies
     /// (`clearSyncedCookies`).
@@ -1922,16 +1924,16 @@ final class ProfileManager: ObservableObject {
     /// at from now on (`CookieSnapshotKeeper.begin`).
     private func prepareCookies(of id: UUID, summary: ProfileSummary, stored: ProfileConfiguration, storeRestored: Bool,
                                 storeState: (state: CookieRecovery.StoreState, note: String), session: BrowserSession) async {
-        var recovered: CookieSnapshotKeeper.Report?
+        var finding = CookieSnapshotKeeper.LaunchFinding()
         if stored.keepsCookieSnapshots, let store = session.dataStore?.httpCookieStore {
-            recovered = await cookieSnapshots.recover(id, store: store, state: storeState.state, note: storeState.note)
+            finding = await cookieSnapshots.recover(id, store: store, state: storeState.state, note: storeState.note)
         } else {
             // Turned off, or an ephemeral profile: no copy of its cookies is kept.
             cookieSnapshots.forget(id)
         }
         // Cookies put back are the profile's state now; none put back (WebKit kept none of them) is
         // tried again at the next launch — unless a clean stop copies the store first.
-        var changedAtLaunch = (recovered?.restored ?? 0) > 0
+        var changedAtLaunch = (finding.report?.restored ?? 0) > 0
         if !stored.syncsCookies {
             try? repository.clearSyncedCookies(for: id)
             if await applyQueuedCookies(of: id, name: summary.name, to: session) > 0 { changedAtLaunch = true }
@@ -1940,10 +1942,18 @@ final class ProfileManager: ObservableObject {
             do {
                 let loaded = try repository.cookieJar(for: id)
                 let baseline = try repository.cookieBaseline(for: id)
-                // A store that came up with nothing (its website data lost) records no deletions, nor
-                // one that lost cookies and was given back what its snapshot had.
-                let came: CookieJarDocument.LaunchStore = recovered != nil ? .recovered : (storeRestored ? .asLeft : .withNothing)
-                let jar = loaded.atLaunch(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline, came: came)
+                // A store that came up with nothing (its website data lost) records no deletions, nor one
+                // that lost cookies — but for what this Mac's newest snapshot, at least as new as the
+                // baseline, says was deleted since (`atLaunch(afterLoss:)`); nor one whose cookie file
+                // was damaged.
+                let found = await CookieStoreSync.persistentCookies(in: store)
+                let jar: CookieJarDocument
+                if finding.lost {
+                    jar = loaded.atLaunch(afterLoss: found, snapshot: finding.latest, baseline: baseline)
+                } else {
+                    let came: CookieJarDocument.LaunchStore = finding.damaged ? .recovered : (storeRestored ? .asLeft : .withNothing)
+                    jar = loaded.atLaunch(store: found, baseline: baseline, came: came)
+                }
                 let applied = await CookieStoreSync.apply(jar, to: store)
                 log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
                 if applied.set + applied.deleted > 0 { changedAtLaunch = true }

@@ -345,8 +345,10 @@ document. Changes are the difference between the store and that baseline:
      data, a damaged cookie file, cookies gone after a clean end, far fewer after a run that did not
      stop cleanly — is given back from this Mac's newest snapshot (never synced) every cookie it
      lacks. Such a store records **no deletion** in step 1 — the loss is not the person's, and
-     recorded it would take those cookies off every other device — and what it holds otherwise is
-     recorded as of the baseline's time, as below: any change another device made since wins, and
+     recorded it would take those cookies off every other device — but for what this Mac's newest
+     snapshot, when it is at least as new as the baseline, says was deleted since (a sign-out, a
+     deletion through Lumen the lost store had not written): the store with that snapshot is taken
+     for what the run left. What it holds otherwise is recorded as of the baseline's time, as below: any change another device made since wins, and
      step 2 applies it before the first page, so a snapshot never pushes a stale cookie over a newer
      one nor brings back one deleted elsewhere;
   1. what the store changed since the baseline without being recorded (a run that ended

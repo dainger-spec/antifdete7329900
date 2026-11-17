@@ -291,3 +291,24 @@ public enum BinaryCookiesFile {
         return .wellFormed(cookies: cookies)
     }
 }
+
+extension CookieJarDocument {
+    /// `atLaunch` for a store found to have lost the profile's cookies — its website data missing, or
+    /// cookies put back from a snapshot (`CookieRecovery`) — whose losses are not deletions. The newest
+    /// snapshot, when it is at least as new as the baseline, is this Mac's own record of the run before:
+    /// what it lacks of the baseline that the store does not hold either was deleted since (a sign-out,
+    /// a deletion through Lumen, copied at once) and is recorded so — otherwise these synced cookies,
+    /// applied to the store, would bring back a deletion the lost store had not written. `store` with
+    /// what the snapshot holds and the store does not (WebKit refused it) is taken for the store the run
+    /// left, its changes recorded as of the baseline's time: any change another device made since wins.
+    /// Without such a snapshot, nothing it lacks is a deletion (`LaunchStore.recovered`).
+    public func atLaunch(afterLoss store: [ImportedCookie], snapshot: CookieSnapshot?, baseline: CookieBaseline,
+                         now: Date = Date()) -> CookieJarDocument {
+        guard let snapshot, snapshot.takenAt >= baseline.savedAt else {
+            return atLaunch(store: store, baseline: baseline, came: .recovered)
+        }
+        let present = Set(store.map(CookieKey.init))
+        let left = store + snapshot.liveCookies(at: now).filter { !present.contains(CookieKey($0)) }
+        return recording(store: left, baseline: baseline.cookies, at: baseline.savedAt)
+    }
+}
