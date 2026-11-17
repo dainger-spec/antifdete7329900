@@ -188,7 +188,9 @@ final class HostedDownloads: NSObject, WKDownloadDelegate {
             if let self, let destination { self.began(download, at: destination) }
             completionHandler(destination)
         }
-        guard preferences.askWhereToSave else {
+        // Save Image As… asks, whatever the setting.
+        let asks = alwaysAsk.remove(ObjectIdentifier(download)) != nil
+        guard preferences.askWhereToSave || asks else {
             let folder = preferences.downloadFolderURL
             // The folder the settings name may have been removed since: made again, as a save
             // panel would let the person make it.
@@ -299,6 +301,93 @@ final class HostedDownloads: NSObject, WKDownloadDelegate {
         _ = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { _ in
             MainActor.assumeIsolated { HostedDownloads.shared.route() }
         }
+        routeImageSaving()
+    }
+
+    // MARK: An image's Save Image
+
+    /// Downloads that ask where to save whatever the setting says (Save Image As…).
+    private var alwaysAsk: Set<ObjectIdentifier> = []
+    /// Where the pointer was as the last menu opened (a context menu's place), in screen space.
+    private var menuPlace: NSPoint?
+
+    /// Safari's Save Image to “Downloads” and Save Image As… ask the real Safari's own service for
+    /// where its downloads go (DownloadLocationRemoteViewController), which a profile's process is
+    /// refused: the first read "Save Image to “(null)”" and said "Safari can't save the file", the
+    /// second did nothing at all (the sweep with real input, CI runs 43999545658 and 44012019641,
+    /// macOS 26 and 27). Both save the image the way the profile's other downloads go now — fetched
+    /// through the profile, to the folder the settings name (the first), or where the person
+    /// chooses (the second) — and the first names that folder.
+    private static func routeImageSaving() {
+        guard let owner = NSClassFromString("BrowserUIDelegate") else { return }
+        for (name, asking) in [("_saveImageToDownloadsFolder:", false), ("_saveImageAs:", true)] {
+            guard let method = class_getInstanceMethod(owner, NSSelectorFromString(name)) else { continue }
+            let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { _, sender in
+                HostedDownloads.saveImage(chosenWith: sender as? NSMenuItem, asking: asking)
+            }
+            method_setImplementation(method, imp_implementationWithBlock(replacement))
+        }
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+            guard let menu = note.object as? NSMenu, Thread.isMainThread else { return }
+            MainActor.assumeIsolated {
+                HostedDownloads.shared.menuPlace = NSEvent.mouseLocation
+                HostedDownloads.nameFolder(in: menu)
+            }
+        }
+    }
+
+    /// "Save Image to “(null)”": the folder's own name in its place.
+    private static func nameFolder(in menu: NSMenu) {
+        for item in menu.items where item.title.contains("(null)") {
+            guard let action = item.action.map(NSStringFromSelector), action.hasSuffix("ToDownloadsFolder:") else { continue }
+            let folder = BrowsingPreferences.current.downloadFolderURL.path
+            item.title = item.title.replacingOccurrences(of: "(null)", with: FileManager.default.displayName(atPath: folder))
+        }
+    }
+
+    /// The image the menu was opened on, fetched through the profile as a download of its page.
+    private static func saveImage(chosenWith item: NSMenuItem?, asking: Bool) {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let webView = SafariChromeHost.frontPage(in: window) else {
+            log.error("Save Image: no page in front")
+            return
+        }
+        let start: (URL) -> Void = { address in
+            webView.startDownload(using: URLRequest(url: address)) { download in
+                if asking { HostedDownloads.shared.alwaysAsk.insert(ObjectIdentifier(download)) }
+                HostedDownloads.shared.take(download, from: webView)
+            }
+        }
+        // The item's own record of the image, when it carries one.
+        let carried = item?.representedObject as AnyObject?
+        if let address = carried as? URL ?? (carried as? NSObject).flatMap(imageAddress(in:)) {
+            start(address)
+            return
+        }
+        // Else the image under the place the menu was opened at, as the page has it.
+        guard let place = shared.menuPlace else { return }
+        let local = webView.convert(window.convertPoint(fromScreen: place), from: nil)
+        let fromTop = webView.isFlipped ? local.y : webView.bounds.height - local.y
+        let script = "const scale = width / window.innerWidth; const inset = Math.max(0, height - window.innerHeight * scale); "
+            + "const element = document.elementFromPoint(x / scale, (fromTop - inset) / scale); "
+            + "const image = element && (element.closest('img') || (element.tagName === 'IMG' ? element : null)); "
+            + "return image ? (image.currentSrc || image.src) : null;"
+        let arguments: [String: Any] = ["x": Double(local.x), "fromTop": Double(fromTop),
+                                        "width": Double(webView.bounds.width), "height": Double(webView.bounds.height)]
+        webView.callAsyncJavaScript(script, arguments: arguments, in: nil, in: .defaultClient) { result in
+            guard case .success(let value) = result, let text = value as? String, let address = URL(string: text) else {
+                log.error("Save Image: no image under the menu's place")
+                return
+            }
+            start(address)
+        }
+    }
+
+    /// An image's address in an object Safari hands its menu items, by the names it may have it under.
+    private static func imageAddress(in object: NSObject) -> URL? {
+        for key in ["imageURL", "URL", "url"] where object.responds(to: NSSelectorFromString(key)) {
+            if let address = object.value(forKey: key) as? URL { return address }
+        }
+        return nil
     }
 
     private var isObservingMenus = false

@@ -56,11 +56,13 @@ enum SafariWindowGuard {
     static func guardMenuKeys(in bar: NSMenu) {
         let selector = NSSelectorFromString("menuHasKeyEquivalent:forEvent:target:action:")
         func walk(_ menu: NSMenu) {
-            if let delegate = menu.delegate, let owner = object_getClass(delegate),
-               menu.items.contains(where: isRetargeted), !guarded.contains("keys " + NSStringFromClass(owner)),
-               let method = class_getInstanceMethod(owner, selector) {
+            // Once per implementation: two delegates' classes may share one.
+            if let delegate = menu.delegate, let owner = object_getClass(delegate), menu.items.contains(where: isRetargeted),
+               let method = class_getInstanceMethod(owner, selector),
+               guarded.insert("keys \(UInt(bitPattern: method_getImplementation(method)))").inserted {
                 wrapKeyAnswer(method, selector: selector)
-                guarded.insert("keys " + NSStringFromClass(owner))
+                // And the wrapper itself is not wrapped again.
+                guarded.insert("keys \(UInt(bitPattern: method_getImplementation(method)))")
             }
             for item in menu.items { if let submenu = item.submenu { walk(submenu) } }
         }
@@ -101,22 +103,26 @@ enum SafariWindowGuard {
         return [event.charactersIgnoringModifiers, event.characters].contains { $0?.lowercased() == key }
     }
 
+    /// The guards whose classes may load after Safari's chrome is prepared.
+    private static let lateGuards = ["safari_constraintsMatchingFrameOfView:withFrameOfView:edgeInsets:",
+                                     "safari_addMenuItemForBookmarkFolder:", "reading list rows"]
+
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
         guardResentKeys()
-        guardFrameMatching()
-        guardBookmarkFolderItems()
-        guard guarded.count < 3, !watchesImages else { return }
+        guardLate()
+        guard lateGuards.contains(where: { !guarded.contains($0) }), !watchesImages else { return }
         watchesImages = true
         _dyld_register_func_for_add_image { _, _ in
-            DispatchQueue.main.async {
-                MainActor.assumeIsolated {
-                    guard SafariWindowGuard.guarded.count < 3 else { return }
-                    SafariWindowGuard.guardFrameMatching()
-                    SafariWindowGuard.guardBookmarkFolderItems()
-                }
-            }
+            DispatchQueue.main.async { MainActor.assumeIsolated { SafariWindowGuard.guardLate() } }
         }
+    }
+
+    private static func guardLate() {
+        guard lateGuards.contains(where: { !guarded.contains($0) }) else { return }
+        guardFrameMatching()
+        guardBookmarkFolderItems()
+        watchReadingListRows()
     }
 
     // MARK: Keys sent again by WebKit
@@ -212,6 +218,53 @@ enum SafariWindowGuard {
             cls = class_getSuperclass(current)
         }
         return "[nil: \(empty.joined(separator: ", ")); set: \(set)]"
+    }
+
+    // MARK: What a Reading List row gets from its nib
+
+    /// While Safari makes a Reading List row (`-[ReadingListTableCellView _setUpSubviews]`).
+    private static var makingReadingListRow = false
+    private static var rowNibsSaid = 0
+
+    /// The row's item view (`_readingListItemView`, an AnnotatedBookmarksSidebarExpandedTableCellView)
+    /// is nil in a profile's process although its nib (…ExpandedTableCellViewV2) is found and made
+    /// (CI run 44012019641): the rows come up with nothing in them. Said in the log for the first
+    /// rows: what each nib the row instantiates holds at its top level, and for whom.
+    private static func watchReadingListRows() {
+        let name = "reading list rows"
+        let setUpSelector = NSSelectorFromString("_setUpSubviews")
+        guard !guarded.contains(name), let cell = NSClassFromString("ReadingListTableCellView"),
+              let setUp = class_getInstanceMethod(cell, setUpSelector),
+              let instantiate = class_getInstanceMethod(NSNib.self, NSSelectorFromString("instantiateWithOwner:topLevelObjects:")) else { return }
+        guarded.insert(name)
+        typealias Plain = @convention(c) (AnyObject, Selector) -> Void
+        let originalSetUp = unsafeBitCast(method_getImplementation(setUp), to: Plain.self)
+        let setUpReplacement: @convention(block) (AnyObject) -> Void = { view in
+            makingReadingListRow = true
+            defer { makingReadingListRow = false }
+            originalSetUp(view, setUpSelector)
+        }
+        method_setImplementation(setUp, imp_implementationWithBlock(setUpReplacement))
+        let instantiateSelector = method_getName(instantiate)
+        typealias Instantiate = @convention(c) (AnyObject, Selector, AnyObject?, UnsafeMutableRawPointer?) -> Bool
+        let original = unsafeBitCast(method_getImplementation(instantiate), to: Instantiate.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?, UnsafeMutableRawPointer?) -> Bool = { nib, owner, objects in
+            let made = original(nib, instantiateSelector, owner, objects)
+            guard makingReadingListRow, rowNibsSaid < 3 else { return made }
+            rowNibsSaid += 1
+            var classes: [String] = []
+            if let objects, let raw = objects.assumingMemoryBound(to: UnsafeRawPointer?.self).pointee {
+                for object in Unmanaged<NSArray>.fromOpaque(raw).takeUnretainedValue() {
+                    classes.append(String(describing: type(of: object as AnyObject)))
+                }
+            }
+            let topLevel = classes.joined(separator: ", ")
+            let ownerClass = owner.map { String(describing: type(of: $0)) } ?? "none"
+            let madeSaid = made ? "made" : "not made"
+            log.notice("A Reading List row's nib: \(madeSaid, privacy: .public), owner \(ownerClass, privacy: .public), top level: \(topLevel, privacy: .public)")
+            return made
+        }
+        method_setImplementation(instantiate, imp_implementationWithBlock(replacement))
     }
 
     // MARK: A bookmark folder with no title
