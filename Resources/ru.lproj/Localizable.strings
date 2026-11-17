@@ -410,8 +410,8 @@
 "editor.webrtc.now.silent" = "WebRTC есть, но никуда не подключается.";
 "editor.webrtc.now.throughProxy" = "Через SOCKS5-прокси, с его адреса.";
 "editor.webrtc.now.silentHTTP" = "HTTP-прокси не пропускает WebRTC: он есть, но не подключается. Для WebRTC нужен SOCKS5.";
-"editor.webrtc.now.removedGuard" = "Отключён, пока не готова сетевая защита. Сайт может заметить, что WebRTC нет.";
-"editor.webrtc.now.removedNoGuardInBuild" = "Отключён: в этой версии нет сетевой защиты.";
+"editor.webrtc.now.removedGuard" = "Отключён, пока не готова защита сети. Сайт может заметить, что WebRTC нет.";
+"editor.webrtc.now.removedNoGuardInBuild" = "Отключён: в этой версии нет защиты сети.";
 "editor.webrtc.now.removedNotOwnProcess" = "Отключён: в этой сборке профили работают внутри приложения.";
 "editor.webrtc.now.removed" = "Отключён.";
 "editor.webrtc.now.removedBypass" = "Отключён: часть сайтов идёт мимо прокси.";
@@ -2738,9 +2738,9 @@
 "license.masterPassword.change" = "Сменить мастер-пароль";
 
 /* The network guard (NetworkGuard, NetworkGuardSettingsView; docs/TUNNEL.md). */
-"editor.webrtc.guardSettings" = "Сетевая защита…";
-"inspector.webRTC.guardNotReady" = "Отключён: сетевая защита не готова";
-"inspector.webRTC.noGuardInBuild" = "Отключён: в этой версии нет сетевой защиты";
+"editor.webrtc.guardSettings" = "Защита сети…";
+"inspector.webRTC.guardNotReady" = "Отключён: защита сети не готова";
+"inspector.webRTC.noGuardInBuild" = "Отключён: в этой версии нет защиты сети";
 "inspector.webDriver" = "Адрес WebDriver";
 "inspector.webDriver.note" = "Для Selenium (command_executor). Храните как пароль.";
 "inspector.webDriver.off" = "Включите API автоматизации, чтобы получить адрес.";
@@ -2752,7 +2752,7 @@
 "inspector.webDriver.failed" = "API автоматизации не запустился — подробности в его настройках.";
 "inspector.webDriver.hidden" = "Адрес WebDriver, токен скрыт";
 "inspector.checkProfile" = "Проверить профиль";
-"profiles.menu.guard" = "WebRTC через прокси (сетевая защита)…";
+"profiles.menu.guard" = "WebRTC через прокси (защита сети)…";
 "launch.guardLost" = "Сетевая защита Lumen перестала отвечать, пока профиль «%@» использовал WebRTC через прокси. Профиль остановлен, чтобы ничего не ушло мимо прокси; запустите его снова — WebRTC включится, когда защита снова будет готова.";
 "guard.title" = "WebRTC через прокси";
 "guard.status" = "Состояние";
@@ -2798,11 +2798,11 @@
 "guard.state.proving" = "Проверяется на этом Mac…";
 "guard.todo.proving" = "Lumen проверяет, что защита видит соединения, которые WebKit открывает для профиля: служебный процесс без данных профилей отправляет один запрос WebRTC на адрес, который никуда не ведёт, и защита должна его отбросить. Это около 10 секунд.";
 "guard.todo.proofFailed" = "Проверка не прошла: защита не увидела соединение, которое WebKit открыл для профиля, — держать профиль на прокси ей было бы нечем. Поэтому WebRTC в профилях с прокси выключен. Нажмите «Проверить снова»; после обновления macOS или Safari проверка повторится сама.";
-"guardNotice.restartNeeded" = "Сетевая защита заработает после перезагрузки Mac. До этого WebRTC в профилях с прокси выключен.";
-"guardNotice.notInstalled" = "Сетевая защита не установлена — в профилях с прокси WebRTC выключен.";
-"guardNotice.awaitingApproval" = "Разрешите сетевую защиту в Системных настройках — до этого WebRTC в профилях с прокси выключен.";
-"guardNotice.off" = "Сетевая защита выключена — в профилях с прокси WebRTC выключен.";
-"guardNotice.notAnswering" = "Сетевая защита не отвечает — в профилях с прокси WebRTC выключен.";
+"guardNotice.restartNeeded" = "Защита сети заработает после перезагрузки Mac. До этого WebRTC в профилях с прокси выключен.";
+"guardNotice.notInstalled" = "Защита сети не установлена — в профилях с прокси WebRTC выключен.";
+"guardNotice.awaitingApproval" = "Разрешите защиту сети в Системных настройках — до этого WebRTC в профилях с прокси выключен.";
+"guardNotice.off" = "Защита сети выключена — в профилях с прокси WebRTC выключен.";
+"guardNotice.notAnswering" = "Защита сети не отвечает — в профилях с прокси WebRTC выключен.";
 "guardNotice.open" = "Настройки WebRTC…";
 "guardNotice.hide" = "Скрыть до следующего запуска Lumen";
 

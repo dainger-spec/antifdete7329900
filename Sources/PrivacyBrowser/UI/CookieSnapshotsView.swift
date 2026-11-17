@@ -26,7 +26,8 @@ struct CookieSnapshotsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("cookieSnapshots.title"), profile.name), subtitle: L("cookieSnapshots.explanation"))
-            ScrollView {
+            // At most three snapshots are kept: content-sized, no scroll area standing half empty.
+            VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 14) {
                     if ephemeral {
                         note(L("cookieSnapshots.ephemeral"), symbol: "info.circle")
@@ -48,7 +49,7 @@ struct CookieSnapshotsView: View {
                 .padding(.horizontal, 24)
                 .padding(.bottom, 18)
             }
-            .frame(minHeight: 220, maxHeight: 420)
+            .fixedSize(horizontal: false, vertical: true)
             SheetFooter(leading: {
                 if working { ProgressView().controlSize(.small) }
             }, buttons: {
