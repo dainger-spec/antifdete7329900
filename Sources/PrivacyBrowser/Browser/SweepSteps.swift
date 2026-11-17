@@ -1332,6 +1332,36 @@ enum SweepSteps {
         S.expect(after != before, "the image was saved (\(before) → \(after))")
     }
 
+    /// A tab item of Safari's: its class, and what its getters that take nothing and name a URL,
+    /// a web view or a tab answer.
+    static func describeTabItem(_ item: NSObject) -> String {
+        var said = [NSStringFromClass(type(of: item))]
+        var cls: AnyClass? = object_getClass(item)
+        var seen: Set<String> = []
+        while let current = cls, !NSStringFromClass(current).hasPrefix("NS") {
+            var count: UInt32 = 0
+            if let methods = class_copyMethodList(current, &count) {
+                for index in 0..<Int(count) {
+                    let method = methods[index]
+                    let name = NSStringFromSelector(method_getName(method))
+                    let lower = name.lowercased()
+                    guard method_getNumberOfArguments(method) == 2, !name.hasPrefix("_set"), !name.hasPrefix("set"),
+                          lower.contains("url") || lower.hasSuffix("webview") || lower.hasSuffix("tab"), seen.insert(name).inserted else { continue }
+                    let returns = method_copyReturnType(method)
+                    let isObject = String(cString: returns) == "@"
+                    free(returns)
+                    guard isObject else { continue }
+                    var value: AnyObject?
+                    _ = PBCatchException { value = item.perform(method_getName(method))?.takeUnretainedValue() }
+                    said.append("\(name)=\(value.map { String(describing: type(of: $0)) + " " + String(String(describing: $0).prefix(80)) } ?? "nil")")
+                }
+                free(methods)
+            }
+            cls = class_getSuperclass(current)
+        }
+        return said.prefix(25).joined(separator: "; ")
+    }
+
     // MARK: Quit and come back
 
     static func quit() async {
@@ -1341,6 +1371,8 @@ enum SweepSteps {
         // The unit's record ends with the process: said now.
         S.info("before ⌘Q: windows \(S.browserWindowCount()), tabs \(S.tabCount()), key \(keyWindow()), pages "
                + SafariTabs.tabs().map { $0.url?.absoluteString ?? "-" }.joined(separator: " "))
+        // A tab of a tab group read no page (run 44012019641): what its item answers about one.
+        for tab in SafariTabs.tabs().prefix(3) { S.info("a tab before ⌘Q: " + describeTabItem(tab.item)) }
         await S.command(kVK_ANSI_Q)
         await SweepInput.pause(25)
         S.expect(false, "⌘Q ended the process (it is still running; key \(keyWindow()))")

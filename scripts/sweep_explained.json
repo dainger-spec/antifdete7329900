@@ -1,5 +1,6 @@
 [
  {"unit": "^regress: a key equivalent that throws", "text": "PBSweepThrow|^notice:", "why": "thrown on purpose: the regression check's own menu item, pressed while the page has the keyboard; the finding would be the process ending"},
  {"unit": ".*", "text": "caught elsewhere: NSGenericException: layout constraints are not satisfiable", "why": "AppKit's own: it throws this to itself and catches it while it breaks one of two constraints that cannot both hold (the log's 'Unable to simultaneously satisfy constraints'); the view still comes up (Distraction Control's report sheet, run 43990525206)"},
- {"unit": "Speech|Проговаривание|Речь", "text": "^the main thread stopped", "why": "AppKit's own startSpeaking: loads the system's voice on the main thread the first time it speaks (2.1-2.3 s on a runner, runs 43999545658), as in Safari"}
+ {"unit": "Speech|Проговаривание|Речь", "text": "^the main thread stopped", "why": "AppKit's own startSpeaking: loads the system's voice on the main thread the first time it speaks (2.1-2.3 s on a runner, runs 43999545658), as in Safari"},
+ {"unit": "Reader|Для чтения", "text": "^the main thread stopped", "why": "Safari's own Reader, setting its font for the page's language the first time: WebKit makes a sandbox extension for the font's file on the main thread (-[ReaderViewController setFont:] › WebKit::AdditionalFonts, run 44012019641, Russian), as in Safari"}
 ]
