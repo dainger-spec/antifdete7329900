@@ -343,28 +343,31 @@ class LumenUITestCase: XCTestCase {
         // An offer that came late, after the previous form (CI run 15), is caught here.
         XCTAssertFalse(passwordOffer.exists, "the password prompt: an offer to save a password is on the screen before adding \(name)")
         // A touch while the previous form is still closing is lost (CI run 10): touch again until it opens.
+        // The form is known by its first field, the line: the name's field is below a long note, at the
+        // largest text out of sight and not yet in the tree (devices run 146).
         let add = wait(app.buttons["newProxy"], "the list offers a new proxy")
-        let field = app.textFields["proxyName"]
-        for _ in 0..<3 where !field.exists {
+        let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
+        for _ in 0..<3 where !line.exists {
             if add.isHittable { add.tap() }
-            _ = field.waitForExistence(timeout: 5)
+            _ = line.waitForExistence(timeout: 5)
         }
-        wait(field, "the new proxy form opens (for \(name))")
-        typeInto(field, name)
-        // The proxy as one line, its type in the scheme — as a person pastes what a provider gave.
+        wait(line, "the new proxy form opens (for \(name))")
+        // Filled as a person fills it, from the top: the proxy as one line, its type in the scheme — as a
+        // person pastes what a provider gave —, then its name.
         let scheme = kind == "HTTP" ? "http" : "socks5"
         let credentials = user.isEmpty ? "" : "\(user):\(password)@"
-        let line = app.descendants(matching: .any).matching(identifier: "proxyLine").firstMatch
-        typeInto(wait(line, "the form takes the proxy as one line"), "\(scheme)://\(credentials)\(host):\(port)")
+        typeInto(line, "\(scheme)://\(credentials)\(host):\(port)")
         XCTAssertFalse(app.staticTexts["proxyLineProblem"].exists, "the line of \(name) is read as a proxy")
+        typeInto(app.textFields["proxyName"], name)
         // A touch while the keyboard still moves is lost (CI run 29: the form of the second proxy stayed
-        // open): if the form is still there after 5 s, its button is touched again.
+        // open): if the form is still there after 5 s, its button is touched again. The form is there
+        // while its bar's button is (its fields may have scrolled out of the tree).
         let save = app.buttons["saveProxy"]
         save.tap()
-        for _ in 0..<2 where !field.waitForNonExistence(timeout: 5) {
+        for _ in 0..<2 where !save.waitForNonExistence(timeout: 5) {
             if save.isHittable { save.tap() }
         }
-        waitGone(field, "the proxy form closes (\(name))")
+        waitGone(save, "the proxy form closes (\(name))")
         // iOS must not offer to keep the proxy's password among the person's own (CI runs 12, 13: its
         // "Save Password?" came a moment after the form closed, as a remote view app.alerts does
         // not list, and blocked the screen). After a moment the list must still take a touch.

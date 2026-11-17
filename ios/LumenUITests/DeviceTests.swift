@@ -78,10 +78,10 @@ final class DeviceTests: LumenUITestCase {
         leaveProxies()
 
         // The account: the free level, the sign-in form, a paid plan signed in, signed out again.
+        // At the largest text the counter is below the account's own rows: read where a person scrolls to it.
         app.buttons["plansButton"].tap()
-        wait(app.staticTexts["profileCounter"], "the account's screen opens")
-        XCTAssertEqual(app.staticTexts["profileCounter"].label, "Профили: 2 из 2")
-        onScreen(app.buttons["plansDone"], "the account's Done")
+        onScreen(wait(app.buttons["plansDone"], "the account's screen opens"), "the account's Done")
+        XCTAssertEqual(reveal(app.staticTexts["profileCounter"], "the account's screen says how many profiles").label, "Профили: 2 из 2")
         assertDark("the account's screen")
         shot("\(leg) 07 account, nobody signed in")
         reveal(app.buttons["signIn"], "the account's screen offers to sign in").tap()
@@ -93,8 +93,14 @@ final class DeviceTests: LumenUITestCase {
         shot("\(leg) 08 sign-in form")
         reveal(app.buttons["submitSignIn"], "the sign-in form's button can be reached").tap()
         wait(app.staticTexts["accountEmail"], "signed in", timeout: 40)
+        // The plan, below the account's rows: scrolled to, as a person does, once the server named it.
         let plan = app.staticTexts["planName"]
-        XCTAssertTrue(plan.waitForExistence(timeout: 30), "the plan is named once signed in")
+        let named = Date().addingTimeInterval(30)
+        while !(plan.exists && plan.isHittable), Date() < named {
+            scroll(towardStart: isAbove(plan))
+            usleep(500_000)
+        }
+        XCTAssertTrue(plan.exists && plan.isHittable, "the plan is named once signed in")
         XCTAssertEqual(plan.label, "Тариф: Профессиональный")
         onScreen(reveal(app.buttons["signOut"], "the account's screen offers to sign out"), "the sign-out button", wholly: false)
         shot("\(leg) 09 signed in")
