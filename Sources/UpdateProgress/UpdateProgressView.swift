@@ -103,7 +103,7 @@ public final class UpdateProgressModel: ObservableObject {
 public enum UpdateWindowLayout {
     public static let size = CGSize(width: 520, height: 540)
     /// Where the horizon's rim stands, from the top.
-    public static let rimY: CGFloat = 214
+    public static let rimY: CGFloat = 182
 
     /// A window for the update's content, centred on the screen with the keyboard, dark, its title
     /// bar the content's. `closable`: the found and failed windows may be closed; the progress
@@ -139,7 +139,9 @@ public struct UpdateHorizon: View {
     public var body: some View {
         GeometryReader { geometry in
             let width = geometry.size.width
-            let radius = max(width * 1.2, 640)
+            // Flat enough that the rim stays above the content across the window's width (the
+            // lock screen's is wider still): it drops some 20 pt by the content's edges.
+            let radius = max(width * 2.6, 1300)
             let centre = CGPoint(x: width / 2, y: rimY + radius)
             ZStack {
                 LinearGradient(colors: [UpdatePalette.backdrop, UpdatePalette.sky], startPoint: .top, endPoint: .init(x: 0.5, y: 0.4))
@@ -250,7 +252,7 @@ public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
                     .frame(width: 36, height: 36)
                     .shadow(color: UpdatePalette.rim.opacity(0.28), radius: 16)
                     .accessibilityHidden(true)
-                    .padding(.top, 52)
+                    .padding(.top, 40)
                 Text(title)
                     .font(.system(size: 24, weight: .bold))
                     .tracking(-0.6)
@@ -265,9 +267,11 @@ public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 6)
+                // On the disc, under the rim, in the middle of what is left.
                 content()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    .padding(.top, 34)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .padding(.top, 44)
+                    .padding(.bottom, 16)
                 HStack(spacing: 10) {
                     buttons()
                 }
