@@ -133,12 +133,41 @@ public struct CookieJarDocument: Codable, Equatable, Sendable {
     /// document and, through sync, off every other device; not recorded, the document applied to
     /// the store puts them back.
     public func atLaunch(store: [ImportedCookie], baseline: CookieBaseline, storeRestored: Bool) -> CookieJarDocument {
-        storeRestored ? recording(store: store, baseline: baseline.cookies, at: baseline.savedAt) : self
+        atLaunch(store: store, baseline: baseline, came: storeRestored ? .asLeft : .withNothing)
+    }
+
+    /// How a profile's store came up at a launch, for what it tells of the run before.
+    public enum LaunchStore: Equatable, Sendable {
+        /// As an earlier run left it (its archive, or its plaintext after a crash): its differences
+        /// from the baseline are that run's changes, deletions included.
+        case asLeft
+        /// With nothing (no archive, no plaintext): the website data lost. It tells nothing.
+        case withNothing
+        /// Found to have lost cookies, and given back what its newest snapshot held
+        /// (`CookieRecovery`): what it holds that the baseline did not, or held otherwise, is the run
+        /// before's; what it lacks is the loss, not a deletion — recorded, it would take those
+        /// cookies off every other device.
+        case recovered
+    }
+
+    /// `atLaunch(store:baseline:storeRestored:)`, for each way the store can come up. Recorded
+    /// changes are of the baseline's time, the earliest they can be: any change synced from
+    /// another device since wins over them, so what a crashed run left — or a snapshot put back —
+    /// never goes to the other devices in place of something newer.
+    public func atLaunch(store: [ImportedCookie], baseline: CookieBaseline, came: LaunchStore) -> CookieJarDocument {
+        switch came {
+        case .asLeft: return recording(store: store, baseline: baseline.cookies, at: baseline.savedAt)
+        case .withNothing: return self
+        case .recovered: return recording(store: store, baseline: baseline.cookies, at: baseline.savedAt, recordsDeletions: false)
+        }
     }
 
     /// What `store` (the store's persistent cookies now) changed since `baseline` (what it held
     /// when last recorded or applied), written into the document as changes made at `time`.
-    public func recording(store: [ImportedCookie], baseline: [ImportedCookie], at time: Date) -> CookieJarDocument {
+    /// `recordsDeletions` false: cookies of the baseline the store lacks are not deletions (a store
+    /// that lost them, `LaunchStore.recovered`).
+    public func recording(store: [ImportedCookie], baseline: [ImportedCookie], at time: Date,
+                          recordsDeletions: Bool = true) -> CookieJarDocument {
         let now = Date()
         let current = Dictionary(store.filter { $0.expires != nil }.map { (CookieKey($0), $0) }, uniquingKeysWith: { _, last in last })
         let before = Dictionary(baseline.map { (CookieKey($0), $0) }, uniquingKeysWith: { _, last in last })
@@ -154,7 +183,7 @@ public struct CookieJarDocument: Codable, Equatable, Sendable {
             entries[key] = Entry(cookie: cookie, updatedAt: time)
             tombstones[key] = nil
         }
-        for (key, gone) in before where current[key] == nil {
+        for (key, gone) in before where recordsDeletions && current[key] == nil {
             // Expired: every device's store drops it by itself, no deletion to sync.
             if let expires = gone.expires, expires <= now { continue }
             // Deleted from the store: deleted, unless the document has a newer version than this change.

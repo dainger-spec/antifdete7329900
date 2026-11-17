@@ -2,7 +2,7 @@ import Foundation
 
 /// A copy of a stopped profile's browsing state, to go back to: its website data (cookies, local
 /// storage, IndexedDB, caches: `webdata.pbsa`), Safari's own state (`safarihome.pbsa`), its history,
-/// its synced cookies and their baseline, and the tabs it left open. Not its settings, passwords,
+/// its synced cookies and their baseline, the tabs it left open, and its cookie snapshots. Not its settings, passwords,
 /// bookmarks or one-time codes — those are what the person set up, and a restore that took a saved
 /// password away would be a loss, not a way back.
 ///
@@ -67,8 +67,11 @@ public enum RestorePointProblem: Error, Equatable, Sendable {
 
 extension ProfileRepository {
     /// The files a restore point holds: the profile's browsing state, nothing it was set up with.
+    /// The cookie snapshots and the running mark go with the website data they are of
+    /// (docs/COOKIE_RECOVERY.md): a point put back brings back its own, so that its next launch
+    /// neither takes the point's cookies for a loss nor puts back the cookies of the state it replaced.
     public static let restorePointFiles = ["webdata.pbsa", "safarihome.pbsa", "history.bin", "cookies.bin",
-                                           "cookies-baseline.bin", "tabs.bin"]
+                                           "cookies-baseline.bin", "tabs.bin", "cookie-snapshots.bin", "cookies-running"]
     /// At most this many per profile: each holds the profile's whole website data.
     public static let maximumRestorePoints = 20
 
