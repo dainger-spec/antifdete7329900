@@ -37,6 +37,9 @@ class LumenUITestCase: XCTestCase {
         for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
+        // A test of the start screen waits for what comes up itself: the start screen, or the list once
+        // it was passed (AccountTests.testTheStartScreen).
+        if environment["LUMEN_TEST_WELCOME"] == "1" { return app }
         // In the device's own language the list is "Sessions" — or still "Сессии" when a planted fault
         // leaves the texts untranslated: that is for the test's own check to catch, not for this one.
         let bar = language == nil

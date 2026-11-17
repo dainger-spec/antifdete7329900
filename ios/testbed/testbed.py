@@ -458,10 +458,12 @@ async def site(reader, writer, scheme="http"):
             elif path == "/zone-worker.js":
                 out = reply("200 OK", ZONE_WORKER, "text/javascript", ["Cache-Control: no-store"])
             elif path == "/webrtc":
-                out = reply("200 OK", page("webrtc", "<h1>WebRTC</h1><p id=cand>candidates: …</p><p id=chan>channel: …</p>",
+                out = reply("200 OK", page("webrtc", "<h1>WebRTC</h1><p id=cand>candidates: …</p><p id=chan>channel: …</p>"
+                                           f"<p>at: {html.escape(target)}</p>",
                                            WEBRTC_SCRIPT), extra=["Cache-Control: no-store"])
             elif path == "/__stun":
-                out = reply("200 OK", page("stun", f"<p>stun: proxy={STUN_SEEN['proxy']} direct={STUN_SEEN['direct']}</p>"),
+                out = reply("200 OK", page("stun", f"<p>stun: proxy={STUN_SEEN['proxy']} direct={STUN_SEEN['direct']}</p>"
+                                                   f"<p>at: {html.escape(target)}</p>"),
                             extra=["Cache-Control: no-store"])
             elif path == "/hold":
                 name = {"A": "прокси A", "B": "прокси B", "D": "прокси D"}.get(via, "напрямую")
