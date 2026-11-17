@@ -41,6 +41,7 @@ targets:
         # The launch: the app's ground at once, before its first view (Eclipse).
         UILaunchScreen:
           UIColorName: LaunchBackground
+          UIImageName: LaunchLogo
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
