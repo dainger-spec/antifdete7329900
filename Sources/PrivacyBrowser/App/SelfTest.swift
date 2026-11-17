@@ -4426,6 +4426,14 @@ final class SelfTest {
               wrong.isEmpty, wrong.joined(separator: " | "))
         check("errors in the person's language: the sync messages are the interface's",
               !L("sync.error.failed").hasPrefix("sync.") && !L("sync.error.profilesRunning").hasPrefix("sync."))
+        // The core's English details (`ErrorDetailText`): one a person can act on in their words, a
+        // full disk by what it means, and a code's words — an error number, a type — never.
+        let diskFull = errorText(CoreError.io("rename config.bin failed: errno \(ENOSPC)"))
+        let raw = errorText(CoreError.io("read index.bin: Error Domain=NSPOSIXErrorDomain Code=5"))
+        let port = errorText(CoreError.invalidConfiguration("proxy port out of range"))
+        check("errors in the person's language: the core's details in the person's words, never a code's",
+              diskFull.contains(L("error.detail.diskFull")) && !diskFull.contains("errno") && !raw.contains("Domain") && !raw.contains("index.bin")
+                  && port == L("error.detail.proxyPort"), "\(diskFull) | \(raw) | \(port)")
         // A virtual machine's failures (`VMFailureKind`): each kind has words of the interface's,
         // with the system's own kept under them as a technical detail; a failure of no kind the
         // app knows is a sentence of the interface's with the system's words under it; a state
