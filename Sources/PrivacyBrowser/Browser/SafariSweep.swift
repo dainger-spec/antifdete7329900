@@ -74,7 +74,7 @@ enum SafariSweep {
             var index = max(0, from)
             while index < chosen.count {
                 let step = chosen[index]
-                let usesRecorder = ["context", "keys", "menu"].contains(step.phase)
+                let usesRecorder = ["context", "keys", "menu", "regress"].contains(step.phase)
                 if usesRecorder != walkRecorderOn { switchWalkRecorder(on: usesRecorder) }
                 await bringForward()
                 var names = [step.name]
@@ -102,6 +102,8 @@ enum SafariSweep {
         await bringForward()
         if let base = baseInputSource, SweepInput.inputSourceID() != base { SweepInput.selectInputSource(base) }
         let windowsBefore = Set(NSApp.windows.map { ObjectIdentifier($0) })
+        let downloadsBefore = HostedDownloads.counts.text
+        let guardedBefore = SafariWindowGuard.caught
         _ = SweepRecord.take()
         _ = WalkRecorder.take()
         SweepWatchdog.shared.setStep(index)
@@ -110,6 +112,8 @@ enum SafariSweep {
               "time": Date().timeIntervalSince1970])
         await step.run(unit)
         await SweepInput.pause(0.4)
+        if HostedDownloads.counts.text != downloadsBefore { note("downloads: \(downloadsBefore) → \(HostedDownloads.counts.text)") }
+        if SafariWindowGuard.caught != guardedBefore { note("caught by the window's guards: \(SafariWindowGuard.caught - guardedBefore)") }
         var fields = SweepRecord.take()
         let walked = WalkRecorder.take()
         if !walked.effects.isEmpty { fields["answered"] = walked.effects }
@@ -125,7 +129,14 @@ enum SafariSweep {
         fields["name"] = shown
         fields["phase"] = step.phase
         fields["time"] = Date().timeIntervalSince1970
+        // A picture of the screen as the unit left it, when something went wrong in it: taken by
+        // scripts/sweep.py as it reads this, before the way back changes anything.
+        let wrong = ["failed", "thrown", "caught", "notices"].contains { (fields[$0] as? [String])?.isEmpty == false }
         emit(fields)
+        if wrong {
+            emit(["event": "shot", "index": index, "sub": unit])
+            await SweepInput.pause(1.2)
+        }
         await restore(keeping: windowsBefore)
         // What the way back to the window raised belongs to the unit before it.
         var after = SweepRecord.take()
@@ -163,7 +174,8 @@ enum SafariSweep {
         let page = window.flatMap { SafariChromeHost.frontPage(in: $0) }
         let responder = NSApp.keyWindow?.firstResponder.map { String(describing: type(of: $0)) } ?? "-"
         let key = NSApp.keyWindow.map { SafariMenuWalk.describe($0) } ?? "-"
-        return "active \(NSApp.isActive), key \(key), responder \(responder), page \(page?.url?.absoluteString ?? "-"), "
+        let front = NSApp.isActive ? "" : " (in front: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nothing"))"
+        return "active \(NSApp.isActive)\(front), key \(key), responder \(responder), page \(page?.url?.absoluteString ?? "-"), "
             + "tabs \(tabCount()), input \(SweepInput.inputSourceID() ?? "?")"
     }
 
@@ -183,6 +195,14 @@ enum SafariSweep {
             previousSettings?()
         }
         SweepMenus.install()
+        // What a menu item, chosen by a click, the keyboard or its key equivalent, sent: whether a
+        // key equivalent reached the item the menu shows for it.
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.didSendActionNotification, object: nil, queue: nil) { note in
+            guard let item = note.userInfo?["MenuItem"] as? NSMenuItem else { return }
+            let action = item.action.map(NSStringFromSelector) ?? "-"
+            let target = item.target.map { String(describing: type(of: $0)) } ?? "the responder chain"
+            SweepRecord.add("sent", "\(item.title) (\(action) → \(target))")
+        }
     }
 
     /// Every exception thrown goes into the unit's record, and on to `chained` (the menu walk's
@@ -274,7 +294,9 @@ enum SafariSweep {
         if NSApp.isHidden { NSApp.unhide(nil) }
         var leftFullScreen = false
         for window in NSApp.windows {
-            if let sheet = window.attachedSheet { window.endSheet(sheet) }
+            // Ended as its Cancel ends it: a print panel ended otherwise prints (with no printer on
+            // a runner, NSInternalInconsistencyException from -[WKPrintingView beginDocument]).
+            if let sheet = window.attachedSheet { window.endSheet(sheet, returnCode: .cancel) }
             if window.isMiniaturized { window.deminiaturize(nil) }
             if window.styleMask.contains(.fullScreen) {
                 window.toggleFullScreen(nil)
@@ -555,6 +577,10 @@ enum SafariSweep {
         add("menu bar: every item, chosen by a click and the arrow keys", "menu", units: { SweepSteps.menuBarUnits() }) { unit in
             await SweepSteps.menuItem(unit)
         }
+        add("regress: a page in the Reading List, then ⌃⌘2 with the page focused", "regress") { _ in await SweepSteps.readingListByKey() }
+        add("regress: a tab group, then ⌘D", "regress") { _ in await SweepSteps.bookmarkWithTabGroup() }
+        add("regress: a key equivalent that throws, with the page focused", "regress") { _ in await SweepSteps.throwingKeyEquivalent() }
+        add("regress: an image's Save Image to the downloads folder", "regress") { _ in await SweepSteps.saveImageToDownloads() }
         add("quit: ⌘Q", "quit", ends: true) { _ in await SweepSteps.quit() }
         add("after the relaunch: the windows, the tabs, typing", "quit") { _ in await SweepSteps.afterRelaunch() }
         return list

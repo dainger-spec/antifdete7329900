@@ -357,6 +357,14 @@ jobs:
           python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
+      - name: macOS 27 - what the sweep with real input found in Safari 27's window, again (reported)
+        # scripts/sweep.py, phase regress, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          PB_SWEEP_PHASES: regress
+        run: python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out build/egress27/sweep-regress --state "macOS 27 regress"
       - name: macOS 27 - a scenario's run in Safari 27's window — its click on the button it aimed at (reported)
         # scripts/scenario_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -1040,6 +1048,25 @@ jobs:
         with:
           name: menu-walk
           path: build/menu-walk
+          if-no-files-found: ignore
+      - name: What the sweep with real input found in Safari's window, again — none of it comes back
+        # scripts/sweep.py with only its phase regress (SafariSweep, SweepSteps): with the window
+        # server's own keys and clicks, a page added to the Reading List and the list shown with ⌃⌘2
+        # while the page has the keyboard (the profile's process ended there: CI run 43990525206),
+        # ⌘D in a window with a tab group (the bookmark's sheet never came), a key equivalent whose
+        # action throws pressed with the page focused, an image's Save Image to the downloads folder
+        # ("(null)", and the save failed). A crash, an exception the run loop caught or one Safari's
+        # code threw and something else swallowed, a notice, a hang over two seconds, fails the build.
+        if: always()
+        timeout-minutes: 12
+        env:
+          PB_SWEEP_PHASES: regress
+        run: python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out build/sweep-regress --state "regress"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-regress
+          path: build/sweep-regress
           if-no-files-found: ignore
       - name: A scenario's run in Safari's window — its click on the button it aimed at, as the page saw it
         # scripts/scenario_safari_check.sh (Lumen --scenario-safari-check): a profile started without

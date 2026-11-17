@@ -212,6 +212,8 @@ enum SafariSweepCheck {
             finish(current, sweep: sweep)
         case "after":
             print("SWEEP-AFTER " + line)
+        case "shot":
+            print("SWEEP-SHOT \(fields["index"] as? Int ?? -1) \(fields["sub"] as? Int ?? 0)")
         case "hang":
             print("SWEEP-HANG \(pid ?? 0) \(fields["index"] as? Int ?? -1) \(fields["seconds"] as? Int ?? 0)")
         case "done":

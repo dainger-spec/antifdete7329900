@@ -40,6 +40,13 @@ enum SweepSteps {
         return false
     }
 
+    /// The app's visible windows, other than the browser window, over `point` (screen space).
+    static func windowsOver(_ point: NSPoint) -> String {
+        let main = S.browserWindow()
+        let over = NSApp.windows.filter { $0 !== main && $0.isVisible && $0.frame.contains(point) }
+        return over.isEmpty ? "none" : over.map { SafariMenuWalk.describe($0) }.joined(separator: ", ")
+    }
+
     static func webViewCount() -> Int {
         func count(_ view: NSView) -> Int {
             if view is WKWebView { return view.isHiddenOrHasHiddenAncestor ? 0 : 1 }
@@ -184,10 +191,14 @@ enum SweepSteps {
         await S.focusAddressBar()
         await SweepInput.type("abc")
         await SweepInput.pause(0.4)
+        // In Safari the first Escape closes the completion list, the second puts the address back.
+        await S.escape()
+        await SweepInput.pause(0.4)
+        S.note("the field after one Escape: \(S.fieldText(S.addressField()))")
         await S.escape()
         await SweepInput.pause(0.4)
         let text = S.fieldText(S.addressField())
-        S.note("the field after Escape: \(text)")
+        S.note("the field after two: \(text)")
         S.expect(!text.contains("abc"), "Escape put the address back")
         await S.escape()
     }
@@ -212,9 +223,14 @@ enum SweepSteps {
         await S.escape()
     }
 
+    /// The sweep's page as a person types it into the address bar: with its scheme, since its
+    /// host's `.invalid` is no domain Safari knows, and without one Safari searches for it (CI run
+    /// 43990525206: Return went to DuckDuckGo).
+    static func typedAddress(_ path: String) -> String { "http://\(S.host)\(path)" }
+
     static func addressGo() async {
         await S.focusAddressBar()
-        await SweepInput.type("\(S.host)\(S.secondPath)")
+        await SweepInput.type(typedAddress(S.secondPath))
         await SweepInput.pause(0.4)
         await SweepInput.press(kVK_Return)
         let went = await waitForPath(S.secondPath)
@@ -229,7 +245,7 @@ enum SweepSteps {
         await SweepInput.pause(1.2)
         let after = S.tabCount()
         S.expect(after == before + 1, "⌘T made a tab (\(before) → \(after)); responder \(responder())")
-        await SweepInput.type("\(S.host)\(S.pagePath)")
+        await SweepInput.type(typedAddress(S.pagePath))
         await SweepInput.pause(0.3)
         await SweepInput.press(kVK_Return)
         let went = await waitForPath(S.pagePath)
@@ -299,7 +315,8 @@ enum SweepSteps {
         let said = byClass.map { name, views in "\(name)×\(views.count) \(Int(views[0].frame.width))×\(Int(views[0].frame.height))" }
             .sorted().joined(separator: ", ")
         var best: (String, [NSView], CGFloat)?
-        for (name, views) in byClass where views.count == count && count >= 2 {
+        // Every tab's view, or every one but the pinned ones (a pinned tab has a view of its own).
+        for (name, views) in byClass where views.count >= 2 && views.count <= max(count, 2) {
             guard views.allSatisfy({ $0.frame.height >= 16 && $0.frame.height <= 64 && $0.frame.width >= 40 }) else { continue }
             let area = views.reduce(CGFloat(0)) { $0 + $1.frame.width * $1.frame.height }
             if best == nil || area > (best?.2 ?? 0) { best = (name, views, area) }
@@ -319,6 +336,13 @@ enum SweepSteps {
     }
 
     private static var menuTitles: [String: [String]] = [:]
+    /// The same items by their identifier or action: an item whose title says what is selected
+    /// (Look Up “…”) is found again by it.
+    private static var menuIDs: [String: [String]] = [:]
+
+    static func itemID(_ item: NSMenuItem) -> String {
+        item.identifier?.rawValue ?? item.action.map(NSStringFromSelector) ?? item.title
+    }
 
     /// Opens a menu, writes down what it holds, and keeps the titles of what the sweep chooses in
     /// it, one unit each.
@@ -331,8 +355,10 @@ enum SweepSteps {
             return [opened ? "(no menu came up)" : "(nothing to right-click)"]
         }
         S.note("the menu: " + S.describeMenu(menu).joined(separator: "; "))
-        let titles = S.stops(in: menu).filter { $0.submenu == nil && !avoided($0) }.map(\.title)
+        let chosen = S.stops(in: menu).filter { $0.submenu == nil && !avoided($0) }
+        let titles = chosen.map(\.title)
         menuTitles[key] = titles
+        menuIDs[key] = chosen.map(itemID)
         await S.escape()
         return titles.isEmpty ? ["(nothing to choose)"] : titles
     }
@@ -351,8 +377,17 @@ enum SweepSteps {
             await S.escape()
             return
         }
-        guard let item = S.stops(in: menu).first(where: { $0.title == title }) else {
+        let id = menuIDs[key].flatMap { $0.indices.contains(unit) ? $0[unit] : nil }
+        let shown = menu.items.filter { !$0.isSeparatorItem && !$0.isHidden && !$0.isAlternate }
+        guard let item = shown.first(where: { $0.title == title }) ?? shown.first(where: { id != nil && itemID($0) == id }) else {
             S.expect(false, "\(title) is in the menu this time")
+            await S.escape()
+            return
+        }
+        if item.title != title { S.note("this time it says \(item.title)") }
+        guard item.isEnabled else {
+            // The tab the menu is for has no tab to its right, say: off, as in Safari.
+            S.note("off this time")
             await S.escape()
             return
         }
@@ -384,6 +419,7 @@ enum SweepSteps {
             await SweepInput.click(points[1], right: true)
             return true
         }
+        S.note("tabs now: \(S.tabCount()), the tab bar's: \(tabPoints().said)")
     }
 
     // MARK: The page
@@ -481,8 +517,19 @@ enum SweepSteps {
         await SweepInput.press(kVK_Tab)
     }
 
+    /// A click on an empty part of the page, as a person clicks into a page before the wheel or a
+    /// link: what the address bar had open (Tab out of the page's field took the keyboard there,
+    /// and its list over the page took the wheel and the click: CI run 43990525206) closes.
+    static func clickIntoPage() async {
+        guard let point = await S.pagePoint("#blank") else { return }
+        await SweepInput.click(point)
+        await SweepInput.pause(0.4)
+    }
+
     static func wheel() async {
         guard let page = await S.ensurePage(), let center = S.center(of: page) else { return }
+        await clickIntoPage()
+        S.note("before the wheel: responder \(responder()), windows over the page: \(windowsOver(center))")
         _ = await S.script("window.scrollTo(0, 0); return 0;")
         await SweepInput.scroll(at: center, lines: -10)
         await SweepInput.pause(1)
@@ -496,6 +543,7 @@ enum SweepSteps {
 
     static func download() async {
         await S.ensurePage()
+        await clickIntoPage()
         let before = HostedDownloads.counts.text
         guard let point = await S.pagePoint("#download") else {
             S.expect(false, "the page has its download link")
@@ -517,6 +565,15 @@ enum SweepSteps {
         let modal = NSApp.modalWindow.map { SafariMenuWalk.describe($0) }
         S.note("after ⌘P: sheet \(sheet ?? "none"), modal \(modal ?? "none"), key \(keyWindow())")
         S.expect(sheet != nil || modal != nil, "the print panel came up")
+        if !NSApp.isActive {
+            // Another app came in front as the panel opened (CI run 43990525206, macOS 26: the
+            // first print on the Mac); a person clicks the panel to go on.
+            S.note("the app is not in front after ⌘P: \(NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "nothing") is")
+            if let panel = S.browserWindow()?.attachedSheet {
+                await SweepInput.click(NSPoint(x: panel.frame.midX, y: panel.frame.maxY - 8))
+                await SweepInput.pause(0.6)
+            }
+        }
         await S.escape()
         await SweepInput.pause(1.5)
         S.expect(S.browserWindow()?.attachedSheet == nil && NSApp.modalWindow == nil, "Escape cancelled it")
@@ -743,7 +800,7 @@ enum SweepSteps {
         S.expect(after == before + 1, "⌘N opened a window (\(before) → \(after))")
         guard after > before else { return }
         await S.focusAddressBar()
-        await SweepInput.type("\(S.host)\(S.secondPath)")
+        await SweepInput.type(typedAddress(S.secondPath))
         await SweepInput.press(kVK_Return)
         await SweepInput.pause(2)
         S.note("the new window's page: \(pageAddress())")
@@ -831,6 +888,11 @@ enum SweepSteps {
         await S.ensureTabs(2)
         await S.ensurePage()
         S.note("action \(chosen.action)")
+        // A menu whose delegate answers for its key equivalents itself is not asked for its items'.
+        if let menu = liveItems(chosen.path)?.last?.menu, let delegate = menu.delegate,
+           (delegate as AnyObject).responds(to: NSSelectorFromString("menuHasKeyEquivalent:forEvent:target:action:")) {
+            S.note("its menu's delegate (\(String(describing: type(of: delegate)))) answers for its key equivalents itself")
+        }
         await SweepInput.press(chosen.code, chosen.flags)
         await SweepInput.pause(1.5)
         S.note("after it: key \(keyWindow()), responder \(responder()), page \(pageAddress())")
@@ -991,6 +1053,132 @@ enum SweepSteps {
         }
         await SweepInput.press(kVK_Return)
         return nil
+    }
+
+    // MARK: What was found and fixed, again (the phase "regress", also run by full.yml)
+
+    /// The Reading List's table in the window, as rows the table has and row views it made.
+    static func readingListRows() -> String {
+        guard let window = S.browserWindow(), let root = window.contentView?.superview else { return "no window" }
+        var found: NSTableView?
+        func walk(_ view: NSView) {
+            guard found == nil else { return }
+            if let table = view as? NSTableView, !table.isHiddenOrHasHiddenAncestor {
+                let owner = table.delegate.map { String(describing: type(of: $0)) } ?? NSStringFromClass(type(of: table))
+                if owner.contains("ReadingList") {
+                    found = table
+                    return
+                }
+            }
+            for subview in view.subviews { walk(subview) }
+        }
+        walk(root)
+        guard let table = found else { return "no Reading List in the window" }
+        let made = (0..<min(table.numberOfRows, 5)).filter { table.rowView(atRow: $0, makeIfNecessary: false) != nil }.count
+        return "rows \(table.numberOfRows), row views \(made)"
+    }
+
+    /// A page added to the Reading List (⇧⌘D), then the Reading List shown by its key equivalent
+    /// (⌃⌘2) while the page has the keyboard: WebKit sends the key to the page first and to the menu
+    /// again after. Each row's view threw, and there the process ended (CI run 43990525206).
+    static func readingListByKey() async {
+        await S.ensurePage()
+        await clickIntoPage()
+        await S.command(kVK_ANSI_D, .maskShift)
+        await SweepInput.pause(1.5)
+        await clickIntoPage()
+        S.note("before ⌃⌘2: responder \(responder())")
+        await S.command(kVK_ANSI_2, .maskControl)
+        await SweepInput.pause(2)
+        let rows = readingListRows()
+        S.note("the Reading List: \(rows)")
+        S.expect(rows.hasPrefix("rows ") && !rows.hasPrefix("rows 0") && !rows.hasSuffix("row views 0"),
+                 "the Reading List shows the page added to it")
+        await S.command(kVK_ANSI_L, .maskShift)
+        await SweepInput.pause(0.8)
+    }
+
+    /// A tab group made (⌃⌘N), a page in it, then ⌘D: the bookmark's sheet lists the folders, and a
+    /// folder with no title threw there, so the sheet never came (CI run 43990525206).
+    static func bookmarkWithTabGroup() async {
+        await S.ensurePage()
+        await S.command(kVK_ANSI_N, .maskControl)
+        await SweepInput.pause(2)
+        S.note("after ⌃⌘N: key \(keyWindow()), tabs \(S.tabCount()), responder \(responder())")
+        await S.escape()
+        await S.focusAddressBar()
+        await SweepInput.type(typedAddress(S.pagePath))
+        await SweepInput.press(kVK_Return)
+        _ = await waitForPath(S.pagePath)
+        await S.command(kVK_ANSI_D)
+        await SweepInput.pause(2)
+        let sheet = S.browserWindow()?.attachedSheet
+        S.note("after ⌘D: sheet \(sheet.map { SafariMenuWalk.describe($0) } ?? "none"), key \(keyWindow())")
+        S.expect(sheet != nil, "⌘D brought up the bookmark's sheet with a tab group in the window")
+        await S.escape()
+        await SweepInput.pause(0.6)
+    }
+
+    /// Throws when chosen: the regression check's own menu item.
+    private final class Thrower: NSObject {
+        static let name = NSExceptionName("PBSweepThrow")
+
+        @objc func throwOne(_ sender: Any?) {
+            NSException(name: Self.name, reason: "thrown on purpose by the sweep", userInfo: nil).raise()
+        }
+    }
+
+    private static let thrower = Thrower()
+
+    /// A key equivalent whose action throws, pressed while the page has the keyboard: whatever
+    /// Safari's code throws for a key WebKit sends again, the profile's process goes on.
+    static func throwingKeyEquivalent() async {
+        guard let menu = NSApp.mainMenu?.items.last?.submenu else {
+            S.expect(false, "the menu bar has a last menu")
+            return
+        }
+        guard let key = UnicodeScalar(UInt32(NSF13FunctionKey)) else { return }
+        let item = NSMenuItem(title: "PB sweep throw", action: #selector(Thrower.throwOne(_:)), keyEquivalent: String(Character(key))) // l10n: not text
+        item.keyEquivalentModifierMask = [.command]
+        item.target = thrower
+        menu.addItem(item)
+        defer { menu.removeItem(item) }
+        await S.ensurePage()
+        await clickIntoPage()
+        S.note("before ⌘F13: responder \(responder())")
+        await S.command(kVK_F13)
+        await SweepInput.pause(1.5)
+        S.note("after ⌘F13: the process goes on; key \(keyWindow()), responder \(responder())")
+    }
+
+    /// An image's "Save Image to “Downloads”": named, and saved where the settings say.
+    static func saveImageToDownloads() async {
+        await S.ensurePage()
+        let before = HostedDownloads.counts.text
+        guard let point = await S.pagePoint("#image") else {
+            S.expect(false, "the page has its image")
+            return
+        }
+        let menu = await S.openMenu { await SweepInput.click(point, right: true) }
+        guard let menu else {
+            S.expect(false, "the image's menu came up")
+            await S.escape()
+            return
+        }
+        guard let item = menu.items.first(where: { $0.action.map(NSStringFromSelector) == "_saveImageToDownloadsFolder:" }) else {
+            S.note("no Save Image to the downloads folder here: " + S.describeMenu(menu).joined(separator: "; "))
+            await S.escape()
+            return
+        }
+        S.note("the item: \(item.title)")
+        S.expect(!item.title.contains("(null)"), "the item names the downloads folder")
+        if let why = await S.choose(item, in: menu) {
+            S.expect(false, "chosen with the arrow keys: \(why)")
+            return
+        }
+        await SweepInput.pause(3)
+        let after = HostedDownloads.counts.text
+        S.expect(after != before, "the image was saved (\(before) → \(after))")
     }
 
     // MARK: Quit and come back

@@ -1,1 +1,4 @@
-[]
+[
+ {"unit": "^regress: a key equivalent that throws", "text": "PBSweepThrow|^notice:",
+  "why": "thrown on purpose: the regression check's own menu item, pressed while the page has the keyboard; the finding would be the process ending"}
+]

@@ -81,7 +81,7 @@ enum SweepInput {
 
     static let arrowKeys: Set<Int> = [kVK_LeftArrow, kVK_RightArrow, kVK_UpArrow, kVK_DownArrow]
     static let functionKeys: Set<Int> = [kVK_Home, kVK_End, kVK_PageUp, kVK_PageDown, kVK_ForwardDelete, kVK_F1, kVK_F2,
-                                         kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12, kVK_F19]
+                                         kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12, kVK_F13, kVK_F19]
 
     private static func modifierKeys(_ flags: CGEventFlags) -> [(Int, CGEventFlags)] {
         var keys: [(Int, CGEventFlags)] = []

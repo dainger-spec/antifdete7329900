@@ -12,13 +12,16 @@
 #                  selected, the profile in Russian with Yandex, behind a SOCKS5 proxy, dark appearance
 #   first-run      the app as a new tester first opens it (scripts/first_run_sweep.swift): the welcome,
 #                  the master password, the account's screens, the first profile
+#   safari-used    a Mac whose person uses the real Safari: it is launched, browses two sites (history,
+#                  caches, cookies, its container's data, a session to restore) and is quit before the
+#                  sweep; light appearance, the profile behind SOCKS5
 #   fresh-mac      a Mac whose Safari never ran (its folders, container, preferences and caches gone),
 #                  a 1280×800 screen, Increase Contrast, Reduce Transparency, Reduce Motion and larger
 #                  text, light appearance, and three other profiles running beside the swept one
 #
 # What a runner refuses (a protected container, a screen mode it does not have) is said, not failed.
 set -uo pipefail
-STATE="${1:?a state: default, russian or fresh-mac}"
+STATE="${1:?a state: default, russian, first-run, safari-used or fresh-mac}"
 OUT="${2:?an output folder}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 mkdir -p "$OUT"
@@ -50,6 +53,20 @@ case "$STATE" in
     appearance true
     echo "export PB_SWEEP_PROXY=socks PB_SWEEP_LANGUAGE=ru-RU PB_SWEEP_ENGINE=yandex"
     echo "export PB_SWEEP_INPUT_SOURCE=com.apple.keylayout.RussianWin PRIVACYBROWSER_LANG=ru"
+    ;;
+  safari-used)
+    # The real Safari opened as a person opens it (Launch Services, no Apple Events), two sites
+    # browsed, then quit: what it keeps in ~/Library/Safari and its container is there, as on the
+    # Macs of people who use Safari besides the app.
+    for site in "https://www.apple.com/" "https://en.wikipedia.org/wiki/Tea"; do
+      run open -a Safari "$site"
+      sleep 12
+    done
+    osascript -e 'quit app "Safari"' >> "$LOG" 2>&1 || pkill -x Safari
+    sleep 4
+    pgrep -x Safari >/dev/null && { say "Safari still running: killed"; pkill -x Safari; }
+    run ls -la "$HOME/Library/Safari" "$HOME/Library/Containers/com.apple.Safari/Data/Library/Safari"
+    echo "export PB_SWEEP_PROXY=socks"
     ;;
   fresh-mac)
     osascript -e 'quit app "Safari"' >/dev/null 2>&1

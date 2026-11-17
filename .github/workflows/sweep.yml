@@ -6,9 +6,11 @@ name: Sweep — a profile's Safari window with real input
 # quit and a relaunch — done with the window server's own key and mouse events (SafariSweep), on
 # the Mac states customers' Macs are in (scripts/sweep_state.sh): the runner as it is; a Russian Mac
 # with a Russian keyboard, dark, behind SOCKS5; a Mac whose Safari never ran, on a small screen,
-# with the accessibility display settings and other profiles running. Every exception the run loop
-# caught, every "unavailable" notice, every hang over two seconds and every crash is a finding
-# (scripts/sweep.py); an explained one is listed in scripts/sweep_explained.json with why.
+# with the accessibility display settings and other profiles running; a Mac whose person uses the
+# real Safari. Every exception the run loop caught, every one thrown in Safari's code and swallowed
+# elsewhere, every "unavailable" notice, every hang over two seconds and every crash is a finding
+# (scripts/sweep.py), with a picture of the screen; an explained one is listed in
+# scripts/sweep_explained.json with why.
 #
 # On request only (Actions › Sweep › Run workflow): macOS runners are shared. `images` and `groups`
 # narrow it: each group is one job, its states run one after another on one build.
@@ -19,10 +21,10 @@ on:
         description: 'Runner images, as JSON (macos-26: macOS 26; xcode-27: macOS 27)'
         default: '["macos-26","xcode-27"]'
       groups:
-        description: 'Groups of states, one job each, as JSON (default, russian, fresh-mac, first-run)'
-        default: '["first-run default","russian fresh-mac"]'
+        description: 'Groups of states, one job each, as JSON (default, russian, fresh-mac, first-run, safari-used)'
+        default: '["first-run default","russian fresh-mac","safari-used"]'
       phases:
-        description: 'Phases to run, comma-separated (address,tabs,page,context,library,window,keys,menu,quit); empty: all'
+        description: 'Phases to run, comma-separated (address,tabs,page,context,library,window,keys,menu,regress,quit); empty: all'
         default: ''
 
 jobs:
@@ -32,7 +34,7 @@ jobs:
       fail-fast: false
       matrix:
         image: ${{ fromJSON(inputs.images || '["macos-26","xcode-27"]') }}
-        group: ${{ fromJSON(inputs.groups || '["first-run default","russian fresh-mac"]') }}
+        group: ${{ fromJSON(inputs.groups || '["first-run default","russian fresh-mac","safari-used"]') }}
     runs-on: ${{ matrix.image }}
     timeout-minutes: 150
     steps:

@@ -14,8 +14,11 @@ Writes <out>/sweep.txt (everything the app printed), <out>/units.json, <out>/rep
 job's summary when $GITHUB_STEP_SUMMARY is set) and GitHub notices for every finding.
 
 A finding is a unit that crashed the process or was killed, an exception AppKit's run loop caught,
-a notice the window would have put up ("This Safari feature is unavailable in the profile"), the
-main thread stopped for more than two seconds, or a crash report. What a unit expected and did not
+an exception thrown in Safari's code that something else caught (a menu's tracking swallows the
+exception of an item chosen by a click: the item silently did nothing), a notice the window would
+have put up ("This Safari feature is unavailable in the profile"), the main thread stopped for more
+than two seconds, or a crash report. A unit with something wrong has a picture of the screen as it
+left it (`SWEEP-SHOT`: <out>/shot-<step>-<unit>.png). What a unit expected and did not
 see is listed too, as "not as expected". Exit 1 when there is a finding not explained in
 --explained (a JSON list of {"unit": regex, "text": regex, "why": "..."}), or the sweep did not get
 to its end; 0 otherwise. The environment's PB_SWEEP_* variables pass through to the app.
@@ -90,12 +93,23 @@ def run(command, environment, out, log):
     def sample(pid, index):
         stacks.setdefault(str(index), []).append(main_thread(pid, out, "profile"))
 
+    def picture(index, sub):
+        path = os.path.join(out, f"shot-{index}-{sub}.png")
+        try:
+            subprocess.run(["/usr/sbin/screencapture", "-x", "-t", "png", path], capture_output=True, timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+
     def read():
         for line in process.stdout:
             lines.append(line)
             last[0] = time.time()
             if line.startswith(("SWEEP-PROGRESS", "SWEEP-ERROR", "SWEEP-INFO", "SWEEP-HANG")):
                 print(line.rstrip()[:400], flush=True)
+            if line.startswith("SWEEP-SHOT "):
+                parts = line.split()
+                if len(parts) == 3 and len(glob.glob(os.path.join(out, "shot-*.png"))) < 80:
+                    picture(parts[1], parts[2])
             if line.startswith("SWEEP-HANG "):
                 parts = line.split()
                 if len(parts) >= 3 and parts[1].isdigit() and parts[3:4] != ["killed"] and len(stacks.get(parts[2], [])) < 2:
@@ -153,6 +167,9 @@ def exception_log(since, out):
     return path
 
 
+SAFARI_FRAME = re.compile(r"(^|/ )(Safari|SafariShared|SafariSharedUI|SafariCore|SafariFoundation|SafariPlatformSupport) ")
+
+
 def findings(unit):
     """What is wrong with a unit, one line each."""
     said = []
@@ -162,10 +179,23 @@ def findings(unit):
         said.append(f"the process ended (status {unit['exit']})")
     for text in unit.get("caught", []):
         said.append(f"caught by the run loop: {text}")
+    if not unit.get("caught") and "exit" not in unit:
+        # Thrown in Safari's code and caught by something other than the run loop: a menu's
+        # tracking, a table's delegate. What the person asked for then did nothing, and said nothing.
+        seen = set()
+        for text in unit.get("thrown", []):
+            head, _, frames = text.partition(" | ")
+            if SAFARI_FRAME.search(frames) and head not in seen:
+                seen.add(head)
+                said.append(f"thrown in Safari's code, caught elsewhere: {head[:300]}")
     for text in unit.get("notices", []):
         said.append(f"notice: {text}")
     for seconds in unit.get("hangs", []):
         said.append(f"the main thread stopped {seconds} s")
+    if unit.get("phase") == "regress":
+        # What was found and fixed must do what a person expects of it again.
+        for text in unit.get("failed", []):
+            said.append(f"not as expected: {text}")
     return said
 
 
@@ -267,6 +297,9 @@ def main():
     for unit in units:
         for text in unit.get("thrown", [])[:3]:
             report.append(f"- {unit.get('name', '?')}: {text[:500]}")
+    shots = sorted(glob.glob(os.path.join(args.out, "shot-*.png")))
+    if shots:
+        report += ["", f"Pictures of the screen where a unit went wrong: {len(shots)} (shot-<step>-<unit>.png in the artifact)."]
     if crashes:
         report += ["", "Crash reports:", ""]
         for name, summary in crashes:
