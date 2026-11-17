@@ -38,9 +38,9 @@ build_arch() {
   (cd openvpn-2.7.9 && make distclean >/dev/null 2>&1; ./configure --host=$host --with-crypto-library=mbedtls \
      --disable-plugins --disable-plugin-auth-pam --disable-plugin-down-root --disable-dco --disable-unit-tests \
      --disable-debug --enable-lzo --enable-lz4 \
-     CFLAGS="$CF" LDFLAGS="-arch $arch" \
-     MBEDTLS_CFLAGS="-I$P/include" MBEDTLS_LIBS="$P/lib/libmbedtls.a $P/lib/libmbedx509.a $P/lib/libmbedcrypto.a" \
-     LZO_CFLAGS="-I$P/include" LZO_LIBS="$P/lib/liblzo2.a" LZ4_CFLAGS="-I$P/include" LZ4_LIBS="$P/lib/liblz4.a" > "$OUT/configure-$arch.log" 2>&1 \
+     CFLAGS="$CF" LDFLAGS="-arch $arch -L$P/lib" \
+     MBEDTLS_CFLAGS="-I$P/include" MBEDTLS_LIBS="-lmbedtls -lmbedx509 -lmbedcrypto" \
+     LZO_CFLAGS="-I$P/include" LZO_LIBS="-llzo2" LZ4_CFLAGS="-I$P/include" LZ4_LIBS="-llz4" > "$OUT/configure-$arch.log" 2>&1 \
      && make -j $JOBS > "$OUT/make-$arch.log" 2>&1 && cp src/openvpn/openvpn "$W/openvpn-$arch") || { echo "openvpn $arch failed"; tail -40 "$OUT/configure-$arch.log"; tail -40 "$OUT/make-$arch.log"; return 1; }
 }
 build_arch arm64 aarch64-apple-darwin || exit 1
