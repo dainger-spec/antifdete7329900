@@ -122,12 +122,14 @@ enum AddressBarCommit {
         // back (an object or a BOOL). Called through raw pointers either way: nothing is retained or
         // released here, and what Safari's own method answers is handed back untouched.
         typealias Search = @convention(c) (UnsafeRawPointer?, Selector, UnsafeRawPointer?, Int, UnsafeRawPointer?) -> UnsafeRawPointer?
-        let selector = NSSelectorFromString("_searchWebForString:withWindowPolicy:punchoutDetails:")
-        guard let cls = NSClassFromString("BrowserWindowController"), let method = class_getInstanceMethod(cls, selector),
-              method_getNumberOfArguments(method) == 5 else {
-            log.notice("No -[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] in this Safari")
+        // Safari 27: `_searchWebForString:withWindowPolicy:punchoutDetails:`; Safari 26.6.2:
+        // `…:richSearchSuggestionEntityIDURLParameter:` (the probe's frames of a search's start).
+        guard let cls = NSClassFromString("BrowserWindowController"),
+              let method = searchMethod(of: cls) else {
+            log.notice("No -[BrowserWindowController _searchWebForString:withWindowPolicy:…] in this Safari")
             return
         }
+        let selector = method_getName(method)
         var encodings: [String] = []
         for index in 2..<5 {
             guard let raw = method_copyArgumentType(method, UInt32(index)) else { return }
@@ -140,7 +142,7 @@ enum AddressBarCommit {
         let answersBool = answer == "B" || answer == "c"
         guard ["v", "@", "B", "c"].contains(answer), encodings[0].hasSuffix("@"), "qQlLiI".contains(encodings[1].last ?? "?"),
               encodings[2].hasSuffix("@") else {
-            log.notice("-[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] is not as measured (\(answer, privacy: .public) \(encodings.joined(separator: " "), privacy: .public)): Safari's search is left as it is")
+            log.notice("-[BrowserWindowController _searchWebForString:withWindowPolicy:…] is not as measured (\(answer, privacy: .public) \(encodings.joined(separator: " "), privacy: .public)): Safari's search is left as it is")
             return
         }
         let original = unsafeBitCast(method_getImplementation(method), to: Search.self)
@@ -157,6 +159,20 @@ enum AddressBarCommit {
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
         log.notice("Safari's search from the address bar is held to the profile's engine (answers \(answer, privacy: .public))")
+    }
+
+    /// `-[BrowserWindowController _searchWebForString:withWindowPolicy:<third>:]`, whatever this
+    /// Safari calls its third argument.
+    private static func searchMethod(of cls: AnyClass) -> Method? {
+        var count: UInt32 = 0
+        guard let methods = class_copyMethodList(cls, &count) else { return nil }
+        defer { free(methods) }
+        for index in 0..<Int(count) {
+            let method = methods[index]
+            let name = NSStringFromSelector(method_getName(method))
+            if name.hasPrefix("_searchWebForString:withWindowPolicy:"), method_getNumberOfArguments(method) == 5 { return method }
+        }
+        return nil
     }
 
     /// The profile's engine's results for `text` in the front tab of `controller`'s window, when
