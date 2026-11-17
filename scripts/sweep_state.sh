@@ -39,8 +39,11 @@ run defaults delete io.lumenbrowser.Lumen
 run rm -rf "$HOME/Library/Application Support/Lumen" "$HOME/Library/Application Support/io.lumenbrowser.Lumen" \
   "$HOME/Library/Caches/io.lumenbrowser.Lumen" "$HOME/Library/Saved Application State/io.lumenbrowser.Lumen.savedState"
 # Back to the runner's own language, region and appearance (an earlier state of the same job set them).
-run defaults delete -g AppleLanguages
-run defaults delete -g AppleLocale
+# Written, not deleted: a delete of the key the Russian state wrote failed (exit 1) and the next
+# state ran in Russian (CI run 43999545658).
+run defaults write -g AppleLanguages -array en-US
+run defaults write -g AppleLocale en_US
+run killall -u "$USER" cfprefsd
 appearance false
 
 case "$STATE" in
@@ -88,6 +91,7 @@ case "$STATE" in
     # Larger text: the system's text size for apps that follow it, and the menu bar's.
     run defaults write -g AppleFontSize -int 15
     run defaults write com.apple.universalaccess FontSizeCategory -string "UICTContentSizeCategoryXL"
+    # A runner's screen is 1024×768 already (smaller than this): what its display offers is kept.
     run swift "$HERE/sweep_display.swift" 1280 800
     echo "export PB_SWEEP_PROXY=http PB_SWEEP_PROFILES=3"
     ;;
