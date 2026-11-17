@@ -37,16 +37,43 @@ struct LaunchRoot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var curtain = true
     @State private var lifting = false
+    /// The start screen was passed once — signed in, or on without an account — and does not come back.
+    @AppStorage("welcome.passed") private var welcomePassed = false
+    /// Passed in this run (with the fault, the passing is not kept: the start screen comes back).
+    @State private var showList = false
+
+    /// The start screen: on the first launch, while nobody is signed in. Tests begin on the session
+    /// list unless they ask for it (LUMEN_TEST_WELCOME=1).
+    private var welcome: Bool {
+        guard model.account == nil, !welcomePassed else { return false }
+        #if DEBUG
+        if TestHooks.enabled { return ProcessInfo.processInfo.environment["LUMEN_TEST_WELCOME"] == "1" }
+        #endif
+        return true
+    }
 
     var body: some View {
         ZStack {
-            if model.ready { SessionsView() }
+            if model.ready {
+                if welcome && !showList {
+                    WelcomeView {
+                        withAnimation(.easeInOut(duration: 0.4)) {
+                            if !Faults.isActive(.welcomeForgetsGuest) { welcomePassed = true }
+                            showList = true
+                        }
+                    }
+                    .transition(.opacity)
+                    .zIndex(1)
+                }
+                if !welcome || showList { SessionsView() }
+            }
             if curtain {
                 // The whole screen, not the safe area: iOS centres the launch image on the screen.
                 ZStack {
                     Color("LaunchBackground")
+                    // Over the start screen the mark stays as it is: the start screen's own takes it up.
                     Image("LaunchLogo")
-                        .scaleEffect(lifting && !reduceMotion ? 1.18 : 1)
+                        .scaleEffect(lifting && !reduceMotion && !welcome ? 1.18 : 1)
                 }
                 .ignoresSafeArea()
                 .opacity(lifting ? 0 : 1)

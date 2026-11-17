@@ -86,6 +86,7 @@ final class AppModel: ObservableObject {
             store.removeAll()
             ProxyPasswords.removeAll()
             AccountStore.save(nil)   // the iPhone's own identifier stays, as it does through a reinstall
+            UserDefaults.standard.removeObject(forKey: "welcome.passed")   // the first launch again
         }
         #if DEBUG
         if AppStoreSeed.active { AppStoreSeed.write(to: store) }   // the App Store's screenshots

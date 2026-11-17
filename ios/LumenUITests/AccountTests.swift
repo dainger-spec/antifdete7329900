@@ -9,14 +9,55 @@ final class AccountTests: LumenUITestCase {
 
     /// The app as a release build starts — nothing fixed, the account decides — with the stand-in
     /// for its server, the stand-in's key for its documents, and the testbed for its site.
-    func launchWithAccount(reset: Bool = true, run: String) {
+    func launchWithAccount(reset: Bool = true, run: String, extra: [String: String] = [:]) {
         launch(reset: reset, access: "account", environment: [
             "LUMEN_TEST_ACCOUNT_SERVER": "http://account.lumentest:28395",
             "LUMEN_TEST_ENTITLEMENT_KEYS": "cbbc653cdb8bd787:dNOl9JtGQJg6VOEIn3+1dscg5hWYkx9XUqm+qJ5CnZc=",
             "LUMEN_TEST_SITE_URL": "http://127.0.0.1:28380/site-\(run)",
             // The sync's key kept without Face ID: a simulator has no passcode and no face.
             "LUMEN_TEST_SYNC_NO_PRESENCE": "1",
-        ])
+        ].merging(extra) { _, new in new })
+    }
+
+    /// The start screen (the owner, 17 November): on the first launch without an account. On without
+    /// signing in: the session list, and the start screen does not come back. Signed in from it — with
+    /// the password, and with the code from the email when the server asks — the plan's rights.
+    func testTheStartScreen() {
+        let run = String(UUID().uuidString.prefix(6)).lowercased()
+        let welcome = ["LUMEN_TEST_WELCOME": "1"]
+        launchWithAccount(run: run, extra: welcome)
+        let guest = wait(app.buttons["continueWithoutAccount"], "the first launch opens on the start screen", timeout: 20)
+        sleep(2)   // the mark's way up and the words after it
+        shot("82 the start screen")
+        guest.tap()
+        wait(app.navigationBars["Сессии"], "on without an account: the session list")
+        app.terminate()
+        launchWithAccount(reset: false, run: run, extra: welcome)
+        XCTAssertFalse(app.buttons["continueWithoutAccount"].waitForExistence(timeout: 8), "the start screen does not come back once passed")
+        wait(app.navigationBars["Сессии"], "the next launch: the session list")
+
+        // Signed in from the start screen: its own form, then the session list and the plan.
+        launchWithAccount(run: run, extra: welcome)
+        typeInto(wait(app.textFields["signInEmail"], "the start screen takes the address", timeout: 20), "pro-\(run)@lumen.test")
+        let secret = app.secureTextFields["signInPassword"]
+        typeInto(secret, password)
+        if !app.buttons["submitSignIn"].isEnabled || ((secret.value as? String) ?? "").isEmpty { typeInto(secret, password) }
+        reveal(app.buttons["submitSignIn"], "the start screen's button").tap()
+        wait(app.navigationBars["Сессии"], "signed in from the start screen: the session list", timeout: 40)
+        openPlan()
+        wait(app.staticTexts["accountEmail"], "signed in from the start screen", timeout: 30)
+        closePlan()
+
+        // The code from the email on the start screen itself.
+        launchWithAccount(run: run, extra: welcome)
+        typeInto(wait(app.textFields["signInEmail"], "the start screen again", timeout: 20), "code-\(run)@lumen.test")
+        typeInto(app.secureTextFields["signInPassword"], password)
+        reveal(app.buttons["submitSignIn"], "the start screen's button").tap()
+        let code = wait(app.textFields["signInCode"], "the start screen asks for the code from the email", timeout: 30)
+        typeInto(code, "424242")
+        shot("83 the start screen asks for the code")
+        reveal(app.buttons["submitCode"], "the code's button").tap()
+        wait(app.navigationBars["Сессии"], "signed in with the code: the session list", timeout: 40)
     }
 
     func openPlan() {

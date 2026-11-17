@@ -382,6 +382,33 @@ struct OptionalIdentifier: ViewModifier {
 // MARK: The mark
 
 /// Lumen's mark — only on the icon and the launch screen: two halves of a disc, slid apart along a slanted cut.
+/// One half of the mark — the upper right or the lower left of the split disc — for the start screen,
+/// which moves them apart along the split and lets the light through it.
+struct LumenMarkHalf: Shape {
+    let upper: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let scale = min(rect.width, rect.height) / 32
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.midX + (x - 16) * scale, y: rect.midY + (y - 16) * scale)
+        }
+        var path = Path()
+        if upper {
+            path.move(to: point(14.435, 23.858))
+            path.addLine(to: point(20.728, 4.98))
+            path.addCurve(to: point(26.119, 17.265), control1: point(25.413, 7.083), control2: point(27.743, 12.393))
+            path.addCurve(to: point(14.435, 23.858), control1: point(24.495, 22.137), control2: point(19.445, 24.987))
+        } else {
+            path.move(to: point(11.272, 27.02))
+            path.addLine(to: point(17.565, 8.142))
+            path.addCurve(to: point(5.881, 14.735), control1: point(12.555, 7.013), control2: point(7.505, 9.863))
+            path.addCurve(to: point(11.272, 27.02), control1: point(4.257, 19.607), control2: point(6.587, 24.917))
+        }
+        path.closeSubpath()
+        return path
+    }
+}
+
 struct LumenMark: Shape {
     func path(in rect: CGRect) -> Path {
         let scale = min(rect.width, rect.height) / 32

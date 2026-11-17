@@ -417,6 +417,16 @@
         }
       }
     },
+    "Войдите, чтобы продолжить": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Sign in to continue"
+          }
+        }
+      }
+    },
     "Войти": {
       "localizations": {
         "en": {
@@ -1723,6 +1733,16 @@
           "stringUnit": {
             "state": "translated",
             "value": "Checking…"
+          }
+        }
+      }
+    },
+    "Продолжить без входа": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Continue Without Signing In"
           }
         }
       }

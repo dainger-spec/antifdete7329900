@@ -10,36 +10,26 @@ struct SignInView: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
-    @State private var email = ""
-    @State private var password = ""
-    @State private var showPassword = false
-    @State private var code = ""
-    /// The code step: the server's handle of this sign-in attempt.
-    @State private var challenge: String?
-    @State private var message: String?
-    @State private var busy = false
-    @State private var robotCheck = false
-    /// When the code may be sent again (a minute after the last one).
-    @State private var resendAt = Date.distantPast
+    @StateObject private var flow = SignInFlow()
 
     var body: some View {
         NavigationStack {
             Form {
-                if challenge == nil { passwordStep } else { codeStep }
+                if flow.challenge == nil { passwordStep } else { codeStep }
             }
-            .navigationTitle(challenge == nil ? L("Вход") : L("Код из письма"))
+            .navigationTitle(flow.challenge == nil ? L("Вход") : L("Код из письма"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(L("Отмена")) { close() }.accessibilityIdentifier("cancelSignIn") }
-                if busy { ToolbarItem(placement: .confirmationAction) { ProgressView().accessibilityIdentifier("signInBusy") } }
+                if flow.busy { ToolbarItem(placement: .confirmationAction) { ProgressView().accessibilityIdentifier("signInBusy") } }
             }
-            .sheet(isPresented: $robotCheck) {
+            .sheet(isPresented: $flow.robotCheck) {
                 RobotCheckSheet(url: Self.robotCheckURL) { token in
-                    robotCheck = false
+                    flow.robotCheck = false
                     guard let token else { return }
                     // Once the check's window has closed: this form may close next (signed in), and a
                     // window is not closed while the one above it is still closing.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { submit(robotToken: token) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { flow.submit(model, robotToken: token, signedIn: close) }
                 }
             }
         }
@@ -49,36 +39,36 @@ struct SignInView: View {
     /// The account's address and password (p11-login); a failure in one red line under the fields.
     @ViewBuilder private var passwordStep: some View {
         Section {
-            TextField(L("Почта"), text: $email)
+            TextField(L("Почта"), text: $flow.email)
                 .keyboardType(.emailAddress).textInputAutocapitalization(.never).autocorrectionDisabled()
                 .textContentType(.username)
                 .accessibilityIdentifier("signInEmail")
             HStack {
                 Group {
-                    if showPassword {
-                        TextField(L("Пароль"), text: $password).accessibilityIdentifier("signInPasswordShown")
+                    if flow.showPassword {
+                        TextField(L("Пароль"), text: $flow.password).accessibilityIdentifier("signInPasswordShown")
                     } else {
-                        SecureField(L("Пароль"), text: $password).accessibilityIdentifier("signInPassword")
+                        SecureField(L("Пароль"), text: $flow.password).accessibilityIdentifier("signInPassword")
                     }
                 }
                 .textInputAutocapitalization(.never).autocorrectionDisabled()
-                Button { showPassword.toggle() } label: {
-                    Image(systemName: showPassword ? "eye" : "eye.slash").foregroundStyle(.secondary)
+                Button { flow.showPassword.toggle() } label: {
+                    Image(systemName: flow.showPassword ? "eye" : "eye.slash").foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
-                .accessibilityLabel(showPassword ? L("Скрыть пароль") : L("Показать пароль"))
+                .accessibilityLabel(flow.showPassword ? L("Скрыть пароль") : L("Показать пароль"))
             }
         } header: {
             Text(L("Аккаунт Lumen"))
         } footer: {
-            if let message { failure(message) }
+            if let message = flow.message { failure(message) }
         }
         Section {
-            Button(L("Войти")) { submit(robotToken: nil) }
+            Button(L("Войти")) { flow.submit(model, signedIn: close) }
                 .fontWeight(.semibold)
-                .disabled(busy || email.trimmingCharacters(in: .whitespaces).isEmpty || password.isEmpty)
+                .disabled(!flow.canSubmit)
                 .accessibilityIdentifier("submitSignIn")
-            Button(L("Забыли пароль?")) { openURL(AccountClient.site.appendingPathComponent("reset-password")) }
+            Button(L("Забыли пароль?")) { openURL(Self.resetURL) }
                 .accessibilityIdentifier("forgotPassword")
         } footer: {
             Text(L("Пароль восстанавливается на сайте %@.", AccountClient.site.host() ?? "lumenbrowser.io"))
@@ -88,37 +78,23 @@ struct SignInView: View {
     /// The code from the letter (p11-code): sent again after a minute, the password step one touch away.
     @ViewBuilder private var codeStep: some View {
         Section {
-            TextField(L("Код из письма"), text: $code)
+            TextField(L("Код из письма"), text: $flow.code)
                 .keyboardType(.numberPad).textContentType(.oneTimeCode).monospacedDigit()
                 .accessibilityIdentifier("signInCode")
         } header: {
             Text(AccountText.checkEmail).textCase(nil)
         } footer: {
-            if let message { failure(message) }
+            if let message = flow.message { failure(message) }
         }
         Section {
-            Button(L("Подтвердить")) { confirm() }
+            Button(L("Подтвердить")) { flow.confirm(model, signedIn: close) }
                 .fontWeight(.semibold)
-                .disabled(busy || code.trimmingCharacters(in: .whitespaces).isEmpty)
+                .disabled(!flow.canConfirm)
                 .accessibilityIdentifier("submitCode")
         }
         Section {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
-                let left = max(0, Int(resendAt.timeIntervalSince(context.date).rounded(.up)))
-                Button { resend() } label: {
-                    HStack(spacing: 4) {
-                        Text(L("Отправить код ещё раз"))
-                        if left > 0 { Text(String(format: "%d:%02d", left / 60, left % 60)).foregroundStyle(.secondary).monospacedDigit() }
-                    }
-                }
-                .disabled(busy || left > 0)
-                .accessibilityIdentifier("resendCode")
-            }
-            Button(L("Ввести пароль заново")) {
-                challenge = nil
-                code = ""
-                message = nil
-            }
+            ResendCodeButton(flow: flow) { flow.resend(model) }
+            Button(L("Ввести пароль заново")) { flow.backToPassword() }
         }
     }
 
@@ -134,59 +110,33 @@ struct SignInView: View {
         return parts?.url ?? AccountClient.site
     }
 
-    private func submit(robotToken: String?) {
-        busy = true
-        message = nil
-        Task {
-            let outcome = await model.signIn(email: email, password: password, robotToken: robotToken)
-            busy = false
-            finish(outcome)
-        }
-    }
+    /// The site's page for a forgotten password.
+    static var resetURL: URL { AccountClient.site.appendingPathComponent("reset-password") }
 
-    private func confirm() {
-        busy = true
-        message = nil
-        Task {
-            let outcome = await model.confirmSignIn(email: email, code: code, challenge: challenge)
-            busy = false
-            finish(outcome)
-        }
-    }
-
-    private func resend() {
-        guard let challenge else { return }
-        busy = true
-        resendAt = Date().addingTimeInterval(60)
-        Task {
-            message = await model.resendCode(challenge: challenge)
-            busy = false
-        }
-    }
-
-    private func finish(_ outcome: AppModel.SignInOutcome) {
-        switch outcome {
-        case .signedIn:
-            close()
-        case let .needsCode(challenge):
-            self.challenge = challenge
-            resendAt = Date().addingTimeInterval(60)
-        case .needsRobotCheck:
-            message = AccountText.robotCheck
-            robotCheck = true
-        case let .failed(text):
-            message = text
-        }
-    }
-
-    /// Closes with the fields emptied first: iOS takes a form that leaves the screen with a login and
-    /// a password in it for one to keep in the person's Passwords, and offers so over the app (the
-    /// proxy form, CI runs 12 and 13). Lumen's password is kept nowhere on the iPhone.
+    /// Closes with the fields emptied first (SignInFlow.clear).
     private func close() {
-        email = ""
-        password = ""
-        code = ""
+        flow.clear()
         DispatchQueue.main.async { dismiss() }
+    }
+}
+
+/// "Send the code again", with the seconds left until it may be.
+struct ResendCodeButton: View {
+    @ObservedObject var flow: SignInFlow
+    let resend: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = max(0, Int(flow.resendAt.timeIntervalSince(context.date).rounded(.up)))
+            Button(action: resend) {
+                HStack(spacing: 4) {
+                    Text(L("Отправить код ещё раз"))
+                    if left > 0 { Text(String(format: "%d:%02d", left / 60, left % 60)).foregroundStyle(.secondary).monospacedDigit() }
+                }
+            }
+            .disabled(flow.busy || left > 0)
+            .accessibilityIdentifier("resendCode")
+        }
     }
 }
 
