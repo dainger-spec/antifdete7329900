@@ -42,7 +42,7 @@ ARCHS="${ARCHS:-$(uname -m)}"
 MINIMUM_MACOS=14.0
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-STAMP="openvpn $OPENVPN_VERSION $OPENVPN_SHA256 mbedtls $MBEDTLS_VERSION make lzo $LZO_VERSION lz4 $LZ4_VERSION archs $ARCHS macos $MINIMUM_MACOS"
+STAMP="openvpn $OPENVPN_VERSION $OPENVPN_SHA256 nogit mbedtls $MBEDTLS_VERSION make lzo $LZO_VERSION lz4 $LZ4_VERSION archs $ARCHS macos $MINIMUM_MACOS"
 if [[ -x "$OUT/openvpn" && -f "$OUT/STAMP" && "$(cat "$OUT/STAMP")" == "$STAMP" ]]; then
   echo "OpenVPN: reusing $OUT/openvpn ($STAMP)"
   exit 0
@@ -114,8 +114,11 @@ build_arch() {
   cp "$dir/lz4-$LZ4_VERSION/lib/"{lz4.h,lz4hc.h,lz4frame.h} "$prefix/include/"
   cp "$dir/lz4-$LZ4_VERSION/lib/liblz4.a" "$prefix/lib/"
   echo "OpenVPN: OpenVPN $OPENVPN_VERSION ($arch)"
+  # OpenVPN's configure writes the git checkout its source is in into its version (`git -C <source>
+  # rev-parse`). Its source here is a tarball unpacked inside Lumen's own checkout, whose branch and
+  # commit it took for its own ("OpenVPN 2.7.9 [git:main/…]"): it is given no git (GIT=false).
   # Only static libraries in the prefix: what -l finds there is linked in.
-  (cd "$dir/openvpn-$OPENVPN_VERSION" && ./configure --host="$host" --with-crypto-library=mbedtls CC=clang \
+  (cd "$dir/openvpn-$OPENVPN_VERSION" && ./configure --host="$host" --with-crypto-library=mbedtls CC=clang GIT=false \
     --disable-plugins --disable-plugin-auth-pam --disable-plugin-down-root --disable-dco --disable-unit-tests \
     --disable-port-share --disable-ntlm --enable-lzo --enable-lz4 \
     CFLAGS="$flags" LDFLAGS="-arch $arch -L$prefix/lib" \
@@ -145,6 +148,11 @@ if otool -L "$WORK/openvpn" | tail -n +2 | grep -v -E '^\s+/usr/lib/|^\s+/System
 fi
 # `openvpn --version` ends with status 1 by design: its words are what is checked.
 [[ "$("$WORK/openvpn" --version 2>&1 || true)" == "OpenVPN $OPENVPN_VERSION "* ]] || { echo "error: the openvpn built does not run" >&2; exit 1; }
+# Its version names no git checkout: the tarball's source, as SOURCES.txt says.
+version_line="$("$WORK/openvpn" --version 2>&1 || true)"
+version_line="${version_line%%$'\n'*}"
+[[ "$version_line" != *"[git:"* ]] || { echo "error: the openvpn built names a git checkout in its version: $version_line" >&2; exit 1; }
+echo "$version_line"
 
 # What must ship with it: each license, and where its source is.
 first="$WORK/${ARCHS%% *}"
