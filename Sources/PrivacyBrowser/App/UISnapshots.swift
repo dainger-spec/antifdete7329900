@@ -1112,6 +1112,38 @@ enum UISnapshots {
                 MachineCoverView(model: model, still: shot.still)
             }.capture(into: folder)
         }
+        // The machine's window as the helper draws it: Lumen's bar over the screen (the cover here,
+        // as at a start) — a machine through a proxy, its answer time and UDP; and one without a
+        // proxy whose network does not work. The window's own buttons are drawn where they are.
+        let proxied = VMProfile(name: "Vienna", proxy: ProxySettings(kind: .socks5, host: "at.proxy.example", port: 1080), // l10n: not text
+                                timeZoneIdentifier: "Europe/Vienna", countryCode: "AT")
+        let exit = sampleWorks(.socks5, "203.0.113.30", "AT", "Europe/Vienna", "Vienna", [42]) // l10n: not text
+        let windows: [(name: String, bar: VMHelperRequest.WindowBar, ping: Int?, trouble: String?)] = [
+            ("vm-window-bar", VMCenter.windowBar(for: proxied, exit: exit, udp: .throughProxy), 42, nil),
+            ("vm-window-bar-direct", VMCenter.windowBar(for: VMProfile(name: "Vienna", proxy: nil), exit: nil, udp: .direct), nil, // l10n: not text
+             L("vm.window.trouble")),
+        ]
+        for window in windows {
+            let bar = MachineTitleBarModel(name: "Vienna", bar: window.bar, texts: VMCenter.helperTexts) // l10n: not text
+            bar.latency = window.ping
+            bar.bytesUp = 48_300_000
+            bar.bytesDown = 912_000_000
+            bar.trouble = window.trouble
+            let cover = MachineCoverModel(name: "Vienna", texts: texts, stage: .look) // l10n: not text
+            problems += await Shot(name: window.name, size: CGSize(width: 1280, height: 860), titled: false) {
+                VStack(spacing: 0) {
+                    MachineTitleBar(model: bar)
+                        .frame(height: 28)
+                        .overlay(alignment: .leading) {
+                            HStack(spacing: 8) {
+                                ForEach(0..<3, id: \.self) { _ in Circle().fill(Color.white.opacity(0.22)).frame(width: 12, height: 12) }
+                            }
+                            .padding(.leading, 12)
+                        }
+                    MachineCoverView(model: cover, still: 3.0)
+                }
+            }.capture(into: folder)
+        }
         return problems
     }
 

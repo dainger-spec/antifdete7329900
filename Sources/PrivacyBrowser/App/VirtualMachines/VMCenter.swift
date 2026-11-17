@@ -1019,6 +1019,7 @@ final class VMCenter: ObservableObject {
                                               udp: udp)
             // The app's own "animations off": the start's cover moves nothing, as under Reduce Motion.
             if !AppearancePreferences.animationsEnabled { request.reducesMotion = true }
+            request.windowBar = Self.windowBar(for: profile, exit: exits[id], udp: udp)
             try helper.start(request)
             helpers[id] = helper
             var updated = list
@@ -1321,13 +1322,34 @@ final class VMCenter: ObservableObject {
         }
     }
 
+    /// What the bar at the top of the machine's window says (`MachineTitleBar`): the exit's flag and
+    /// country, the proxy as the person knows it (a link by its kind and server, never its secret),
+    /// the exit's address, whether UDP goes through in this run; and the proxy — or the link's
+    /// server — to time the answer of. Nothing to time without a proxy.
+    static func windowBar(for profile: VMProfile, exit: ProxyCheckResult?, udp: VMUDPRoute?) -> VMHelperRequest.WindowBar {
+        let code = (exit?.countryCode ?? profile.countryCode)?.uppercased()
+        let showsCountry = profile.proxy != nil || profile.localeFollowsConnection
+        let country = showsCountry ? code.map { CountryNames.name(for: $0) } : nil
+        var route = L("vm.bar.direct")
+        if let proxy = profile.proxy {
+            let host = proxy.host.contains(":") ? "[\(proxy.host)]" : proxy.host
+            route = proxy.kind == .xray ? (proxy.shareLink?.scheme.displayName ?? "Xray") + " " + host : host // l10n: not text
+        }
+        return VMHelperRequest.WindowBar(countryCode: showsCountry ? code : nil, country: country, route: route,
+                                         exitIP: profile.proxy == nil ? nil : exit?.exitIP,
+                                         udp: udp.map(\.carriesUDP), udpText: udp.map { L("vm.row.udp.\($0.rawValue)") },
+                                         pingHost: profile.proxy?.host, pingPort: profile.proxy?.port)
+    }
+
     /// The helper's few words, in the person's language (it has no strings of its own).
     static var helperTexts: [String: String] {
         ["stop": L("vm.window.stop"), "stopQuestion": L("vm.window.stopQuestion"), "stopDetail": L("vm.window.stopDetail"),
          "stopNow": L("vm.window.stopNow"), "cancel": L("common.cancel"), "stopping": L("vm.window.stopping"),
          "sleep": L("vm.window.sleep"), "sleeping": L("vm.window.sleeping"),
          "guestFullScreen": L("vm.window.guestFullScreen"), "nextStartQuestion": L("vm.window.nextStartQuestion"),
-         "nextStartDetail": L("vm.window.nextStartDetail"), "keep": L("vm.window.keep")]
+         "nextStartDetail": L("vm.window.nextStartDetail"), "keep": L("vm.window.keep"),
+         "bar.ping": L("vm.bar.ping"), "bar.ping.none": L("vm.bar.ping.none"), "bar.ping.help": L("vm.bar.ping.help"),
+         "bar.traffic.help": L("vm.row.traffic.help"), "bar.locale": Localization.locale.identifier]
             .merging(VMNetworkTrouble.allCases.map { ("trouble." + $0.rawValue, L("vm.window.trouble")) }) { first, _ in first }
             .merging(coverTexts) { first, _ in first }
     }
