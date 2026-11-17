@@ -286,7 +286,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         let policy = webRTCLaunchPolicy
         if policy == .disabled { return proxy == nil || webRTCSilent ? .silent : .off }
         guard let proxy else { return .native(policy) }
-        if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
+        if proxy.carriesUDP, let webRTCRelay { return .relay(webRTCRelay) }
         return webRTCSilent ? .silent : .off
     }
 
@@ -400,8 +400,14 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
              syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
              localRequests, languageOverride, localeSource, menusInAppLanguage,
-             cameraSubstitution
+             cameraSubstitution, format
     }
+
+    /// The format `config.bin` is written in (docs/UPDATES.md §4): 2 while the proxy is a share
+    /// link's (`ProxySettings.Kind.xray`) — a version from before links cannot read that proxy, and
+    /// refuses the whole file as a newer version's rather than take it for damaged or start the
+    /// profile without it; 1 otherwise, written as before (no key).
+    public var format: Int { proxy?.kind == .xray ? 2 : 1 }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
     /// configurations written by older builds keep decrypting and decoding.
@@ -460,6 +466,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and not confused with "field absent" (→ default) when decoding.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        if format > 1 { try c.encode(format, forKey: .format) }
         try c.encodeIfPresent(startURL, forKey: .startURL)
         try c.encodeIfPresent(userAgent, forKey: .userAgent)
         try c.encodeIfPresent(proxy, forKey: .proxy)
@@ -539,6 +546,11 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         /// HTTP CONNECT tunnel. Used for both http:// and https:// traffic.
         case httpConnect
         case socks5
+        /// A VLESS, VMess, Trojan or Shadowsocks server, named by its share link (`link`). No page
+        /// talks to it: the app runs a relay for the profile (Xray), and the profile goes through
+        /// that relay as through a SOCKS5 proxy on 127.0.0.1 (`ProxyRoutes`, docs/TUNNEL.md, "Links").
+        /// `host` and `port` are the link's server, for showing and comparing.
+        case xray
     }
 
     public var kind: Kind
@@ -550,9 +562,13 @@ public struct ProxySettings: Codable, Equatable, Sendable {
     public var tlsToProxy: Bool
     /// Domains that bypass the proxy. Empty by default: everything goes via the proxy.
     public var excludedDomains: [String]
+    /// `.xray` only: the share link as it was pasted (`ShareLink`). It holds the server's secret — a
+    /// user id or a password — so it is kept as `password` is: in the encrypted settings and proxy
+    /// list, never logged, and given to the relay alone.
+    public var link: String?
 
     public init(kind: Kind, host: String, port: Int, username: String? = nil, password: String? = nil,
-                tlsToProxy: Bool = false, excludedDomains: [String] = []) {
+                tlsToProxy: Bool = false, excludedDomains: [String] = [], link: String? = nil) {
         self.kind = kind
         self.host = host
         self.port = port
@@ -560,6 +576,32 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         self.password = password
         self.tlsToProxy = tlsToProxy
         self.excludedDomains = excludedDomains
+        self.link = link
+    }
+
+    /// The proxy a share link names: its server as `host` and `port`, the link itself kept whole.
+    public init(shareLink text: String, excludedDomains: [String] = []) throws {
+        let parsed = try ShareLink.parse(text)
+        self.init(kind: .xray, host: parsed.host, port: parsed.port, excludedDomains: excludedDomains,
+                  link: ShareLink.trimmed(text))
+    }
+
+    /// `.xray`: the link, read. Nil for the other kinds, and for a link that does not read.
+    public var shareLink: ShareLink? {
+        guard kind == .xray, let link else { return nil }
+        return try? ShareLink.parse(link)
+    }
+
+    /// A proxy that can carry UDP (SOCKS5's UDP ASSOCIATE): a SOCKS5 proxy, and a share link's, whose
+    /// relay is one (`XrayConfig`). The launch still asks whether it does (`ProxyUDPCheck`).
+    public var carriesUDP: Bool { kind == .socks5 || kind == .xray }
+
+    /// What may be shown and logged of the proxy: "VLESS host:port" for a link — never its secret —
+    /// and "host:port" for the others.
+    public var redactedAddress: String {
+        let address = (host.contains(":") ? "[\(host)]" : host) + ":\(port)"
+        guard kind == .xray else { return address }
+        return (shareLink?.scheme.displayName ?? "Xray") + " " + address
     }
 
     public func validate() throws {
@@ -574,6 +616,20 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         }
         if (username == nil) != (password == nil) {
             throw CoreError.invalidConfiguration("proxy username and password must both be set or both empty")
+        }
+        guard kind == .xray else {
+            if link != nil { throw CoreError.invalidConfiguration("only a VLESS, VMess, Trojan or Shadowsocks proxy has a link") }
+            return
+        }
+        // The link is the proxy: what it names is what the relay connects to, and host and port only
+        // show it. A link that does not read, or names another server, is never half used.
+        guard let link else { throw CoreError.invalidConfiguration("a VLESS, VMess, Trojan or Shadowsocks proxy needs its link") }
+        let parsed = try ShareLink.parse(link)
+        guard parsed.host.lowercased() == host.lowercased(), parsed.port == port else {
+            throw CoreError.invalidConfiguration("the proxy's server is not the one its link names")
+        }
+        guard username == nil, password == nil, !tlsToProxy else {
+            throw CoreError.invalidConfiguration("a link's proxy has its credentials in the link")
         }
     }
 }

@@ -412,11 +412,11 @@ final class ProxyListTests: XCTestCase {
         XCTAssertEqual(list.entries.first?.label, "kept")
         XCTAssertNil(list.entries.first?.lastCheck)
 
-        try SecureFile.write(AEAD.seal(Data(#"{"format": 4, "entries": []}"#.utf8), key: ProxyList.file(for: vault).key,
+        try SecureFile.write(AEAD.seal(Data(#"{"format": 5, "entries": []}"#.utf8), key: ProxyList.file(for: vault).key,
                                        aad: "proxy-list:v1:\(vault.vaultID.uuidString)"),
                              to: root.appendingPathComponent("proxies.bin"))
         XCTAssertThrowsError(try ProxyList.load(from: vault)) { error in
-            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 4, supported: 3))
+            XCTAssertEqual(error as? CoreError, .newerFormat(what: "proxies.bin", found: 5, supported: 4))
         }
     }
 

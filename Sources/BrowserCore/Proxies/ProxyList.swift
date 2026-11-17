@@ -252,7 +252,12 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// type; a new password is the same proxy). Another user name is another proxy: gateway
     /// providers pick the exit — the country, the session — from it.
     public static func identity(of proxy: ProxySettings) -> String {
-        [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
+        // A share link's server is its account on it: the protocol, the server and the user's id or
+        // password (another id on the same server is another proxy, as another user name is).
+        if proxy.kind == .xray {
+            return "xray\u{0}" + (proxy.shareLink?.identity ?? proxy.link ?? "")
+        }
+        return [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
     }
 
     /// `entries` by what makes each one's proxy the proxy it is (`identity(of:)`): for every
@@ -334,7 +339,8 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var result = result
         let before = entries[index].proxy
         let kinds = result.diagnosis?.kinds ?? []
-        if let found = kinds.first, !entries[index].kindKnown || !kinds.contains(before.kind) {
+        // A link's proxy is checked through its relay, which answers as SOCKS5: that is not its type.
+        if let found = kinds.first, before.kind != .xray, !entries[index].kindKnown || !kinds.contains(before.kind) {
             result.kindFinding = entries[index].kindKnown ? .corrected(from: before.kind) : .found
             entries[index].proxy.kind = found
             if found == .socks5 { entries[index].proxy.tlsToProxy = false }
@@ -424,7 +430,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// changed in the profile's editor — and the one never overwrites the other.
     public static func sameConnection(_ a: ProxySettings, _ b: ProxySettings) -> Bool {
         identity(of: a) == identity(of: b) && a.kind == b.kind && a.tlsToProxy == b.tlsToProxy
-            && (a.password ?? "") == (b.password ?? "")
+            && (a.password ?? "") == (b.password ?? "") && a.link == b.link
     }
 
     /// The entries as text, one per line, in the form the import reads back
@@ -498,7 +504,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     }
 
     /// The newest format of the file this version reads and writes.
-    static let supportedFormat = 3
+    static let supportedFormat = 4
 
     /// The format this list is written in.
     var format: Int { Self.format(for: entries) }
@@ -508,8 +514,10 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// link (or changes its IP at launch). A version from before origins would read a service's
     /// proxy as the user's and write it back without its origin, and one from before IP changes
     /// would write a proxy back without its link: each is to refuse the file instead
-    /// (docs/UPDATES.md, R4).
+    /// (docs/UPDATES.md, R4). 4 once one is a share link's (`ProxySettings.Kind.xray`): a version from
+    /// before links skips such an entry, and would drop it when it saves the list.
     static func format(for entries: [ProxyListEntry]) -> Int {
+        if entries.contains(where: { $0.proxy.kind == .xray }) { return 4 }
         if entries.contains(where: \.hasIPChange) { return 3 }
         return entries.contains { $0.origin != .user } ? 2 : 1
     }

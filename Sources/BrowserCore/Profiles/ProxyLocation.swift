@@ -50,6 +50,12 @@ public struct ProxyLocation: Codable, Equatable, Sendable {
 
     public static func endpoint(of proxy: ProxySettings) -> String {
         let address = "\(proxy.kind.rawValue)://\(proxy.host):\(proxy.port)"
+        // A link's account on its server (its id or password), never the relay it is reached through
+        // at a launch: the same link is the same place at every launch.
+        if proxy.kind == .xray {
+            let identity = Data((proxy.shareLink?.identity ?? proxy.link ?? "").utf8)
+            return address + "#" + SHA256.hash(data: identity).prefix(8).map { String(format: "%02x", $0) }.joined()
+        }
         guard proxy.username?.isEmpty == false || proxy.password?.isEmpty == false else { return address }
         let credentials = Data(((proxy.username ?? "") + "\u{0}" + (proxy.password ?? "")).utf8)
         let digest = SHA256.hash(data: credentials).prefix(8).map { String(format: "%02x", $0) }.joined()

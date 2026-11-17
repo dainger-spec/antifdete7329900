@@ -50,6 +50,9 @@ public struct ProxyDiagnosis: Codable, Equatable, Sendable {
         case reachable
         /// It answered, took the login (or needed none), and opened a tunnel to the site.
         case works
+        /// A share link's proxy, and the app's relay for it (Xray) did not start: nothing was asked,
+        /// since nothing but the relay may talk to the link's server (`ProxyRoutes`).
+        case relayNotStarted
     }
 
     /// How the login went.
@@ -107,7 +110,7 @@ public struct ProxyDiagnosis: Codable, Equatable, Sendable {
     public var failedStep: Int? {
         switch verdict {
         case .hostNotFound, .resolverFailed, .substituteDNS: return 1
-        case .refused, .unreachable, .connectTimeout: return 2
+        case .refused, .unreachable, .connectTimeout, .relayNotStarted: return 2
         case .silent, .closedWithoutAnswer, .notAProxy: return 3
         case .credentialsNeeded, .credentialsRejected, .refusedByProxy: return 4
         case .noUpstream: return 5
