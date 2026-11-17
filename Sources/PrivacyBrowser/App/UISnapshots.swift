@@ -754,7 +754,7 @@ enum UISnapshots {
         going.began(scenarioProfiles[4].id, at: runStart.addingTimeInterval(40))
         var ended = going
         ended.ended(scenarioProfiles[1].id, .finished, at: runStart.addingTimeInterval(50), result: "\"signed in\"")
-        ended.ended(scenarioProfiles[2].id, .failed(reason: "timed out: text=My orders visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
+        ended.ended(scenarioProfiles[2].id, .failed(reason: "Error: timed out: text=My orders to be visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
                     log: ["    0.0  window: Safari's", "    0.1  goto https://shop.example/login", "    2.3  type 17 characters into input[type=\"email\"]",
                           "    4.4  type 14 characters into input[type=\"password\"]", "    7.0  press Enter", "    7.1  waitFor text=My orders visible",
                           "   37.1  timed out: text=My orders visible (line 17)", "   37.1  Failed: timed out: text=My orders visible (line 17)"])

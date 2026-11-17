@@ -3,6 +3,51 @@ import BrowserCore
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Why a run failed, in the interface's language (`ScenarioFailureReason`): the runner's reason is
+/// English, as a script's `catch` and the automation API see it, and a Russian interface showed it
+/// as it was. A reason of the script's own is shown as written; the scenario's line, when named,
+/// stays at the end.
+enum ScenarioFailureText {
+    static func text(_ reason: String) -> String {
+        let parsed = ScenarioFailureReason.parse(reason)
+        let words = self.words(parsed.reason)
+        guard let line = parsed.line else { return words }
+        return String(format: L("scenarios.failure.line"), words, line)
+    }
+
+    private static func words(_ reason: ScenarioFailureReason) -> String {
+        switch reason {
+        case .noWindow: return L("scenarios.failure.noWindow")
+        case .timedOut(let wait):
+            switch wait {
+            case .element(let selector, let state): return String(format: L("scenarios.failure.wait.\(state)"), selector)
+            case .load: return L("scenarios.failure.wait.load")
+            case .address(let pattern): return String(format: L("scenarios.failure.wait.address"), pattern)
+            case .opening(let address): return String(format: L("scenarios.failure.wait.opening"), address)
+            case .back: return L("scenarios.failure.wait.back")
+            case .forward: return L("scenarios.failure.wait.forward")
+            case .reload: return L("scenarios.failure.wait.reload")
+            case .profile: return L("scenarios.failure.wait.profile")
+            case .other(let what): return String(format: L("scenarios.failure.wait.other"), what)
+            }
+        case .notFound(let selector): return String(format: L("scenarios.failure.notFound"), selector)
+        case .notVisible(let selector): return String(format: L("scenarios.failure.notVisible"), selector)
+        case .covered(let selector, let by?): return String(format: L("scenarios.failure.covered"), selector, by)
+        case .covered(let selector, nil): return String(format: L("scenarios.failure.moving"), selector)
+        case .disabled(let selector): return String(format: L("scenarios.failure.disabled"), selector)
+        case .untypeable(let character): return String(format: L("scenarios.failure.untypeable"), character)
+        case .nothingToGoBackTo: return L("scenarios.failure.noBack")
+        case .nothingToGoForwardTo: return L("scenarios.failure.noForward")
+        case .notWebAddress: return L("scenarios.failure.notWebAddress")
+        case .navigation(let message): return String(format: L("scenarios.failure.navigation"), message)
+        case .script(let message): return String(format: L("scenarios.failure.script"), message)
+        case .couldNotStart: return L("scenarios.failure.couldNotStart")
+        case .notAwaited(let count): return String(format: L("scenarios.failure.notAwaited"), count)
+        case .other(let text): return text
+        }
+    }
+}
+
 /// What a run on many profiles is asked for (`ScenarioRunChooser`).
 struct ScenarioBatchRequest {
     var profiles: [(id: UUID, name: String)]
@@ -237,7 +282,7 @@ struct ScenarioEntryState: View {
             case .failed(let reason, let line):
                 Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.danger)
                 (Text(Self.failedTitle(line: line, steps: steps)).foregroundColor(Theme.danger).fontWeight(.medium)
-                    + Text(verbatim: " — " + reason).foregroundColor(Theme.textSecondary))
+                    + Text(verbatim: " — " + ScenarioFailureText.text(reason)).foregroundColor(Theme.textSecondary))
             case .stopped:
                 Image(systemName: "stop.circle").foregroundStyle(Theme.textSecondary)
                 Text(L("scenarios.state.stopped")).foregroundStyle(Theme.textSecondary)
@@ -263,7 +308,7 @@ struct ScenarioEntryState: View {
         case .waiting: return L("scenarios.state.waiting")
         case .running: return L("scenarios.state.running")
         case .finished: return L("scenarios.state.finished")
-        case .failed(let reason, _): return L("scenarios.state.failed") + ": " + reason
+        case .failed(let reason, _): return L("scenarios.state.failed") + ": " + ScenarioFailureText.text(reason)
         case .stopped: return L("scenarios.state.stopped")
         case .skipped(let reason): return String(format: L("scenarios.state.skipped"), reason)
         }
@@ -427,7 +472,7 @@ struct ScenarioRunTable: View {
                     Text(ScenarioWords.length(duration)).font(.lumenSecondary).foregroundStyle(Theme.textTertiary).monospacedDigit()
                 }
                 if case .failed(let reason, _) = entry.state {
-                    Text(reason).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                    Text(ScenarioFailureText.text(reason)).font(.lumenSecondary).foregroundStyle(Theme.textSecondary).fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                 }
             }
             .padding(.horizontal, 24)
