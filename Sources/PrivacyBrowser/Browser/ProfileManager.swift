@@ -84,6 +84,8 @@ final class ProfileManager: ObservableObject {
     var onSealed: ((UUID, ProfileSealReport) -> Void)?
     /// A step of the menu walk a profile's process was asked for (`walkMenu`; `--menu-walk`).
     var onMenuWalk: ((UUID, String) -> Void)?
+    /// A line of the sweep a profile's process was asked for (`sweep`; `--sweep`).
+    var onSweep: ((UUID, String) -> Void)?
     /// What a profile's History window showed when the self-test asked (`lookAtHistory`).
     var onHistoryLook: ((UUID, HistoryWindowLook) -> Void)?
     /// What a profile's window showed after the self-test acted on it (`lookAtWindow`).
@@ -692,6 +694,8 @@ final class ProfileManager: ObservableObject {
                 self.onChildSealed?(id, report)
             case .menuWalk(let line):
                 self.onMenuWalk?(id, line)
+            case .sweep(let line):
+                self.onSweep?(id, line)
             case .historyLook(let look):
                 self.onHistoryLook?(id, look)
             case .windowLook(let look):
@@ -1311,6 +1315,16 @@ final class ProfileManager: ObservableObject {
     func walkMenu(_ id: UUID, from: Int) -> Bool {
         guard let child = children[id] else { return false }
         child.send(.walkMenu(from: from))
+        return true
+    }
+
+    /// Asks a profile running in its own process to drive its window with real input from step
+    /// `from`, unit `sub` on (`SafariSweep`); each line comes back through `onSweep`. The `--sweep`
+    /// check's only. False when it does not run in a process of its own.
+    @discardableResult
+    func sweep(_ id: UUID, from: Int, sub: Int, phases: [String]) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.sweep(from: from, sub: sub, phases: phases))
         return true
     }
 

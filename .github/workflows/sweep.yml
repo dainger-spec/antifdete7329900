@@ -1,0 +1,72 @@
+name: Sweep — a profile's Safari window with real input
+
+# What a customer does in a profile's Safari window — typing into the address bar (Latin, Cyrillic,
+# a Russian layout, an input method), tabs, find, Reader, zoom, context menus, a download, print,
+# Share, bookmarks, history, full screen, every key equivalent and every item of the menu bar, a
+# quit and a relaunch — done with the window server's own key and mouse events (SafariSweep), on
+# the Mac states customers' Macs are in (scripts/sweep_state.sh): the runner as it is; a Russian Mac
+# with a Russian keyboard, dark, behind SOCKS5; a Mac whose Safari never ran, on a small screen,
+# with the accessibility display settings and other profiles running. Every exception the run loop
+# caught, every "unavailable" notice, every hang over two seconds and every crash is a finding
+# (scripts/sweep.py); an explained one is listed in scripts/sweep_explained.json with why.
+#
+# On request only (Actions › Sweep › Run workflow): macOS runners are shared. `images` and `groups`
+# narrow it: each group is one job, its states run one after another on one build.
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        description: 'Runner images, as JSON (macos-26: macOS 26; xcode-27: macOS 27)'
+        default: '["macos-26","xcode-27"]'
+      groups:
+        description: 'Groups of states, one job each, as JSON (default, russian, fresh-mac)'
+        default: '["default","russian fresh-mac"]'
+      phases:
+        description: 'Phases to run, comma-separated (address,tabs,page,context,library,window,keys,menu,quit); empty: all'
+        default: ''
+
+jobs:
+  sweep:
+    name: Sweep (${{ matrix.image }}, ${{ matrix.group }})
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(inputs.images || '["macos-26","xcode-27"]') }}
+        group: ${{ fromJSON(inputs.groups || '["default","russian fresh-mac"]') }}
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - name: The machine
+        continue-on-error: true
+        run: |
+          sw_vers
+          uname -m
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
+          system_profiler SPDisplaysDataType | grep -E "Resolution|Retina|Main Display" || true
+          ls -la ~/Library/Safari ~/Library/Containers/com.apple.Safari 2>&1 | head -20 || true
+      - name: Build the app without the App Sandbox (the build that runs profiles in Safari's window)
+        timeout-minutes: 40
+        run: SANDBOX=0 APP_DIR=build/unsandboxed scripts/build-app.sh
+      - name: The sweep, state by state
+        timeout-minutes: 100
+        env:
+          PB_SWEEP_PHASES: ${{ inputs.phases }}
+        run: |
+          status=0
+          for state in ${{ matrix.group }}; do
+            echo "::group::state $state"
+            out="build/sweep/$state"
+            mkdir -p "$out"
+            exports="$(scripts/sweep_state.sh "$state" "$out")"
+            echo "$exports"
+            ( eval "$exports"; python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out "$out" --state "${{ matrix.image }} $state" ) || status=1
+            echo "::endgroup::"
+          done
+          exit $status
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-${{ matrix.image }}-${{ strategy.job-index }}
+          path: build/sweep
+          if-no-files-found: ignore

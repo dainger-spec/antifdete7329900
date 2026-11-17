@@ -364,6 +364,10 @@ enum ProfileSessionHost {
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
                 }
+            case .sweep(let from, let sub, let phases):
+                SafariSweep.start(from: from, sub: sub, phases: phases, session: manager?.session(for: profileID)) { line in
+                    ProfileSessionHost.send(.sweep(line))
+                }
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
                     ProfileSessionHost.log.error("Warm-up of \(self.profileID.uuidString, privacy: .public) did not start")
