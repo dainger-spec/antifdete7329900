@@ -142,6 +142,10 @@ enum UISnapshots {
         problems += await Shot(name: "settings-search", size: SettingsView.size, edges: true) {
             SettingsView(section: .behavior, search: L("settings.behavior.zoom")).environmentObject(model)
         }.capture(into: folder)
+        // "OpenVPN" typed: Proxies, with Add a proxy, a link or OpenVPN marked.
+        problems += await Shot(name: "settings-search-openvpn", size: SettingsView.size, edges: true) {
+            SettingsView(section: .proxies, search: "OpenVPN").environmentObject(model) // l10n: not text
+        }.capture(into: folder)
         // The command palette with the same typed: the single setting, and the page it is on.
         problems += await Shot(name: "palette-setting", size: CommandPaletteView.size, titled: false) {
             CommandPaletteView(commands: paletteSample(sampleRows()), query: L("settings.behavior.zoom"))
