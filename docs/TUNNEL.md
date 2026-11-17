@@ -656,9 +656,10 @@ then holds through the relay.
 - **Its sandbox.** The relay's process starts as the app's own executable with `--xray-relay`
   (`XrayRelayLauncher`), puts itself in a sandbox the kernel holds it and every process it becomes to,
   and only then becomes Xray (`execve`): no outgoing connection but TCP and UDP to the server's port,
-  loopback, and the system's resolver (`/var/run/mDNSResponder`); nothing listened on but loopback; no
-  file written. The kernel's rules can name a host only as "any" or "loopback": the server's address is
-  held by the configuration, its port by the kernel. A sandbox that does not apply is no relay
+  loopback, and the system's resolver (`/var/run/mDNSResponder`); no file written. The kernel's rules
+  can name a host only as "any" or "loopback": the server's address is held by the configuration, its
+  port by the kernel. Binding is not limited (Xray sends UDP from a socket it binds to any address on a
+  port of the system's choosing); what it listens on for others is its configuration's 127.0.0.1. A sandbox that does not apply is no relay
   (exit 70), and the profile does not start.
 - **Not held by the network guard.** The guard holds only processes signed as Lumen itself, and that
   identity is also what lets a process ask the guard anything. A program of a third party that parses

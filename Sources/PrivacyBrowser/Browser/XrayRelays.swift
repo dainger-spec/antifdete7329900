@@ -16,8 +16,7 @@ import os
 /// - **Out.** The link's server and nothing else: the configuration has no other outbound
 ///   (`XrayConfig`), and the relay runs in a sandbox the kernel holds it to before Xray's code is
 ///   loaded (`XrayRelayLauncher`): no connection but to the server's port, to this Mac's loopback and
-///   to the system's resolver (the server's own name is the one it resolves), no listening but on
-///   loopback, no file written.
+///   to the system's resolver (the server's own name is the one it resolves), no file written.
 /// - **Fail closed.** A relay that ends while its profile runs is started again on the same port with
 ///   the same login (twice in a minute at most); until it answers, the profile's loads fail — its
 ///   data store has no other proxy and failover is off. One that cannot be started again stops its
@@ -73,6 +72,10 @@ final class XrayRelays {
 
     private var relays: [UUID: Relay] = [:]
 
+    /// What the last relay that did not start wrote (Xray's errors, the launcher's), for the check of
+    /// links to print (`XrayCheck`); the app's log has it as private data.
+    private(set) var lastStartFailure: String?
+
     /// How many times a minute a relay that ended is started again before its owner is told
     /// (`onDied`). The check of links (`XrayCheck`) sets 0, to see what a relay that stays dead does.
     var restartLimit = 2
@@ -122,6 +125,7 @@ final class XrayRelays {
                 return relay.inbound.route
             }
             relays[relay.id] = nil
+            lastStartFailure = relay.output.text
             log.error("The relay of \(owner.uuidString, privacy: .public) did not start, attempt \(Int(attempt), privacy: .public): \(relay.output.text, privacy: .private)")
             if Task.isCancelled { break }
         }
@@ -336,15 +340,18 @@ final class XrayRelays {
 ///
 /// The sandbox: no outgoing connection but to the link's server's port (TCP and UDP: the transports
 /// and Shadowsocks's UDP), to loopback (the UDP associations answer the profile's relay there), and
-/// to the system's resolver (`mDNSResponder`, for the server's own name); nothing listened on but
-/// loopback; no file written. The kernel's rules name hosts only as "any" or "loopback", so the
+/// to the system's resolver (`mDNSResponder`, for the server's own name); no file written. The kernel's rules name hosts only as "any" or "loopback", so the
 /// server's address is held by the configuration — its one outbound — and the port by the kernel.
 /// Should the sandbox not apply, the relay does not run (exit 70): never a relay outside it.
 enum XrayRelayLauncher {
     static let argument = "--xray-relay"
 
-    /// The sandbox's rules for a relay whose server listens on `port`.
-    static func profile(serverPort port: Int) -> String {
+    /// The sandbox's rules for a relay whose server listens on `port`. `resolver` names the system
+    /// resolver's socket as this macOS spells a Unix socket's path in a rule (two spellings; the
+    /// first this macOS takes is used). Binding is not limited: Xray sends UDP from a socket it binds
+    /// to any address on a port of the system's choosing (its system dialer), and what it listens on
+    /// for others is its configuration's 127.0.0.1.
+    static func profile(serverPort port: Int, resolver: String) -> String {
         [
             "(version 1)",
             "(allow default)",
@@ -352,13 +359,16 @@ enum XrayRelayLauncher {
             "(allow network-outbound (remote ip \"localhost:*\"))",
             "(allow network-outbound (remote tcp \"*:\(port)\"))",
             "(allow network-outbound (remote udp \"*:\(port)\"))",
-            "(allow network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))",
-            "(deny network-bind)",
-            "(allow network-bind (local ip \"localhost:*\"))",
+            "(allow network-outbound \(resolver))",
             "(deny file-write*)",
             "(allow file-write* (literal \"/dev/null\") (literal \"/dev/dtracehelper\"))",
         ].joined(separator: "\n")
     }
+
+    static let resolverRules = [
+        "(remote unix-socket (path-literal \"/private/var/run/mDNSResponder\"))",
+        "(literal \"/private/var/run/mDNSResponder\")",
+    ]
 
     static func run(arguments: [String]) -> Never {
         guard let index = arguments.firstIndex(of: argument), arguments.count > index + 2,
@@ -372,10 +382,19 @@ enum XrayRelayLauncher {
             FileHandle.standardError.write(Data("the relay's sandbox is not in this macOS: the relay does not run\n".utf8))
             exit(70)
         }
-        var error: UnsafeMutablePointer<CChar>?
-        guard unsafeBitCast(symbol, to: SandboxInit.self)(profile(serverPort: port), 0, &error) == 0 else {
-            let reason = error.map { String(cString: $0) } ?? "unknown"
-            FileHandle.standardError.write(Data("the relay's sandbox was refused (\(reason)): the relay does not run\n".utf8))
+        let sandboxInit = unsafeBitCast(symbol, to: SandboxInit.self)
+        var applied = false
+        var reasons: [String] = []
+        for resolver in resolverRules {
+            var error: UnsafeMutablePointer<CChar>?
+            if sandboxInit(profile(serverPort: port, resolver: resolver), 0, &error) == 0 {
+                applied = true
+                break
+            }
+            reasons.append(error.map { String(cString: $0) } ?? "unknown")
+        }
+        guard applied else {
+            FileHandle.standardError.write(Data("the relay's sandbox was refused (\(reasons.joined(separator: "; "))): the relay does not run\n".utf8))
             exit(70)
         }
         // Xray reads its configuration from standard input to its end (`-c stdin:`), and nothing from

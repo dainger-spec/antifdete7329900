@@ -155,6 +155,7 @@ enum XrayCheck {
             try await manager.launch(profile.id)
         } catch {
             fail("\(name): the profile did not start: \(error.localizedDescription)")
+            if let output = XrayRelays.shared.lastStartFailure { info("\(name): the relay said: \(output)") }
             info("egress-window end \(Date().timeIntervalSince1970) \(name)")
             return
         }
