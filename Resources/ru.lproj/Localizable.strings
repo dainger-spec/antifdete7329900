@@ -1535,6 +1535,7 @@
 /* Warm-up: several profiles in a queue, a schedule, what a run left per site */
 "profiles.menu.warmUpSeveral" = "Прогреть несколько профилей…";
 "profiles.row.warmUpQueued" = "В очереди на прогрев";
+"profiles.row.launchQueued" = "В очереди на запуск";
 "warmup.composed.eachCountry" = "Каждому профилю — сайты страны, где выходит его прокси; если страна неизвестна — общий список.";
 "warmup.estimate.each" = "Страниц на профиль: %1$ld · примерно %2$@ на каждый";
 "warmup.schedule.repeat" = "Повторять прогрев по расписанию";

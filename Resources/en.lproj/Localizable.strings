@@ -1535,6 +1535,7 @@
 /* Warm-up: several profiles in a queue, a schedule, what a run left per site */
 "profiles.menu.warmUpSeveral" = "Warm Up Several Profiles…";
 "profiles.row.warmUpQueued" = "Waiting to warm up";
+"profiles.row.launchQueued" = "Waiting to launch";
 "warmup.composed.eachCountry" = "Each profile gets the sites of the country its proxy exits in; the general list when that is unknown.";
 "warmup.estimate.each" = "Pages per profile: %1$ld · about %2$@ each";
 "warmup.schedule.repeat" = "Repeat on a schedule";

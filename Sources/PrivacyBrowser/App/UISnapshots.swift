@@ -1764,8 +1764,9 @@ enum UISnapshots {
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
+            // Waiting for its turn in a selection's Launch, while "Launch Review" starts.
             ProfileRowItem(id: id(6), name: "Shopping", activity: .stopped, exit: .direct, ephemeral: true,
-                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400)),
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400), launchQueued: true),
             // At its last launch no geolocation service answered through its proxy.
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,

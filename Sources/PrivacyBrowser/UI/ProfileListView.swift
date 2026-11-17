@@ -587,6 +587,7 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                launchQueued: !running && model.launchQueued.contains(profile.id),
                 warmedAt: warmth.flatMap { $0.isWarmed ? $0.date : nil },
                 neverWarmed: warmth == .never,
                 exitUnconfirmed: lookupFailed,
@@ -729,6 +730,8 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// Waiting for its turn in a selection's Launch (`AppModel.launchQueued`).
+    var launchQueued = false
     /// When its last warm-up went through; nil: never warmed up, or not wholly (`WarmUpWarmth`).
     var warmedAt: Date?
     /// Never warmed up on this Mac: the sidebar's "Not warmed up" gathers such profiles.
@@ -2238,7 +2241,12 @@ private struct ProfileRow: View {
                     RunningDot()
                 }
             case .stopped:
-                Color.clear
+                if row.launchQueued {
+                    Image(systemName: "clock").font(.system(size: 10)).foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                } else {
+                    Color.clear
+                }
             }
         }
     }
@@ -2281,7 +2289,9 @@ private struct ProfileRow: View {
                     .lineLimit(1)
                 }
             case .stopped:
-                if row.warmUpQueued {
+                if row.launchQueued {
+                    secondaryLine(L("profiles.row.launchQueued"))
+                } else if row.warmUpQueued {
                     secondaryLine(L("profiles.row.warmUpQueued"))
                 } else {
                     Text(lastUsed)

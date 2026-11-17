@@ -191,6 +191,7 @@ struct ProfileInspectorView: View {
         case .starting: return row.startingText
         case .sealing: return L("profiles.row.encrypting")
         case .stopped:
+            if row.launchQueued { return L("profiles.row.launchQueued") }
             guard let date = row.lastUsed else { return L("profiles.row.neverLaunched") }
             return String(format: L("profiles.row.lastUsed"), date.shownRelative)
         }
