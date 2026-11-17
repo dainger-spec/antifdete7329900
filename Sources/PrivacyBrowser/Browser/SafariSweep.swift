@@ -104,6 +104,7 @@ enum SafariSweep {
         let windowsBefore = Set(NSApp.windows.map { ObjectIdentifier($0) })
         let downloadsBefore = HostedDownloads.counts.text
         let guardedBefore = SafariWindowGuard.caught
+        let appsBefore = runningApps()
         _ = SweepRecord.take()
         _ = WalkRecorder.take()
         SweepWatchdog.shared.setStep(index)
@@ -114,6 +115,10 @@ enum SafariSweep {
         await SweepInput.pause(0.4)
         if HostedDownloads.counts.text != downloadsBefore { note("downloads: \(downloadsBefore) → \(HostedDownloads.counts.text)") }
         if SafariWindowGuard.caught != guardedBefore { note("caught by the window's guards: \(SafariWindowGuard.caught - guardedBefore)") }
+        // An app the unit started: what a profile's window handed outside itself (the real
+        // Safari searching a selection with the owner's cookies, a Notes window, another browser).
+        let started = runningApps().subtracting(appsBefore)
+        if !started.isEmpty { SweepRecord.add("started", started.sorted().joined(separator: ", ")) }
         var fields = SweepRecord.take()
         let walked = WalkRecorder.take()
         if !walked.effects.isEmpty { fields["answered"] = walked.effects }
@@ -148,6 +153,11 @@ enum SafariSweep {
             after["sub"] = unit
             emit(after)
         }
+    }
+
+    /// The bundle identifiers of the apps running on this Mac.
+    private static func runningApps() -> Set<String> {
+        Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier))
     }
 
     /// The input source the sweep runs with (`PB_SWEEP_INPUT_SOURCE`, else the Mac's): put back

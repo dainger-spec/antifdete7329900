@@ -167,6 +167,10 @@ def exception_log(since, out):
     return path
 
 
+# Apps a profile's window must never start: a page, a selection or an address handed to them would
+# leave the profile (its proxy, its cookies, its encryption) for the owner's own browser.
+BROWSERS = ("com.apple.Safari", "com.apple.SafariTechnologyPreview", "com.google.Chrome", "org.mozilla.firefox",
+            "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.operasoftware.Opera")
 SAFARI_FRAME = re.compile(r"(^|/ )(Safari|SafariShared|SafariSharedUI|SafariCore|SafariFoundation|SafariPlatformSupport) ")
 
 
@@ -192,6 +196,10 @@ def findings(unit):
         said.append(f"notice: {text}")
     for seconds in unit.get("hangs", []):
         said.append(f"the main thread stopped {seconds} s")
+    for text in unit.get("started", []):
+        outside = [app for app in text.split(", ") if app in BROWSERS]
+        if outside:
+            said.append(f"another browser started: {', '.join(outside)}")
     if unit.get("phase") == "regress":
         # What was found and fixed must do what a person expects of it again.
         for text in unit.get("failed", []):
@@ -293,6 +301,10 @@ def main():
         for text in unit.get("failed", []):
             report.append(f"- {unit.get('name', '?')}: {text[:300]}")
             notice("warning", f"sweep {args.state} - not as expected", f"{unit.get('name', '?')}: {text}")
+    started = [(unit.get("name", "?"), text) for unit in units for text in unit.get("started", [])]
+    if started:
+        report += ["", "Apps that started during a unit:", ""]
+        report += [f"- {name}: {text}" for name, text in started]
     report += ["", "Exceptions thrown (caught or not), by unit:", ""]
     for unit in units:
         for text in unit.get("thrown", [])[:3]:
