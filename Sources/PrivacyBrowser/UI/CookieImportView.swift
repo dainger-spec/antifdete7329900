@@ -45,7 +45,9 @@ struct CookieImportView: View {
             .padding(.horizontal, 24)
             .padding(.bottom, 16)
             .frame(maxHeight: .infinity, alignment: .top)
-            SheetFooter {
+            SheetFooter(leading: {
+                if importing { SheetWorking(text: L("cookies.working")) }
+            }, buttons: {
                 Button(L(outcome == nil ? "common.cancel" : "common.done")) { dismiss() }
                     .buttonStyle(.lumenSecondary)
                     .keyboardShortcut(.cancelAction)
@@ -55,14 +57,14 @@ struct CookieImportView: View {
                         .keyboardShortcut(.defaultAction)
                         .disabled(importing)
                 }
-            }
+            })
         }
         .sheetFrame(width: 680, height: 560)
         .background(Theme.raised)
         .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.json, .plainText, .text, .data]) { result in
             switch result {
             case let .success(url): read(url)
-            case let .failure(failure): error = failure.localizedDescription
+            case let .failure(failure): error = errorText(failure)
             }
         }
     }
@@ -142,13 +144,30 @@ struct CookieImportView: View {
             do {
                 outcome = try await model.importCookies(cookies, into: profile.id)
             } catch {
-                self.error = error.localizedDescription
+                self.error = errorText(error)
             }
             importing = false
         }
     }
 
     // MARK: Wording
+
+    /// The kind of file the reader recognised (`CookieImporter.otherFileKind`), in the interface's
+    /// language: the core names it in English, and a Russian sheet said «Это не экспорт cookies, а
+    /// файл другого вида: SQLite database (a browser's cookie database: export it with an extension)».
+    static func fileKind(_ kind: String) -> String {
+        let keys: [(prefix: String, key: String)] = [
+            ("SQLite database", "cookies.kind.sqlite"),
+            ("Safari binary cookies", "cookies.kind.safari"),
+            ("Firefox compressed session", "cookies.kind.firefoxSession"),
+            ("ZIP archive", "cookies.kind.zip"),
+            ("gzip archive", "cookies.kind.gzip"),
+            ("PDF document", "cookies.kind.pdf"),
+            ("Python pickle", "cookies.kind.pickle"),
+            ("web page", "cookies.kind.html"),
+        ]
+        return keys.first { kind.hasPrefix($0.prefix) }.map { L($0.key) } ?? kind
+    }
 
     static func describe(_ location: CookieImportLocation) -> String {
         switch location {
@@ -171,7 +190,7 @@ struct CookieImportView: View {
             return String(format: L("cookies.reason.fileTooLarge"),
                           Int64(size).formatted(.byteCount(style: .file).locale(Localization.locale)))
         case let .unreadableFile(detail): return String(format: L("cookies.reason.unreadableFile"), detail)
-        case let .unsupportedFile(kind): return String(format: L("cookies.reason.unsupportedFile"), kind)
+        case let .unsupportedFile(kind): return String(format: L("cookies.reason.unsupportedFile"), fileKind(kind))
         case .encryptedValue: return L("cookies.reason.encryptedValue")
         case .partitioned: return L("cookies.reason.partitioned")
         case let .damagedJSON(line): return String(format: L("cookies.reason.damagedJSON"), line)

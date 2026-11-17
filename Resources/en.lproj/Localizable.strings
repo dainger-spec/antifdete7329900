@@ -61,6 +61,7 @@
 "cookies.format.netscape" = "Netscape cookies.txt";
 "cookies.formatLine" = "Format: %1$@, read as %2$@";
 "cookies.import" = "Import %ld Cookies";
+"cookies.working" = "Importing the cookies…";
 "cookies.launch.refused" = "WebKit did not keep %1$ld imported cookies of “%2$@”: %3$@";
 "cookies.launch.unreadable" = "The cookies imported into “%1$@” could not be read and were not applied. The import queue was not deleted: it is kept beside as %2$@. The import can be made again.";
 "cookies.problemsTitle" = "Not imported: %ld";
@@ -88,6 +89,14 @@
 "cookies.reason.unreadableFile" = "The file could not be read: %@";
 "cookies.reason.unrecognizedFormat" = "Not a cookie file: neither JSON nor Netscape cookies.txt";
 "cookies.reason.unsupportedFile" = "Not a cookie export but a file of another kind: %@";
+"cookies.kind.html" = "a web page (HTML)";
+"cookies.kind.pickle" = "a Python pickle (Selenium): save the cookies as JSON instead";
+"cookies.kind.pdf" = "a PDF document";
+"cookies.kind.gzip" = "a gzip archive (unpack it first)";
+"cookies.kind.zip" = "a ZIP archive (unpack it first)";
+"cookies.kind.firefoxSession" = "a compressed Firefox session file";
+"cookies.kind.safari" = "Safari's binary cookies file";
+"cookies.kind.sqlite" = "a SQLite database (a browser's own cookie database: export the cookies with an extension)";
 "cookies.reason.wrongFieldCount" = "%ld fields instead of 7 tab-separated ones";
 "cookies.summary" = "%1$ld of %2$ld entries can be imported";
 "cookies.sync.saveFailed" = "The synced cookies of “%@” could not be saved; this run’s cookie changes will not reach your other devices.";

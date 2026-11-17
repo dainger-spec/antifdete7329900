@@ -61,6 +61,7 @@
 "cookies.format.netscape" = "Netscape cookies.txt";
 "cookies.formatLine" = "Формат: %1$@, прочитан как %2$@";
 "cookies.import" = "Импортировать cookies: %ld";
+"cookies.working" = "Импорт cookies…";
 "cookies.launch.refused" = "WebKit не сохранил импортированные cookies профиля «%2$@» (%1$ld): %3$@";
 "cookies.launch.unreadable" = "Cookies, импортированные в «%1$@», не удалось прочитать, и они не применены. Очередь импорта не удалена: она сохранена рядом как %2$@. Импорт можно повторить.";
 "cookies.problemsTitle" = "Не импортировано: %ld";
@@ -88,6 +89,14 @@
 "cookies.reason.unreadableFile" = "Файл не удалось прочитать: %@";
 "cookies.reason.unrecognizedFormat" = "Это не файл cookies: ни JSON, ни Netscape cookies.txt";
 "cookies.reason.unsupportedFile" = "Это не экспорт cookies, а файл другого вида: %@";
+"cookies.kind.html" = "веб-страница (HTML)";
+"cookies.kind.pickle" = "Python pickle (Selenium): сохраните cookies в JSON";
+"cookies.kind.pdf" = "документ PDF";
+"cookies.kind.gzip" = "архив gzip (сначала распакуйте его)";
+"cookies.kind.zip" = "архив ZIP (сначала распакуйте его)";
+"cookies.kind.firefoxSession" = "сжатый файл сеанса Firefox";
+"cookies.kind.safari" = "двоичный файл cookies Safari";
+"cookies.kind.sqlite" = "база SQLite (собственная база cookies браузера: экспортируйте cookies расширением)";
 "cookies.reason.wrongFieldCount" = "Полей: %ld вместо 7 (через табуляцию)";
 "cookies.summary" = "Можно импортировать %1$ld из %2$ld записей";
 "cookies.sync.saveFailed" = "Не удалось сохранить синхронизируемые cookies профиля «%@»: изменения cookies этого запуска не попадут на другие устройства.";
