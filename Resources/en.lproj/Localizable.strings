@@ -133,7 +133,7 @@
 "editor.error.startURL" = "Start URL is not a valid URL";
 "editor.footer.note" = "Changes apply at the next launch.";
 "editor.generation" = "View for websites";
-"editor.generation.footer" = "Safari on this Mac as it is: the engine and hardware are this Mac's, as a page measures them. The canvas is drawn as it is, without noise — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
+"editor.generation.footer" = "Safari on this Mac as it is: the engine and hardware are this Mac's, as a page measures them. The canvas is drawn as it is, without noise.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";
@@ -160,7 +160,7 @@
 "editor.location.unknown" = "Exit location not checked yet";
 "editor.location.unknown.detail" = "At the next launch the app asks a location service through the proxy.";
 "editor.name" = "Name";
-"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC goes through the proxy only with the network guard and SOCKS5; otherwise it stays in the pages connecting nowhere where the guard can hold the profile, and is taken out where it cannot.";
+"editor.network.footer" = "Each profile has a proxy of its own, and when it does not work the profile does not go online directly. WebRTC goes through the proxy only with the network guard and SOCKS5; otherwise it stays in the pages connecting nowhere where the guard can hold the profile, and is taken out where it cannot.";
 "editor.passwords.autoFill" = "AutoFill user names and passwords";
 "editor.passwords.footer" = "After a sign-in the browser offers to save the password, encrypted with this profile; a login field then lists the saved logins for its site. Nothing is filled until you choose a login.";
 "editor.privacy.footer" = "Safe Browsing looks sites up outside the profile's proxy (WebKit does it itself), so it is off by default.";
@@ -214,7 +214,7 @@
 "editor.cookies.note.existing" = "Read as Import Cookies reads a file, and imported when you save: at once if the profile runs, else at its next launch, before its first page loads.";
 "editor.cookies.error" = "The profile was saved, but its cookies were not imported: %@";
 "editor.locale.mismatch" = "%@ is not where the proxy was last seen to come out (%@): a page that compares the time zone with the IP address's location sees that they differ.";
-"editor.language.note" = "WebKit takes the language once per run: profiles that share the app's process all get the one of the first profile started (Settings → Behavior → each profile its own app gives each its own).";
+"editor.language.note" = "WebKit takes the language once per run: profiles that share the app's process all get the one of the first profile started. To give each its own, turn on “Each profile its own app in the Dock” in Settings → Behavior.";
 "editor.menusInAppLanguage" = "Profile menus in the app's language";
 "editor.menusInAppLanguage.detail" = "Off: Safari's menus and panel in the profile's window are in the language of the country the profile presents itself from, as a local's would be. Lumen's own windows are always in the app's language.";
 "editor.menusInAppLanguage.on" = "The menus will be in your language, but the browser will then use it in its own words to sites too — for example in messages about a wrongly filled form. A site can read them and see that they differ from the language the profile claims.";
@@ -243,8 +243,8 @@
 "editor.camera.mode.block" = "No camera";
 "editor.camera.mode.substitute" = "Substitute";
 "editor.camera.off.note" = "Pages reach this Mac's real camera through WebKit, as before — the window still asks you before a page may use it.";
-"editor.camera.block.note" = "No camera exists for this profile: a page's request is refused with NotFoundError and no camera is listed, as on a Mac with every camera unplugged. The microphone is left alone.";
-"editor.camera.footer" = "A JavaScript shim over the camera API, not a system device: it runs in the profile's pages (a window of Safari's as well as the app's own), only where the page is a secure context (https). The frames are drawn here, so a test that watches for a live sensor can still tell them apart.";
+"editor.camera.block.note" = "No camera exists for this profile: a page's request is refused with “no camera found”, and no camera is listed — as on a Mac with every camera unplugged. The microphone is left alone.";
+"editor.camera.footer" = "The substitution works in the JavaScript of the profile's pages, not as a system device — in Safari's window as well as Lumen's own, and only on secure pages (https). Lumen draws the frames, so a check that watches for a live sensor can tell them apart.";
 "editor.camera.source" = "Source";
 "editor.camera.source.color" = "Solid colour";
 "editor.camera.source.bars" = "Test pattern";
@@ -270,8 +270,8 @@
 "editor.camera.audio.silent" = "Silent track";
 "editor.camera.audio.off" = "No audio";
 "editor.camera.screenShare" = "Substitute screen sharing too";
-"editor.camera.screenShare.detail" = "getDisplayMedia is handed the same stream instead of a screen.";
-"editor.camera.secure.note" = "Device ids are salted per site, as a real browser salts them, and the frames carry faint sensor-like grain so they are never frozen.";
+"editor.camera.screenShare.detail" = "A site that asks to see the screen gets the same picture instead of the screen.";
+"editor.camera.secure.note" = "Each site gets device ids of its own, as in a real browser, and the frames carry a faint sensor-like grain so that the picture is never frozen.";
 "editor.camera.media.choose" = "Choose a file…";
 "editor.camera.media.replace" = "Replace…";
 "editor.camera.media.remove" = "Remove";
@@ -283,7 +283,7 @@
 "editor.camera.error.read" = "Could not read %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Set this to match a real camera so a page cannot tell them apart — the match button fills this Mac’s own camera’s exact name and resolution.";
+"editor.camera.label.note" = "Give it the name of a real camera so that a page cannot tell them apart: “Match this Mac” fills in this Mac’s own camera’s exact name and resolution.";
 "editor.camera.matchMac" = "Match this Mac";
 "editor.camera.preview.note" = "Live preview of what a page gets — it updates as you change the source, crop and adjustments. A video plays and loops here.";
 "editor.camera.preview.open" = "Open preview";
@@ -320,17 +320,17 @@
 
 /* Camera: delivery and the system camera */
 "editor.camera.delivery" = "Delivery";
-"editor.camera.delivery.shim" = "JavaScript shim";
+"editor.camera.delivery.shim" = "JavaScript substitution";
 "editor.camera.delivery.system" = "System camera";
 "editor.camera.system" = "System camera";
 "editor.camera.system.note" = "The system virtual camera feeds the picture through macOS, so a page cannot tell it from the built-in camera. It is one device for the whole Mac, and other profiles do not see it. While the profile runs, Lumen draws your source — a colour, the test pattern, an image or a video — with crop, fit, mirror, the adjustments and the video playback, and hands it to the camera.";
 "editor.camera.system.notInBuild" = "This build does not include the system camera; it comes in a signed build.";
 "editor.camera.system.active" = "The system camera is installed and on.";
 "editor.camera.system.restart" = "Installed; macOS switches it on after a restart — restart the Mac, then open Lumen again. Until then a profile set to it gets no camera.";
-"editor.camera.system.notActive" = "Not installed yet. Until the extension is installed and on, a profile set to it gets no camera at all — neither the substitution nor your real one — and Save refuses it. Install it with the steps below, or choose the JavaScript shim, which needs no install.";
+"editor.camera.system.notActive" = "Not installed yet. Until the extension is installed and on, a profile set to it gets no camera at all — neither the substitution nor your real one — and Save refuses it. Install it with the steps below, or choose the JavaScript substitution, which needs no install.";
 "editor.camera.system.notRunning" = "Installed and on, but macOS has not started the camera yet — after an update this can wait for a restart. Until it appears, a profile set to it gets no camera; restart the Mac if it does not appear in a minute.";
-"editor.camera.system.formats" = "Like a built-in camera, it offers 1920×1080, 1280×720 and 640×480 at up to 30 frames a second, and the page picks one. The microphone and screen sharing stay as in Safari — the size, facing and microphone settings belong to the JavaScript shim, so they are hidden here.";
-"editor.camera.system.error.notActive" = "The system camera is not installed and on: install it (Camera, the steps are there) or choose the JavaScript shim.";
+"editor.camera.system.formats" = "Like a built-in camera, it offers 1920×1080, 1280×720 and 640×480 at up to 30 frames a second, and the page picks one. The microphone and screen sharing stay as in Safari — the size, facing and microphone settings belong to the JavaScript substitution, so they are hidden here.";
+"editor.camera.system.error.notActive" = "The system camera is not installed and on: install it (Camera, the steps are there) or choose the JavaScript substitution.";
 "editor.camera.system.accessSettings" = "Open Camera Settings";
 "editor.camera.system.accessDenied" = "Lumen is not allowed to use the camera, so it cannot hand the picture to the system camera — a page would get the fallback test pattern. Allow Lumen in System Settings → Privacy & Security → Camera, then start the profile again.";
 "editor.camera.system.steps" = "1. Press “Install…”.  2. In System Settings → General → Login Items & Extensions → Lumen, turn on the “Media extension” (that is the camera).  3. Come back here — it should say “installed and on”.  4. Stop the profile and start it again; if macOS asks whether Lumen may use the camera, allow it — that is how Lumen hands the picture to the camera. A leftover older copy can block the install — then restart the Mac and try once more.";
@@ -361,14 +361,14 @@
 "editor.notes" = "Notes";
 "editor.notes.placeholder" = "Anything to remember about this profile";
 "editor.labels.note" = "The glyph, tags and notes are yours alone: the Profiles list shows them and finds profiles by them; they are kept encrypted with the profile, synced and exported with it, and no page ever sees them.";
-"editor.location.footer" = "Geolocation and time zone are JavaScript shims (not applied in workers, detectable). See docs/ISOLATION_AND_LIMITATIONS.md.";
+"editor.location.footer" = "The geolocation and the time zone are substituted by JavaScript in the page: background scripts (workers) do not get the substitution, and a careful site can notice it.";
 "editor.search" = "Search engine";
 "editor.search.note" = "What the address bar and the warm-up search with, through the profile's proxy; from the profile's next start. In a profile shown in Safari's own window, that window's address bar searches with Safari's engine.";
 "editor.subtitle.direct" = "Connects directly";
 "editor.subtitle.new" = "Its own cookies, identity and network";
 "editor.subtitle.proxy" = "Through a proxy";
 "editor.sync.cookies" = "Sync cookies with other devices";
-"editor.sync.footer" = "With sync set up (More → Sync… in the Profiles window), a profile’s settings, passwords, bookmarks and history sync, encrypted. With this on, so do its persistent cookies (session cookies never), merged cookie by cookie: the newer change wins. They reach the other device at its next launch of the profile, before the first page loads. Settings changed on two devices: the newer ones win and the other device’s are kept as a conflict copy.";
+"editor.sync.footer" = "With sync set up (the sync line at the bottom left of the Profiles window), a profile’s settings, passwords, bookmarks and history sync, encrypted. With this on, so do its persistent cookies (session cookies never), merged cookie by cookie: the newer change wins. They reach the other device at its next launch of the profile, before the first page loads. Settings changed on two devices: the newer ones win and the other device’s are kept as a conflict copy.";
 "editor.sync.footer.ephemeral" = "An ephemeral profile keeps no website data, so it has no cookies to sync.";
 "editor.title.edit" = "Edit Profile";
 "editor.title.new" = "New Profile";
@@ -834,7 +834,7 @@
 "profiles.column.state" = "State";
 "profiles.row.failed" = "Did not start";
 "profiles.row.select" = "Select “%@”";
-"profiles.row.ephemeralTag" = "temporary";
+"profiles.row.ephemeralTag" = "ephemeral";
 "profiles.row.stopFor" = "Stop “%@”";
 "profiles.row.launchFor" = "Launch “%@”";
 "profiles.filter.proxied" = "Through a Proxy";
@@ -1613,7 +1613,7 @@
 "editor.proxy.none.note" = "The profile goes online directly, from this Mac's address.";
 "editor.proxy.new.note" = "Every page of this profile goes through the proxy — never around it. Without a scheme its type comes from a check: Save runs one if Check has not. The proxy stays the profile's own; it is not added to the list.";
 "editor.proxy.saved.empty" = "The proxy list is empty. Add proxies under ⋯ → Proxies…, or paste one under New.";
-"editor.proxy.saved.noneKnown" = "No proxy of the list has a known type yet: check them under ⋯ → Proxies… first, or paste one under New.";
+"editor.proxy.saved.noneKnown" = "No proxy of the list has a known type yet: check them in Proxies on the left first, or paste one under New.";
 "editor.proxy.saved.search" = "Search proxies";
 "editor.proxy.saved.chosen" = "Chosen: %@";
 "editor.proxy.saved.check.help" = "Checks the chosen proxy as the list checks it; what it finds is kept in the list too.";
@@ -1800,7 +1800,7 @@
 "profiles.row.restorePoints" = "Restore Points and History…";
 "restorePoints.title" = "Restore Points — %@";
 "restorePoints.explanation" = "Keep the profile as it is now — its site data, cookies, history and open tabs — and put it back later, say after a sign-up that went wrong. Settings, passwords and bookmarks stay as they are.";
-"restorePoints.ephemeral" = "A temporary profile keeps nothing between launches: there is nothing to go back to.";
+"restorePoints.ephemeral" = "An ephemeral profile keeps nothing between launches: there is nothing to go back to.";
 "restorePoints.stopFirst" = "Stop the profile to make or restore a point: its data is encrypted on disk only while it is stopped.";
 "restorePoints.sync" = "This profile syncs its cookies: the next sync can bring back cookies another Mac has.";
 "restorePoints.name" = "Name";
@@ -1860,7 +1860,7 @@
 "duplicate.more" = "…and %ld more";
 "duplicate.action" = "Duplicate";
 "duplicate.error.noProxies" = "No proxy of the list fits: none of that country, or none whose type a check has found.";
-"duplicate.partly" = "%1$ld copies were made, then: %2$@";
+"duplicate.partly" = "%1$ld copies were made; the rest were not: %2$@";
 "journal.copied" = "Made as a copy of “%@”";
 "journal.copied.plain" = "Made as a copy";
 "inspector.network" = "Network";
@@ -3921,10 +3921,10 @@
 "profiles.row.cookieSnapshots" = "Restore Cookies from a Snapshot…";
 "cookieSnapshots.title" = "Cookie Snapshots — %@";
 "cookieSnapshots.explanation" = "Lumen copies the profile’s persistent cookies every few minutes while they change, and when it stops. When its cookie store loses them, the next launch puts them back by itself; here you can put back a snapshot yourself.";
-"cookieSnapshots.ephemeral" = "A temporary profile keeps no website data: it has no snapshots.";
+"cookieSnapshots.ephemeral" = "An ephemeral profile keeps no website data: it has no snapshots.";
 "cookieSnapshots.off" = "Cookie snapshots are off for this profile (its settings → Data). The snapshots below, if any, are removed at its next launch.";
 "cookieSnapshots.unreadable" = "The snapshots could not be read. They are not deleted: the next snapshot moves the file aside.";
-"cookieSnapshots.list" = "Snapshots: %1$ld of %2$ld";
+"cookieSnapshots.list" = "Snapshots: %1$ld (the last %2$ld are kept)";
 "cookieSnapshots.none" = "No snapshot yet: the first is taken while the profile runs and has cookies.";
 "cookieSnapshots.count" = "cookies: %ld";
 "cookieSnapshots.count.valid" = "cookies still valid: %1$ld of %2$ld";
