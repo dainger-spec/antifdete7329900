@@ -109,6 +109,7 @@ ALLOWED_IN_FILE = {
         "this file's and an exception's name — never its reason, never what was typed",
     ("AddressBarCommit.swift", "intent.thrownIn.joined(separator: \"; \")"): "the same places, one after the other",
     ("AddressBarCommit.swift", "encodings.joined(separator: \" \")"): "Objective-C type encodings of a method of Safari's",
+    ("AddressBarCommit.swift", "answer"): "the Objective-C type encoding of what a method of Safari's answers",
     ("AddressBarCommit.swift", "SafariChrome.searchEngineInUse"): "the name of a search engine in Safari's own provider list",
     ("AddressBarCommit.swift", "wanted.name"): "the name of a search engine of the app's fixed list (SearchEngine.name)",
     ("SafariChromeHost.swift", "patched.joined(separator: \", \")"): "names of Safari's configuration factories",

@@ -118,14 +118,16 @@ enum AddressBarCommit {
     /// Return's search goes) is let through when Safari's engine is the profile's; otherwise the
     /// profile's process loads the profile's engine's results page itself, in the front tab.
     private static func searchWithTheProfilesEngine() {
-        typealias Search = @convention(c) (AnyObject, Selector, AnyObject?, Int, AnyObject?) -> Void
+        // Measured on macOS 27.0.1: an object, an integer and an object in, and a register-wide value
+        // back (an object or a BOOL). Called through raw pointers either way: nothing is retained or
+        // released here, and what Safari's own method answers is handed back untouched.
+        typealias Search = @convention(c) (UnsafeRawPointer?, Selector, UnsafeRawPointer?, Int, UnsafeRawPointer?) -> UnsafeRawPointer?
         let selector = NSSelectorFromString("_searchWebForString:withWindowPolicy:punchoutDetails:")
         guard let cls = NSClassFromString("BrowserWindowController"), let method = class_getInstanceMethod(cls, selector),
               method_getNumberOfArguments(method) == 5 else {
             log.notice("No -[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] in this Safari")
             return
         }
-        // An object, an integer and an object, and nothing back: anything else is not the method measured.
         var encodings: [String] = []
         for index in 2..<5 {
             guard let raw = method_copyArgumentType(method, UInt32(index)) else { return }
@@ -133,18 +135,28 @@ enum AddressBarCommit {
             free(raw)
         }
         let returns = method_copyReturnType(method)
-        let returnsNothing = String(cString: returns) == "v"
+        let answer = String(cString: returns)
         free(returns)
-        guard returnsNothing, encodings[0].hasSuffix("@"), "qQlLiI".contains(encodings[1].last ?? "?"), encodings[2].hasSuffix("@") else {
-            log.notice("-[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] is not as measured (\(encodings.joined(separator: " "), privacy: .public)): Safari's search is left as it is")
+        let answersBool = answer == "B" || answer == "c"
+        guard ["v", "@", "B", "c"].contains(answer), encodings[0].hasSuffix("@"), "qQlLiI".contains(encodings[1].last ?? "?"),
+              encodings[2].hasSuffix("@") else {
+            log.notice("-[BrowserWindowController _searchWebForString:withWindowPolicy:punchoutDetails:] is not as measured (\(answer, privacy: .public) \(encodings.joined(separator: " "), privacy: .public)): Safari's search is left as it is")
             return
         }
         let original = unsafeBitCast(method_getImplementation(method), to: Search.self)
-        let replacement: @convention(block) (AnyObject, AnyObject?, Int, AnyObject?) -> Void = { controller, text, policy, details in
-            let done = Thread.isMainThread && MainActor.assumeIsolated { AddressBarCommit.searchItself(controller, text as? String) }
-            if !done { original(controller, selector, text, policy, details) }
+        let replacement: @convention(block) (UnsafeRawPointer?, UnsafeRawPointer?, Int, UnsafeRawPointer?) -> UnsafeRawPointer? = { controller, text, policy, details in
+            var done = false
+            if Thread.isMainThread, let controller {
+                let receiver = Unmanaged<AnyObject>.fromOpaque(controller).takeUnretainedValue()
+                let words = text.flatMap { Unmanaged<AnyObject>.fromOpaque($0).takeUnretainedValue() as? String }
+                done = MainActor.assumeIsolated { AddressBarCommit.searchItself(receiver, words) }
+            }
+            // Searched here: "done" as a BOOL, nothing as an object.
+            if done { return answersBool ? UnsafeRawPointer(bitPattern: 1) : nil }
+            return original(controller, selector, text, policy, details)
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
+        log.notice("Safari's search from the address bar is held to the profile's engine (answers \(answer, privacy: .public))")
     }
 
     /// The profile's engine's results for `text` in the front tab of `controller`'s window, when

@@ -932,8 +932,12 @@ enum SafariChrome {
                 parts.append("\(name)=\(String(describing: value))")
             }
         }
-        let lists = ["providers", "allProviders", "searchProviders", "availableProviders"]
-            + getters(controller, ["providers"]).filter { !$0.hasPrefix("_") && !$0.hasPrefix("reload") && !$0.hasPrefix("load") }
+        let found = getters(controller, ["providers", "providerList", "EngineNames"])
+            .filter { !$0.hasPrefix("_") && !$0.hasPrefix("reload") && !$0.hasPrefix("load") }
+        for name in found where name.hasSuffix("Names") {
+            if let names = ask(controller, name) as? [String] { parts.append("\(name): \(names.joined(separator: ", "))") }
+        }
+        let lists = ["providers", "allProviders", "searchProviders", "availableProviders"] + found.filter { !$0.hasSuffix("Names") }
         for name in lists {
             if let list = ask(controller, name) as? [NSObject] {
                 parts.append("\(name): \(list.count)")
