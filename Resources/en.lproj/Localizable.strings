@@ -3967,6 +3967,7 @@
 "cookieSnapshots.count" = "cookies: %ld";
 "cookieSnapshots.count.valid" = "cookies still valid: %1$ld of %2$ld";
 "cookieSnapshots.restore" = "Restore…";
+"cookieSnapshots.restore.allExpired" = "Every cookie of this snapshot has expired.";
 "cookieSnapshots.restore.title" = "Restore the cookies of %@?";
 "cookieSnapshots.restore.message" = "%ld cookies come back. Newer ones stay.";
 "cookieSnapshots.restore.now" = "The profile is running — they appear at once.";

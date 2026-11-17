@@ -8,6 +8,8 @@ import SwiftUI
 /// when the profile runs, else at its next launch, before its first page loads.
 struct CookieSnapshotsView: View {
     let profile: ProfileSummary
+    /// The snapshots to show instead of the profile's (the UI snapshots: no vault there).
+    var sample: [CookieSnapshot]?
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
 
@@ -95,6 +97,8 @@ struct CookieSnapshotsView: View {
                         Button(L("cookieSnapshots.restore")) { restoring = snapshot }
                             .buttonStyle(.lumenGhost)
                             .disabled(working || valid == 0 || ephemeral || model.isBusy(profile.id))
+                            // A greyed Restore says why.
+                            .help(valid == 0 ? L("cookieSnapshots.restore.allExpired") : "")
                     }
                     .padding(.vertical, 4)
                 }
@@ -127,6 +131,11 @@ struct CookieSnapshotsView: View {
     // MARK: Actions
 
     private func reload() {
+        if let sample {
+            snapshots = sample
+            unreadable = false
+            return
+        }
         if let read = model.cookieSnapshots(for: profile.id) {
             snapshots = read
             unreadable = false

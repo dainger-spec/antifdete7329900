@@ -3967,6 +3967,7 @@
 "cookieSnapshots.count" = "cookies: %ld";
 "cookieSnapshots.count.valid" = "действительных cookies: %1$ld из %2$ld";
 "cookieSnapshots.restore" = "Восстановить…";
+"cookieSnapshots.restore.allExpired" = "Все cookies этого снимка истекли.";
 "cookieSnapshots.restore.title" = "Восстановить cookies на %@?";
 "cookieSnapshots.restore.message" = "Вернутся cookies (%ld). Более новые останутся.";
 "cookieSnapshots.restore.now" = "Профиль запущен — они появятся сразу.";

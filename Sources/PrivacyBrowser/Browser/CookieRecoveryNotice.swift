@@ -82,6 +82,12 @@ enum CookieRecoveryNotice {
         return windows.first { $0.isKeyWindow } ?? windows.first
     }
 
+    /// The notice as it is drawn, alone (the UI snapshots).
+    static func preview(_ report: CookieSnapshotKeeper.Report) -> some View {
+        let words = text(report)
+        return NoticeView(title: words.title, detail: words.detail) {}
+    }
+
     /// Whether a notice is on screen now (the self-test's).
     static var isShowing: Bool { !shown.isEmpty }
 
