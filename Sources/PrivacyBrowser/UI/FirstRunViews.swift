@@ -151,12 +151,13 @@ struct FirstRunProtectionView: View {
                 // Clear of the horizon's light — its line drops by the column's edges — so that no
                 // line of it crosses a card or a word (the coordinator's review of run 44124663489).
                 Color.clear.frame(height: 46)
-                if virtualMachine {
-                    FirstRunCard(symbol: "info.circle", title: L("firstRun.protection.virtualMachine.title"),
-                                 detail: L("firstRun.protection.virtualMachine"), status: .unavailable) { EmptyView() }
-                } else {
-                    if let guardState { guardCard(guardState) }
-                    if let cameraState { cameraCard(cameraState) }
+                // The cards whole where the window has room for them; else they scroll in a fixed
+                // area, so that the button and the line under it never leave the window (two cards
+                // with their steps in "Ждёт вас" ran past its foot: the owner's review).
+                ViewThatFits(in: .vertical) {
+                    cards
+                    ScrollView(.vertical) { cards.padding(.trailing, 2) }
+                        .frame(maxHeight: 300)
                 }
                 LockActionButton(title: L(allDone ? "firstRun.done" : "firstRun.continue"), action: done)
                     .keyboardShortcut(.defaultAction)
@@ -173,6 +174,19 @@ struct FirstRunProtectionView: View {
             guard preview == nil else { return }
             networkGuard.refresh()
             camera.refresh()
+        }
+    }
+
+    @ViewBuilder
+    private var cards: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if virtualMachine {
+                FirstRunCard(symbol: "info.circle", title: L("firstRun.protection.virtualMachine.title"),
+                             detail: L("firstRun.protection.virtualMachine"), status: .unavailable) { EmptyView() }
+            } else {
+                if let guardState { guardCard(guardState) }
+                if let cameraState { cameraCard(cameraState) }
+            }
         }
     }
 
