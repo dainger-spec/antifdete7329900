@@ -539,11 +539,11 @@
 "editor.location.lookupFailed" = "At the last launch no geolocation service answered through the proxy — where it exits is not confirmed, and the time zone and language did not come from it.";
 "launch.webrtcOff.httpProxy" = "WebRTC is off in this profile: an HTTP proxy cannot carry UDP. WebRTC through a proxy needs SOCKS5.";
 "launch.webrtcOff.guardNotInBuild" = "WebRTC is off in this profile: this version of Lumen has no network guard, and without it WebRTC's UDP could leave around the proxy from this Mac's real address.";
-"launch.webrtcOff.guardNotInstalled" = "WebRTC is off in this profile: Lumen's network guard is not installed. Install it under Settings › WebRTC through proxies; until then WebRTC stays off in every profile with a proxy.";
+"launch.webrtcOff.guardNotInstalled" = "WebRTC is off in this profile: Lumen's network guard is not installed. Install it in Settings → WebRTC through proxies; until then WebRTC stays off in every profile with a proxy.";
 "launch.webrtcOff.guardAwaitingApproval" = "WebRTC is off in this profile: the network guard waits for your permission in System Settings › General › Login Items & Extensions › Network Extensions.";
-"launch.webrtcOff.guardOff" = "WebRTC is off in this profile: the network guard is switched off in System Settings. Turn it on under Settings › WebRTC through proxies.";
+"launch.webrtcOff.guardOff" = "WebRTC is off in this profile: the network guard is switched off in System Settings. Turn it on in Settings → WebRTC through proxies.";
 "launch.webrtcOff.guardNotAnswering" = "WebRTC is off in this profile: the network guard does not answer (it may be updating). Start the profile again in a minute.";
-"launch.webrtcOff.guardUnproven" = "WebRTC is off in this profile: it is not confirmed yet on this Mac that the network guard sees the profile's connections. The check runs by itself; if it failed, Settings › WebRTC through proxies says so.";
+"launch.webrtcOff.guardUnproven" = "WebRTC is off in this profile: it is not confirmed yet on this Mac that the network guard sees the profile's connections. The check runs by itself; if it failed, Settings → WebRTC through proxies says so.";
 "launch.webrtcOff.proxyWithoutUDP" = "WebRTC is off in this profile: its proxy does not carry UDP (UDP ASSOCIATE refused, or nothing came back through it). WebRTC needs a SOCKS5 proxy with UDP.";
 "launch.webrtcOff.proxyUDPElsewhere" = "WebRTC is off in this profile: its proxy sends UDP out from another address than its TCP. A site would see two different addresses — and learn that the profile goes through a proxy. WebRTC needs a proxy whose UDP and TCP leave from one address.";
 "launch.webrtcOff.proxyExitUnknown" = "WebRTC is off in this profile: the address its proxy leaves from could not be found out, and without it there is no telling that WebRTC would leave from the same address as the pages. Start the profile again; if it happens again, the proxy does not let the address check through (a request to 1.1.1.1), and WebRTC will not go through it.";
@@ -1395,7 +1395,7 @@
 "updates.notice.rolledBack" = "Lumen %@ was installed but didn’t start, so the previous version was put back. Your profiles and data are untouched.";
 "updates.notice.nextQuit" = "It installs the next time you quit Lumen.";
 "updates.notice.nextQuitEncrypted" = "It installs the next time you quit, once every profile is closed and encrypted.";
-"updates.notice.checkAgain" = "You can check for it again in Settings, under Updates.";
+"updates.notice.checkAgain" = "You can check for it again in Settings → Updates.";
 "updates.now.blocked" = "The update cannot be installed where the app is; see Settings → Updates.";
 "updates.now.failed" = "The update’s installer didn’t start.";
 "updates.now.failed.next" = "Try again, or download Lumen again from the website.";
@@ -2027,7 +2027,7 @@
 "settings.appearance.entry" = "Entry screen";
 "settings.appearance.light" = "Lumen's light at entry";
 "settings.appearance.light.detail" = "The eclipse’s horizon on the entry screen and the light in the corners of the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
-"settings.appearance.welcome" = "Greet with the welcome window at every start";
+"settings.appearance.welcome" = "Show the greeting at every start";
 "settings.appearance.welcome.detail" = "“welcome” written as with a pen before the lock screen, every time Lumen starts. Off: it greets you only at the very first start.";
 "settings.appearance.listAndMotion" = "List and motion";
 "settings.appearance.density" = "Profile list density";
@@ -3934,7 +3934,7 @@
 "launch.openVPNLost" = "“%1$@” was stopped: its OpenVPN connection went down and did not come back, and nothing goes around it. %2$@ Start the profile again to reconnect.";
 "openvpn.failure.notInThisBuild" = "This build of Lumen has no OpenVPN.";
 "openvpn.failure.needsOwnProcess" = "OpenVPN works only for a profile in its own process, which this build does not have.";
-"openvpn.failure.credentialsNeeded" = "The VPN server asks for a user name and password: add them to the connection in Settings › Proxies.";
+"openvpn.failure.credentialsNeeded" = "The VPN server asks for a user name and password: add them to the connection in the Proxies section of the Profiles window.";
 "openvpn.failure.serverNotFound" = "The VPN server's name could not be found. Check the connection to the internet, or the configuration.";
 "openvpn.failure.authenticationFailed" = "The VPN server refused the user name or password.";
 "openvpn.failure.certificateRefused" = "The VPN server's certificate, or the profile's, was refused: the configuration does not match the server.";
