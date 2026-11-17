@@ -110,7 +110,9 @@ enum XrayCheck {
         let token = String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(10)).lowercased()
         info("egress-token \(token)")
         info("egress-process \(ProcessInfo.processInfo.processName) \(getpid())")
-        let control = "dns-control-\(token).xray-check.invalid"
+        // Under a real domain: this Mac's resolver answers a .invalid name asked this way itself, and
+        // the question never reached the capture (run 44012119541).
+        let control = "dns-control-\(token).leak.example.com"
         info("egress-control \(control)")
         var result: UnsafeMutablePointer<addrinfo>?
         _ = getaddrinfo(control, "80", nil, &result)
@@ -241,7 +243,9 @@ enum XrayCheck {
             }
         }
 
-        // 5. Fail closed: the relay killed, and not started again.
+        // 5. Fail closed: the relay killed — started again twice, then not. From a page of the leak
+        // domain over http (the HTTP/3 site above is https, and would block the loop's http fetches as
+        // mixed content: run 44012119541).
         if spec.failClosed == name, let relayPID {
             await failClosed(name: name, manager: manager, profile: profile.id, pid: pid, relayPID: relayPID, run: run,
                              messages: { messages })
@@ -270,6 +274,7 @@ enum XrayCheck {
         func now() async -> (ok: Int, failed: Int) {
             counters(await webDriver(manager, id, "executeSync", ["script": read, "args": []]))
         }
+        _ = await webDriver(manager, id, "navigate", ["url": "http://\(run).leak.example.com/pb-served.json?fc=1"])
         _ = await webDriver(manager, id, "executeSync", ["script": loop, "args": []])
         try? await Task.sleep(nanoseconds: 3_000_000_000)
         let before = await now()

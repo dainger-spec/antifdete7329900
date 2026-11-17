@@ -28,11 +28,28 @@ env:
 
 jobs:
   links:
-    name: Links — the relay's build, every kind against a real server, and the leak test
-    runs-on: macos-26
+    name: Links on ${{ matrix.name }} — the relay's build, every kind against a real server, and the leak test
+    # On the macOS a profile runs on and the newest: macOS 26 (Xcode 26, whose builds declare its SDK,
+    # 26.5 — the leak test runs a copy declaring 14.0, what a release declares) and macOS 27 (Xcode 27,
+    # whose builds declare 14.0, as releases are made).
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS 26
+            runner: macos-26
+          - name: macOS 27
+            runner: xcode-27
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v4
+      - name: The machine
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+          defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
       - uses: actions/setup-go@v5
         with:
           go-version: '1.27.4'
@@ -71,12 +88,12 @@ jobs:
       - name: The leak test — a profile on each link, inside a capture of every packet
         if: ${{ !cancelled() && steps.app.outcome == 'success' }}
         timeout-minutes: 40
-        run: python3 -I scripts/xray_leak_check.py --app build/xray-app/Lumen.app --out build/xray-leaks
+        run: python3 -I scripts/xray_leak_check.py --app build/xray-app/Lumen.app --out build/xray-leaks --sdk 14.0
       - name: What the leak test saw
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: xray-leaks
+          name: xray-leaks-${{ matrix.runner }}
           path: |
             build/xray-leaks/*.txt
             build/xray-leaks/*.log

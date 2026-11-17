@@ -52,6 +52,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from egress_check import DOCUMENTATION, FLOW, PORT, QUESTION, SERVICES, parse  # noqa: E402
 from xray_relay_check import TLSTarget, free_port, links, make_material, wait_for_port  # noqa: E402
+from aia_variants import BINARY, PROFILE_BINARY, copy_declaring, declared_sdk  # noqa: E402
 
 # The kinds the app is checked with: every protocol, REALITY and TLS, two transports.
 CHECKED = ["reality-vision", "tls-ws", "vmess-ws", "trojan-tls", "ss2022"]
@@ -322,6 +323,8 @@ def main():
     parser.add_argument("--app", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--quic-site", default="https://cloudflare-quic.com/cdn-cgi/trace")
+    parser.add_argument("--sdk", help="run a copy of the app whose executables declare this SDK (what a release declares: "
+                                      "14.0), unless they declare it already")
     options = parser.parse_args()
     options.out = os.path.abspath(options.out)
     os.makedirs(options.out, exist_ok=True)
@@ -329,6 +332,28 @@ def main():
     relay = os.path.join(app, "Contents", "MacOS", "LumenXray")
     if not os.access(relay, os.X_OK):
         sys.exit("XRAY-LEAK FAIL the app has no links' relay (Contents/MacOS/LumenXray): build it with XRAY=1")
+    # The SDK the app's executables declare decides some of WebKit's behaviors — with 15.0 or newer this
+    # Mac fetched a certificate's missing intermediate outside a profile's proxy (docs/ISOLATION_AND_
+    # LIMITATIONS.md §2), and a release declares 14.0 (scripts/release.sh): the app is run as a release
+    # has it, as the self-test is (full.yml).
+    minos, declared = declared_sdk(os.path.join(app, BINARY))
+    if options.sdk and declared != options.sdk:
+        entitlements = os.path.join(options.out, "entitlements.plist")
+        with open(entitlements, "wb") as handle:
+            handle.write(subprocess.run(["codesign", "-d", "--entitlements", "-", "--xml", app], capture_output=True).stdout)
+        copies = os.path.join(options.out, "declaring-%s" % options.sdk)
+        shutil.rmtree(copies, ignore_errors=True)
+        os.makedirs(copies)
+        app = copy_declaring(app, options.sdk, copies, entitlements)
+        if not app:
+            sys.exit("XRAY-LEAK FAIL no copy of the app declaring SDK %s could be made" % options.sdk)
+        relay = os.path.join(app, "Contents", "MacOS", "LumenXray")
+        if subprocess.run(["codesign", "--verify", "--strict", relay]).returncode != 0:
+            sys.exit("XRAY-LEAK FAIL the copy's relay does not verify")
+    sdks = {name: declared_sdk(os.path.join(app, name))[1] for name in (BINARY, PROFILE_BINARY)}
+    print("XRAY-LEAK INFO the app run declares SDK %s (minos %s); built declaring %s" % (sdks, minos, declared))
+    if options.sdk and set(sdks.values()) != {options.sdk}:
+        sys.exit("XRAY-LEAK FAIL the app run declares %s, not SDK %s" % (sdks, options.sdk))
     server_binary = os.path.join(options.out, "xray-server")
     shutil.copy(relay, server_binary)
     address = own_address()
