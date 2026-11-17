@@ -363,6 +363,14 @@ jobs:
         continue-on-error: true
         timeout-minutes: 10
         run: TITLE="macOS 27 - a scenario in Safari's window" scripts/scenario_safari_check.sh build/unsandboxed/Lumen.app build/egress27/scenario-safari
+      - name: macOS 27 - typing into Safari 27's address bar and Return, Safari's stores (reported)
+        # scripts/address_bar_check.sh, as in the macOS 26 job: fails the step, not the job. This
+        # image is macOS 27.0.1 or 27.2 by the machine (the job's "The machine" says which); a
+        # customer on 27.2.1 could not search from the address bar.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        run: AX_POLLER=1 FS_TRACE=1 TITLE="macOS 27 - typing into Safari's address bar" scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/egress27/address-bar
       - name: macOS 27 - Selenium against a profile in Safari 27's window (WebDriver; reported)
         # scripts/webdriver_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -475,6 +483,26 @@ jobs:
           echo "exit $?"; cat build/egress27/export-check.txt
           grep '^EXPORT-CHECK' build/egress27/export-check.txt | head -20 | cut -c1-500 | sed 's/^/::notice title=macOS 27 - export in a profile process::/'
           exit 0
+      - name: macOS 27 - the address bar again, once the real Safari has data on this Mac (reported)
+        # Last in the job: the real Safari is used first — pages, a search, a bookmark — and quit, so
+        # that its history, bookmarks and container exist and are refused to the profiles (EPERM
+        # where a new runner has ENOENT), as on a person's Mac. Then the address bar check again,
+        # with the profiles' file-system calls traced (scripts/safari_stores_trace.py).
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 20
+        run: |
+          for address in https://example.com/ https://www.wikipedia.org/ "https://www.google.com/search?q=google"; do
+            open -a Safari "$address"; sleep 7
+          done
+          osascript -e 'tell application "Safari" to activate' -e 'delay 1' \
+            -e 'tell application "System Events" to keystroke "d" using command down' -e 'delay 2' \
+            -e 'tell application "System Events" to key code 36' 2>&1 || echo "no bookmark by the keyboard"
+          sleep 4
+          osascript -e 'quit app "Safari"' 2>&1 || pkill -x Safari
+          sleep 6
+          QUICK=1 FS_TRACE=1 TITLE="macOS 27 - the address bar with the real Safari's data" \
+            scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/egress27/address-bar-used google,bing
       - uses: actions/upload-artifact@v4
         if: always()
         continue-on-error: true
@@ -1056,6 +1084,29 @@ jobs:
         with:
           name: scenario-safari
           path: build/scenario-safari
+          if-no-files-found: ignore
+      - name: Typing into Safari's address bar and Return — every key reaches the field, the search goes to the profile's engine, Safari's stores
+        # scripts/address_bar_check.sh (Lumen --address-bar-check): one profile per search engine, a
+        # tab and a visited page that match what is typed, then key presses one at a time into
+        # Safari's address bar — Latin, Cyrillic, and composed as an input method; Google's profile
+        # launched twice. A customer's address bar put up "not available in a profile" at every key
+        # (0.1.17 or earlier): the field must hold what was typed, no key press may raise, the run
+        # loop may catch nothing and the window put up no notice. Every exception thrown on the way
+        # is printed with its frames. After each key the field's and the completion list's
+        # accessibility is read, in-process and by a client beside it (scripts/ax_poller.swift), as
+        # the apps that act on every key press (layout switchers, grammar checkers) read it. Then a
+        # real Return for every engine (the proxy must see the engine's host; Google's profile also
+        # goes to example.com and to the completion list's first row; a customer on macOS 27.2.1
+        # could not search), and Safari's stores in each profile's home before and after, against
+        # the complete tree, with where Safari's code looked for them (FS_TRACE).
+        if: always()
+        timeout-minutes: 20
+        run: AX_POLLER=1 FS_TRACE=1 scripts/address_bar_check.sh build/unsandboxed/Lumen.app build/address-bar
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: address-bar
+          path: build/address-bar
           if-no-files-found: ignore
       - name: Selenium against a profile — a session starts it, finds, types, clicks and reads in Safari's window (WebDriver)
         # scripts/webdriver_check.sh (Lumen --webdriver-serve, scripts/webdriver_check.py): the

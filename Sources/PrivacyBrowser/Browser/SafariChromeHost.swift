@@ -74,6 +74,9 @@ enum SafariChromeHost {
         }
         // Before the frameworks load: some of what they read, they read as they load.
         SafariChrome.configureSafarisOwnServices(for: configuration)
+        // Safari's stores in the profile's home — every folder they go in, writable, and none Safari
+        // could not open — before any of Safari's code looks for them (`SafariStores`).
+        SafariStores.prepare()
         guard SafariChrome.load() else {
             failure = .frameworksDidNotLoad
             return false

@@ -331,6 +331,8 @@ enum SafariChrome {
         bridgeNibLookups()
         bridgeNibInitializers()
         stubChromeFeatures()
+        SafariTypingGuard.install()
+        AddressBarCommit.install()
         closeSafarisAutoFill()
         installUnavailableNotice()
     }
@@ -872,6 +874,80 @@ enum SafariChrome {
     /// Safari's providers, kept for the lifetime of the process because `+shared` hands them out.
     private static var searchProviders: NSObject?
 
+    /// Notices asked of the profile's window so far (`presentNotice`), shown or not: what the
+    /// address bar's typing check reads.
+    private(set) static var noticesPresented = 0
+
+    /// Safari's search providers as this process has them — the default one and each one's name and
+    /// templates, as far as they answer — for the address bar's typing check. Asked only through
+    /// methods the objects have, each call caught: a description, never a failure.
+    static func searchProvidersDescription() -> String {
+        guard let controller = searchProviders else { return "no providers controller" }
+        var parts: [String] = ["controller \(String(describing: Swift.type(of: controller)))"]
+        func ask(_ object: NSObject, _ name: String) -> AnyObject? {
+            let selector = NSSelectorFromString(name)
+            guard object.responds(to: selector) else { return nil }
+            var answer: AnyObject?
+            let thrown = PBCatchException { answer = object.perform(selector)?.takeUnretainedValue() }
+            if let thrown { parts.append("\(name) threw \(thrown.name.rawValue)") }
+            return answer
+        }
+        /// The no-argument methods answering an object whose names hold one of `words`, of the
+        /// object's class and its superclasses up to NSObject.
+        func getters(_ object: NSObject, _ words: [String]) -> [String] {
+            var names: [String] = []
+            var current: AnyClass? = Swift.type(of: object)
+            while let cls = current, cls != NSObject.self {
+                var count: UInt32 = 0
+                if let methods = class_copyMethodList(cls, &count) {
+                    for index in 0..<Int(count) {
+                        let name = NSStringFromSelector(method_getName(methods[index]))
+                        guard !name.contains(":"), !name.hasPrefix("."), !names.contains(name),
+                              words.contains(where: { name.localizedCaseInsensitiveContains($0) }) else { continue }
+                        let returns = method_copyReturnType(methods[index])
+                        let isObject = String(cString: returns) == "@"
+                        free(returns)
+                        if isObject { names.append(name) }
+                    }
+                    free(methods)
+                }
+                current = class_getSuperclass(cls)
+            }
+            return names
+        }
+        func describe(_ provider: NSObject) -> String {
+            var fields: [String] = [String(describing: Swift.type(of: provider))]
+            for name in getters(provider, ["name", "template", "identifier"]) where !name.hasPrefix("_") {
+                let value = ask(provider, name)
+                fields.append("\(name)=\(value.map { String(describing: $0).prefix(90) } ?? "nil")")
+            }
+            return fields.joined(separator: ", ")
+        }
+        parts.append("the controller's lists: " + getters(controller, ["provider", "engine"]).joined(separator: " "))
+        for name in ["defaultSearchEngineName", "defaultSearchProvider", "defaultSearchProviderForPrivateBrowsing"] {
+            guard let value = ask(controller, name) else { continue }
+            if let object = value as? NSObject, !(value is NSString) {
+                parts.append("\(name): " + describe(object))
+            } else {
+                parts.append("\(name)=\(String(describing: value))")
+            }
+        }
+        let found = getters(controller, ["providers", "providerList", "EngineNames"])
+            .filter { !$0.hasPrefix("_") && !$0.hasPrefix("reload") && !$0.hasPrefix("load") }
+        for name in found where name.hasSuffix("Names") {
+            if let names = ask(controller, name) as? [String] { parts.append("\(name): \(names.joined(separator: ", "))") }
+        }
+        let lists = ["providers", "allProviders", "searchProviders", "availableProviders"] + found.filter { !$0.hasSuffix("Names") }
+        for name in lists {
+            if let list = ask(controller, name) as? [NSObject] {
+                parts.append("\(name): \(list.count)")
+                for provider in list.prefix(12) { parts.append("  " + describe(provider)) }
+                break
+            }
+        }
+        return parts.joined(separator: "\n")
+    }
+
     /// Features of Safari's chrome that need services only Safari has, and take the process down
     /// when they do not find them. None of them is wanted here.
     ///
@@ -981,6 +1057,8 @@ enum SafariChrome {
 
     /// Replaces the late stubs whose classes are loaded by now; called again as images load.
     static func stubLateFeatures() {
+        // Typing's guard too, on the classes of an image that came in later (SafariPlatformSupport's).
+        if isAvailable { SafariTypingGuard.installLate() }
         for (className, selectorName) in lateStubs where !lateStubsMade.contains(className + " " + selectorName) {
             guard NSClassFromString(className) != nil else { continue }
             replaceWithConstant(className, selectorName) { nil }
@@ -1210,35 +1288,82 @@ enum SafariChrome {
     /// The menu item whose action was last sent, and when.
     private static var lastMenuItem: (title: String, at: Date)?
     private static var isShowingUnavailable = false
+    /// When to tell the person, and when the log is enough (`UnavailableNoticePolicy`).
+    private static var noticePolicy = UnavailableNoticePolicy()
 
     /// An exception AppKit's run loop caught (and `ExceptionLog` wrote down) right after the user
-    /// chose a menu item, pressed a key or clicked is one of Safari's features failing for want of
-    /// what only the real Safari has. Instead of nothing happening, the profile's window says so,
-    /// naming the menu item when there was one. Nothing is said for an exception nobody asked for
-    /// (a timer, a page loading): the log has those. One notice at a time.
+    /// chose a menu item, pressed a key or clicked may be one of Safari's features failing for want
+    /// of what only the real Safari has. A menu item's failure is said, naming the item, once per
+    /// item; a click's once per process; never two within the policy's cooldown. Typing is never
+    /// interrupted: a customer's address bar threw at every key press, and the notice, put up over
+    /// the field at every key, took the keyboard from it — nothing could be typed (0.1.17). An
+    /// exception nobody asked for (a timer, a page loading) is in the log only.
     private static func installUnavailableNotice() {
         _ = NotificationCenter.default.addObserver(forName: NSMenu.willSendActionNotification, object: nil, queue: nil) { note in
             let title = (note.userInfo?["MenuItem"] as? NSMenuItem)?.title ?? ""
             MainActor.assumeIsolated { lastMenuItem = (title, Date()) }
         }
-        ExceptionLog.onCaughtInRunLoop = { _, eventType in
-            MainActor.assumeIsolated { showUnavailable(eventType: eventType) }
+        ExceptionLog.onCaughtInRunLoop = { exception, eventType in
+            MainActor.assumeIsolated {
+                // Thrown on the way of a Return in the address bar: that Return does what was asked
+                // itself (`AddressBarCommit`), and the window says nothing.
+                if AddressBarCommit.takesCaughtException(exception) {
+                    log.notice("A caught exception was not announced: the address bar's Return handles it")
+                    return
+                }
+                showUnavailable(eventType: eventType)
+            }
         }
+    }
+
+    /// What the person was doing when the run loop caught an exception in an event of this type.
+    static func noticeCause(eventType: NSEvent.EventType?, menuItem: String?, responder: NSResponder?) -> UnavailableNoticePolicy.Cause {
+        if let menuItem { return .menuItem(menuItem) }
+        guard let eventType else { return .other }
+        switch eventType {
+        case .keyDown, .keyUp:
+            return .key(intoText: takesText(responder))
+        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseUp:
+            return .click
+        default:
+            return .other
+        }
+    }
+
+    /// Whether keys pressed on `responder` are typing: a field editor, a text field or view, a page.
+    private static func takesText(_ responder: NSResponder?) -> Bool {
+        guard let responder else { return false }
+        if responder is NSText || responder is NSTextField || responder is WKWebView { return true }
+        if responder is NSTextInputClient { return true }
+        // A view inside a web view (WebKit's own views take the page's keys).
+        var view = responder as? NSView
+        while let current = view {
+            if current is WKWebView { return true }
+            view = current.superview
+        }
+        return false
     }
 
     private static func showUnavailable(eventType: NSEvent.EventType?) {
         let item = lastMenuItem.flatMap { Date().timeIntervalSince($0.at) < 3 ? $0.title : nil }
-        let byInput = eventType.map { [.keyDown, .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .otherMouseUp].contains($0) } ?? false
-        guard item != nil || byInput else { return }
-        lastMenuItem = nil
-        let text = item.map { $0.isEmpty ? L("safari.unavailable.action") : String(format: L("safari.unavailable.item"), $0) }
-            ?? L("safari.unavailable.action")
-        presentNotice(L("safari.unavailable.title"), text)
+        let responder = (NSApp.keyWindow ?? NSApp.mainWindow)?.firstResponder
+        let cause = noticeCause(eventType: eventType, menuItem: item, responder: responder)
+        let decision = noticePolicy.decide(cause)
+        switch decision {
+        case .logOnly(let reason):
+            log.notice("A caught exception was not announced: \(reason.rawValue, privacy: .public)")
+        case .show(let menuItem):
+            lastMenuItem = nil
+            let text = menuItem.map { $0.isEmpty ? L("safari.unavailable.action") : String(format: L("safari.unavailable.item"), $0) }
+                ?? L("safari.unavailable.action")
+            presentNotice(L("safari.unavailable.title"), text)
+        }
     }
 
     /// Shows a notice in the profile's window: a sheet on it, one at a time. `--exception-check`
     /// prints it instead.
     static var presentNotice: @MainActor (String, String) -> Void = { title, text in
+        noticesPresented += 1
         guard !isShowingUnavailable else { return }
         isShowingUnavailable = true
         let alert = NSAlert()
@@ -1640,6 +1765,8 @@ extension SafariChrome {
     static func prepareForCheck(arguments: [String]) -> Bool {
         guard !AppEnvironment.isSandboxed else { return false }
         isolateForCheck(arguments: arguments)
+        // As a profile's process does: Safari's stores in the home before its frameworks load.
+        SafariStores.prepare()
         guard load() else { return false }
         // As a profile's process does (SafariChromeHost): Safari's own folders are the home's
         // before any of Safari's code runs, not the account's (which the sandbox refuses anyway).
