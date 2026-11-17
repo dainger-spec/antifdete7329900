@@ -19,7 +19,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet { if errorMessage == nil { errorTitle = nil } }
+    }
+    /// What the alert of `errorMessage` is titled: what happened ("Update not installed"), when
+    /// whoever raised it said so (`showError(_:title:)`); nil — and the generic «Error» — when it did
+    /// not, or when messages of different titles are shown together.
+    @Published private(set) var errorTitle: String?
+    /// The error alert's title.
+    var errorAlertTitle: String { errorTitle ?? L("common.error") }
     /// Why the master password just typed is not accepted (§10.1): it is the account's password or
     /// the license's key. Shown under its field, on the setup screen and in "Change master password";
     /// cleared as the password changes.
@@ -2025,16 +2033,21 @@ final class AppModel: ObservableObject {
             }
         }
         updater.start()
+        // Said in the person's words, under a title of its own (`UpdateNoticeText`): the installer's
+        // and the quit's reasons are English, for the log, and went into an alert titled «Error» as
+        // they were (a tester, 17 November). They are logged here.
         switch updater.notice {
         case .outcome(let outcome)?:
-            switch outcome.result {
-            case .installed: updatedTo = outcome.version // and the Updates section says when
-            case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
-            case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
-            case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))
+            if outcome.result == .installed {
+                updatedTo = outcome.version // and the Updates section says when
+            } else if let text = UpdateNoticeText.outcome(outcome) {
+                Logger(subsystem: "PrivacyBrowser", category: "Updates")
+                    .notice("The last update was not installed: \(outcome.result.rawValue, privacy: .public), \(outcome.detail, privacy: .private)")
+                showError(text, title: UpdateNoticeText.title(outcome.result))
             }
         case .deferred(let reason)?:
-            showError(String(format: L("updates.notice.deferred"), reason))
+            Logger(subsystem: "PrivacyBrowser", category: "Updates").notice("The last quit did not install the update: \(reason, privacy: .private)")
+            showError(UpdateNoticeText.deferred(reason), title: UpdateNoticeText.title(nil))
         case nil:
             break
         }
@@ -2071,11 +2084,11 @@ final class AppModel: ObservableObject {
         case .started:
             NSApp.terminate(nil)
         case .refused(let reasons):
-            showError(String(format: L("updates.now.refused"), reasons.joined(separator: "\n")))
+            showError(UpdateNoticeText.refusedNow(reasons), title: UpdateNoticeText.title(nil))
         case .blocked:
-            showError(L("updates.now.blocked"))
+            showError(L("updates.now.blocked"), title: UpdateNoticeText.title(nil))
         case .failed(let reason):
-            showError(String(format: L("updates.now.failed"), reason))
+            showError(UpdateNoticeText.failedNow(reason), title: UpdateNoticeText.title(nil))
         case .nothingReady:
             break
         }
@@ -2101,11 +2114,16 @@ final class AppModel: ObservableObject {
     /// Shows `message` in the error alert. What arrives while it is up is shown with it (a launch
     /// can report several things at once: an exit-IP change, a new time zone, a language note),
     /// not instead of it; a message already shown is not repeated, and the latest few are kept.
-    func showError(_ message: String) {
+    /// `title`: what happened, as the alert's title (`errorAlertTitle`); kept while what is shown
+    /// with it has the same one.
+    func showError(_ message: String, title: String? = nil) {
         var shown = errorMessage?.components(separatedBy: "\n\n") ?? []
         guard !shown.contains(message) else { return }
+        let alone = shown.isEmpty
         shown.append(message)
+        let shownTitle = alone || errorTitle == title ? title : nil
         errorMessage = shown.suffix(5).joined(separator: "\n\n")
+        errorTitle = shownTitle
     }
 
     /// `id`: the profile the work is on — what goes wrong is then said with its name

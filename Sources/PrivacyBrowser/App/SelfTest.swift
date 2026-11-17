@@ -4434,6 +4434,15 @@ final class SelfTest {
         check("errors in the person's language: the core's details in the person's words, never a code's",
               diskFull.contains(L("error.detail.diskFull")) && !diskFull.contains("errno") && !raw.contains("Domain") && !raw.contains("index.bin")
                   && port == L("error.detail.proxyPort"), "\(diskFull) | \(raw) | \(port)")
+        // An update that was not installed (`UpdateNoticeText`): the quit's and the installer's
+        // English reasons in the person's words, never an error number (a tester, 17 November).
+        let deferred = UpdateNoticeText.deferred("a profile is still running, starting or being encrypted; 2 profile process(es) had to be killed during the quit")
+        let swap = UpdateNoticeText.outcome(UpdateOutcome(result: .refused, detail: "the swap failed (errno 1); the installed app is untouched",
+                                                          fromBuild: "1", toBuild: "2", version: "0.1.19", at: Date())) ?? ""
+        check("errors in the person's language: an update that was not installed is said in the person's words",
+              deferred.contains(L("updates.reason.profileRunning")) && deferred.contains(L("updates.reason.killed"))
+                  && !deferred.contains("profile process") && swap.contains("0.1.19") && !swap.contains("errno") && !swap.contains("swap"),
+              "\(deferred) | \(swap)")
         // A virtual machine's failures (`VMFailureKind`): each kind has words of the interface's,
         // with the system's own kept under them as a technical detail; a failure of no kind the
         // app knows is a sentence of the interface's with the system's words under it; a state

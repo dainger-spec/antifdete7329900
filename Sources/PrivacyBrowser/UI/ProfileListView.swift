@@ -61,7 +61,7 @@ struct RootView: View {
         // Every sheet of the window takes the size it asks for, but never more than this room.
         .providesSheetRoom()
         .tint(Theme.accentFill)
-        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
+        .alert(model.errorAlertTitle, isPresented: Binding(get: { model.errorMessage != nil },
                                                        set: { if !$0 { model.errorMessage = nil } })) {
             Button(L("common.ok"), role: .cancel) {}
         } message: {
