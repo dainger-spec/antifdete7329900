@@ -20,8 +20,8 @@ public enum CredentialCheck {
     }
 
     /// Whether the credentials a client sent are the launch's: compared in constant time.
-    public static func matches(_ credentials: SOCKS5Server.Credentials, verifier expected: [UInt8]) -> Bool {
-        let actual = verifier(username: credentials.username, password: credentials.password)
+    public static func matches(username: [UInt8], password: [UInt8], verifier expected: [UInt8]) -> Bool {
+        let actual = verifier(username: username, password: password)
         guard actual.count == expected.count else { return false }
         var difference: UInt8 = 0
         for index in 0..<actual.count { difference |= actual[index] ^ expected[index] }

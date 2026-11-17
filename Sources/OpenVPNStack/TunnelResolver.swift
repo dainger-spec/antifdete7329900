@@ -1,3 +1,4 @@
+import OpenVPNLink
 import CLwIP
 
 /// Names looked up through the tunnel, at the DNS servers the VPN pushed (or, when it pushed

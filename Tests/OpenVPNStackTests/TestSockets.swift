@@ -140,7 +140,7 @@ enum TestSockets {
     static var verifier: [UInt8] { CredentialCheck.verifier(username: Array(username.utf8), password: Array(password.utf8)) }
 
     static func settings(packet: Int32, listening: Int32, ipv4: String = "10.99.0.2", dns: [String] = ["10.99.0.1"]) -> TunnelSettings {
-        TunnelSettings(packetSocket: packet, listeningSocket: listening, statusSocket: nil, verifier: verifier, mtu: 1500,
+        TunnelSettings(packetSocket: packet, listeningSocket: listening, statusSocket: nil, lifeline: nil, verifier: verifier, mtu: 1500,
                        ipv4: TunnelAddress(ipv4), ipv6: nil,
                        dnsServers: dns.map { TunnelSettings.DNSServer(address: TunnelAddress($0)!, port: 53) }, dnsPushed: true)
     }

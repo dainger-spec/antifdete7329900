@@ -1,3 +1,4 @@
+import OpenVPNLink
 /// What OpenVPN hands the program it starts as its tun device (`--dev-node unix:`, OpenVPN 2.7's
 /// AF_UNIX tun), read from that program's environment, and what Lumen's app adds to it.
 ///
@@ -9,7 +10,7 @@
 /// The app's part (`setenv` in the configuration it gives OpenVPN): `LUMEN_SOCKS_FD`, the
 /// listening socket on 127.0.0.1 the profile is given; `LUMEN_SOCKS_VERIFIER`, the SHA-256 of
 /// the launch's credentials (`CredentialCheck`); `LUMEN_STATUS_FD`, where the program says what it
-/// does (optional).
+/// does, and `LUMEN_LIFELINE_FD`, whose end says the app is gone (both optional).
 public struct TunnelSettings: Equatable, Sendable {
     public struct DNSServer: Equatable, Sendable {
         public var address: TunnelAddress
@@ -19,6 +20,9 @@ public struct TunnelSettings: Equatable, Sendable {
     public var packetSocket: Int32
     public var listeningSocket: Int32
     public var statusSocket: Int32?
+    /// A pipe whose other end only the app holds (`LUMEN_LIFELINE_FD`): its end means the app is
+    /// gone, and the tunnel with it.
+    public var lifeline: Int32?
     public var verifier: [UInt8]
     public var mtu: Int
     public var ipv4: TunnelAddress?
@@ -59,6 +63,7 @@ public struct TunnelSettings: Equatable, Sendable {
         let packets = try descriptor("TUNTAP_SOCKET_FD")
         let listening = try descriptor("LUMEN_SOCKS_FD")
         let status = environment["LUMEN_STATUS_FD"] != nil ? try descriptor("LUMEN_STATUS_FD") : nil
+        let lifeline = environment["LUMEN_LIFELINE_FD"] != nil ? try descriptor("LUMEN_LIFELINE_FD") : nil
         if let type = environment["TUNTAP_DEV_TYPE"], type != "tun" { throw Problem.tap }
         guard let verifierText = environment["LUMEN_SOCKS_VERIFIER"] else { throw Problem.missing("LUMEN_SOCKS_VERIFIER") }
         guard let verifier = hexBytes(verifierText), verifier.count == 32 else { throw Problem.invalid("LUMEN_SOCKS_VERIFIER") }
@@ -71,7 +76,7 @@ public struct TunnelSettings: Equatable, Sendable {
         let ipv6 = environment["ifconfig_ipv6_local"].flatMap(TunnelAddress.init).flatMap { $0.family == .v6 && !$0.isAny ? $0 : nil }
         guard ipv4 != nil || ipv6 != nil else { throw Problem.noAddress }
         let pushed = dnsServers(environment)
-        return TunnelSettings(packetSocket: packets, listeningSocket: listening, statusSocket: status, verifier: verifier,
+        return TunnelSettings(packetSocket: packets, listeningSocket: listening, statusSocket: status, lifeline: lifeline, verifier: verifier,
                               mtu: mtu, ipv4: ipv4, ipv6: ipv6,
                               dnsServers: pushed.isEmpty ? fallbackDNS : pushed, dnsPushed: !pushed.isEmpty)
     }

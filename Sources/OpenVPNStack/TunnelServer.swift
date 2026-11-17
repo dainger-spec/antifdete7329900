@@ -1,3 +1,4 @@
+import OpenVPNLink
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -30,9 +31,12 @@ public final class TunnelServer {
         case parentGone
         case packetSocketClosed(Int32)
         case listenerFailed(Int32)
+        /// The app's end of the lifeline closed: the app is gone.
+        case lifelineCut
 
         public var description: String {
             switch self {
+            case .lifelineCut: return "the app is gone"
             case .stopped: return "stopped"
             case .parentGone: return "OpenVPN is gone"
             case .packetSocketClosed(let code): return "OpenVPN's packet socket closed (\(code))"
@@ -146,6 +150,7 @@ public final class TunnelServer {
         entries.append(pollfd(fd: wakeRead, events: Int16(POLLIN), revents: 0))
         entries.append(pollfd(fd: settings.packetSocket, events: Int16(POLLIN), revents: 0))
         entries.append(pollfd(fd: settings.listeningSocket, events: clients.count < tuning.maximumClients ? Int16(POLLIN) : 0, revents: 0))
+        entries.append(pollfd(fd: settings.lifeline ?? -1, events: Int16(POLLIN), revents: 0))
         let fixed = entries.count
         var order: [Int32] = []
         for (descriptor, client) in clients {
@@ -168,6 +173,10 @@ public final class TunnelServer {
 
         if entries[0].revents != 0 { drainWake() }
         if stopRequested { return .stopped }
+        if entries[3].revents != 0, let lifeline = settings.lifeline {
+            var byte: UInt8 = 0
+            if read(lifeline, &byte, 1) <= 0 { return .lifelineCut }
+        }
         let packetEvents = entries[1].revents
         if packetEvents & Int16(POLLIN) != 0 {
             if let ending = readPackets() { return ending }
@@ -429,7 +438,7 @@ public final class TunnelServer {
                 case .invalid: close(client); return
                 case .value(let credentials, let consumed):
                     client.input.removeFirst(consumed)
-                    let accepted = CredentialCheck.matches(credentials, verifier: settings.verifier)
+                    let accepted = CredentialCheck.matches(username: credentials.username, password: credentials.password, verifier: settings.verifier)
                     client.queueControl(SOCKS5Server.credentialsAnswer(accepted: accepted))
                     guard accepted else {
                         counts.refusedCredentials += 1

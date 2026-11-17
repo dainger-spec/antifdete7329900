@@ -60,6 +60,8 @@ struct ProxyListPanel: View {
 
     @State private var search = ""
     @State private var adding = false
+    /// Add OpenVPN…: a `.ovpn` file as an entry (docs/OPENVPN.md).
+    @State private var addingOpenVPN = false
     @State private var importing = false
     @State private var exporting = false
     @State private var assigning: ProxyAssignView.Request?
@@ -93,6 +95,9 @@ struct ProxyListPanel: View {
         .sheet(isPresented: $adding) {
             ProxyEditView(proxies: proxies, entry: nil, profileCount: 0) { added in selection = [added] }
         }
+        .sheet(isPresented: $addingOpenVPN) {
+            OpenVPNImportView(proxies: proxies) { added in selection = [added] }
+        }
         .sheet(isPresented: $importing) {
             ProxyImportView(proxies: proxies) { added in selection = Set(added) }
         }
@@ -101,7 +106,11 @@ struct ProxyListPanel: View {
         }
         .sheet(item: $assigning) { request in ProxyAssignView(request: request) }
         .sheet(item: $editing) { entry in
-            ProxyEditView(proxies: proxies, entry: entry, profileCount: profileCount(entry))
+            if entry.proxy.isOpenVPN {
+                OpenVPNImportView(proxies: proxies, entry: entry)
+            } else {
+                ProxyEditView(proxies: proxies, entry: entry, profileCount: profileCount(entry))
+            }
         }
         .confirmationDialog(String(format: L("proxies.delete.title"), selectedVisible.count), isPresented: $confirmingDelete,
                             titleVisibility: .visible) {
@@ -323,6 +332,8 @@ struct ProxyListPanel: View {
     private var moreMenu: some View {
         MoreMenu {
             Button(L("proxies.add")) { adding = true }
+                .disabled(proxies.loadError != nil)
+            Button(L("proxies.addOpenVPN")) { addingOpenVPN = true }
                 .disabled(proxies.loadError != nil)
             Button(L("proxies.assign")) {
                 assigning = ProxyAssignView.Request(profileIDs: [], proxyIDs: selectedVisible)

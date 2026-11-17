@@ -53,6 +53,16 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session was granted another profile\n".utf8))
             exit(2)
         }
+        // The profile's OpenVPN tunnel, when its manager started one: its local port follows the
+        // grant (`OpenVPNHandoff`).
+        if ProcessInfo.processInfo.environment[OpenVPNHandoff.variable] == "1" {
+            do {
+                OpenVPNHandoff.received = try OpenVPNHandoff.read { count in try? FileHandle.standardInput.read(upToCount: count) }
+            } catch {
+                FileHandle.standardError.write(Data("--profile-session expects its tunnel's port after the grant\n".utf8))
+                exit(2)
+            }
+        }
         // The profile's own settings first: what this process may send, and through which proxy,
         // is decided before anything in it can send at all — before Safari's frameworks, which
         // start clients of their own as soon as they load, are even loaded (ProfileNetworkGuard).
@@ -66,7 +76,9 @@ enum ProfileSessionHost {
                 DispatchQueue.main.async { MainActor.assumeIsolated { ProfileSessionHost.send(.configurationSaved) } }
             }
             stored = try repository.loadConfiguration(profileID)
-            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled,
+            // An OpenVPN connection is held to its tunnel's port, never to the VPN server's address.
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: try OpenVPNHandoff.effective(stored.proxy),
+                                           safeBrowsing: stored.safeBrowsingEnabled,
                                            protectsLocalNetwork: stored.blocksLocalNetwork)
         } catch {
             log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .private)")

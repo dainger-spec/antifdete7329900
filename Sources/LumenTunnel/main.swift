@@ -63,6 +63,8 @@ status.say(["event": "up", "ipv4": settings.ipv4.map { "\($0)" } ?? "", "ipv6": 
             "mtu": "\(settings.mtu)", "dns": dns.joined(separator: ","), "dnsPushed": settings.dnsPushed ? "1" : "0",
             "pid": "\(getpid())"])
 let ending = server.run()
+// The app is gone: OpenVPN, which nothing reaches any more, ends too.
+if ending == .lifelineCut { kill(getppid(), SIGTERM) }
 let counts = server.counts
 say("down: \(ending) — clients \(counts.clients), refused \(counts.refusedCredentials), connects \(counts.connects), "
     + "failed \(counts.connectFailures), associations \(counts.associations), packets in \(counts.packetsIn) out \(counts.packetsOut) "

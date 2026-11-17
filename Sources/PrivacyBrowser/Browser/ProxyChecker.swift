@@ -54,6 +54,8 @@ enum ProxyChecker {
     /// machine's start (`VMCenter.checkProxy`), which asks for the UDP: a machine's HTTP/3 and
     /// WebRTC go through the proxy only where it carries UDP.
     static func check(_ proxy: ProxySettings, latencySamples: Int = 3, triesUDP: Bool = true) async -> ProxyCheckResult {
+        // An OpenVPN connection is checked through a tunnel of its own, made for the check.
+        if proxy.isOpenVPN { return await OpenVPNTunnels.check(proxy, latencySamples: latencySamples, triesUDP: triesUDP) }
         let time = Date()
         // Settings that cannot be applied: nothing is sent at all (there would be nothing to send
         // the lookup through but the direct connection).

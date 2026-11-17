@@ -1,3 +1,4 @@
+import OpenVPNLink
 /// The server side of SOCKS5 (RFC 1928) with user name and password (RFC 1929), as the tunnel's
 /// local port speaks it: what a client sends, read from a buffer as it comes, and what is answered.
 ///

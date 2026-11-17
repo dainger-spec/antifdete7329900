@@ -1,3 +1,4 @@
+import OpenVPNLink
 /// DNS questions and answers (RFC 1035) as the tunnel's resolver asks them: one question, A or
 /// AAAA, recursion desired, EDNS(0) with a 1232-byte payload. Answers are read defensively — they
 /// come from the far side of the tunnel: every length is checked, compression pointers may only

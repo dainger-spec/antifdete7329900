@@ -105,7 +105,8 @@ final class ProfileProcess {
                       preferences: BrowsingPreferences = BrowsingPreferences(),
                       menusInAppLanguage: Bool = false,
                       cameraAllowed: Bool = true,
-                      systemCameraActive: Bool = false) throws -> ProfileProcess {
+                      systemCameraActive: Bool = false,
+                      tunnelProxy: ProxySettings? = nil) throws -> ProfileProcess {
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
         let process = Process()
@@ -124,6 +125,9 @@ final class ProfileProcess {
                                                    preferences: preferences, menusInAppLanguage: menusInAppLanguage,
                                                    cameraAllowed: cameraAllowed,
                                                    systemCameraActive: systemCameraActive)
+        // The profile's OpenVPN tunnel: its local port follows the grant on standard input
+        // (`OpenVPNHandoff`); this only says that it does.
+        if tunnelProxy != nil { process.environment?[OpenVPNHandoff.variable] = "1" }
 
         let keyPipe = Pipe()
         process.standardInput = keyPipe
@@ -136,6 +140,7 @@ final class ProfileProcess {
         process.standardOutput = eventPipe
         var record = try grant.encoded()
         defer { ProfileGrant.erase(&record) }
+        if let tunnelProxy { record.append(try OpenVPNHandoff.record(tunnelProxy)) }
         try process.run()
 
         // The profile's grant first: its key and its entry in the index, not the vault's master
