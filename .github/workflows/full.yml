@@ -1523,3 +1523,27 @@ jobs:
           # Measured next to the macOS 27 job's same lines.
           grep -h "^INFO fragment jump" build/egress/selftest-unsandboxed.txt \
             | head -8 | cut -c1-1000 | sed 's/^/::notice title=self-test - measured::/' || true
+
+  # OpenVPN connections end to end (docs/OPENVPN.md): the app built with OVPN=1 (openvpn from its
+  # pinned sources, LumenTunnel), an OpenVPN server on the runner (root, utun), a profile through it
+  # started as a person's is and driven over WebDriver, inside a capture of every packet. A release
+  # with OVPN=1 needs it passed.
+  openvpn:
+    if: github.event_name != 'schedule'
+    name: OpenVPN end to end (macOS 26)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app with OpenVPN (OVPN=1)
+        run: OVPN=1 SANDBOX=0 APP_DIR=build/ovpn scripts/build-app.sh
+      - name: A profile through a .ovpn - wrong password, pages and DNS through the tunnel, the port's credentials, fail closed, the capture
+        run: scripts/openvpn_macos_e2e.sh build/ovpn/Lumen.app build/openvpn-e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openvpn-e2e
+          path: |
+            build/openvpn-e2e/result.txt
+            build/openvpn-e2e/server-log.txt
+            build/openvpn-e2e/work/serve*.txt
