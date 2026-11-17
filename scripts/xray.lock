@@ -1,0 +1,19 @@
+# Xray-core, the relay Lumen runs for a profile whose proxy is a VLESS, VMess, Trojan or Shadowsocks
+# link (docs/TUNNEL.md, "Links"). Built from source by scripts/build-xray.sh — never downloaded as a
+# binary — and put into the app by `XRAY=1 scripts/build-app.sh` as Contents/MacOS/LumenXray.
+#
+# The tag is pinned to its commit (a tag can be moved; the commit cannot), the Go toolchain to its
+# version (fetched by Go itself, checked against Go's checksum database), and the result to its
+# SHA-256 for each architecture: the same source, toolchain and flags give the same bytes on any
+# host (CGO off, -trimpath, no build id), so a build anywhere — CI's macOS runner, a Linux machine,
+# the release Mac — must come out as recorded here, or build-xray.sh fails.
+#
+# To move to a new Xray: change the tag, the commit and the Go version below, run
+# `scripts/build-xray.sh --record` (it prints the new SHA-256 lines and the notices' diff), review the
+# upstream changes (docs/TUNNEL.md, "Updating Xray"), and commit this file with the notices.
+XRAY_REPOSITORY=https://github.com/XTLS/Xray-core
+XRAY_TAG=v26.10.31
+XRAY_COMMIT=a4a3dff5b20c2faae567b742c172c7b95e75c083
+GO_VERSION=1.27.4
+SHA256_darwin_arm64=2ee7777012cfa0feecbecdc3ebf5afbde639c2aa7a10ad679b785ac5c79d34f0
+SHA256_darwin_amd64=29bd26a0fbcabfcb945e6ca03142832f25403ced3586c05319065a436065a898
