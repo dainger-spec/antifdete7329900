@@ -362,6 +362,15 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             return
         }
         while let presented = top.presentedViewController, !presented.isBeingDismissed { top = presented }
+        // The dialog before this one, if UIKit took it off the screen without a touch on any of its
+        // buttons (the sheet it stood on was closed): dropped unanswered, its completion handler
+        // would end the app (WebKit raises for one never called). Its page gets the answer a closed
+        // dialog gives — a moment later, so that a button touched as it went (its handler comes once
+        // the dialog is gone) still answers first (`DialogAnswer` takes the first).
+        if let earlier = pendingDialog {
+            pendingDialog = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { earlier.dismissed() }
+        }
         pendingDialog = (alert, dismissed)
         top.present(alert, animated: true)
         if alert.presentingViewController == nil {
