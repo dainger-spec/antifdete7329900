@@ -187,7 +187,9 @@ enum ProfileSessionHost {
             // may misbehave", when there is no Safari window.
             let missing = SafariChromeHost.isHosting ? SafariChrome.missingPieces() : []
             if !missing.isEmpty {
-                ProfileSessionHost.send(.error(String(format: L("safari.chrome.missingPieces"), missing.joined(separator: ", "))))
+                // Which pieces (class and method names) is for the log, not for the person.
+                ProfileSessionHost.log.error("This Safari lacks pieces of the chrome: \(missing.joined(separator: ", "), privacy: .private)")
+                ProfileSessionHost.send(.error(L("safari.chrome.missingPieces")))
             }
             let manager = ProfileManager(repository: repository)
             manager.runsInProfileProcess = true

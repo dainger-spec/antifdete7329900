@@ -5507,14 +5507,15 @@ final class SelfTest {
                 check("simplified mode: the chip's popover opens and closes", opened && closed, "opened \(opened), closed \(closed)")
             }
         }
-        // Every reason says something of its own, and the missing pieces by name.
+        // Every reason says something of its own; the missing pieces' names (classes of Safari's)
+        // are the log's, never the person's to read.
         let reasons: [SafariChromeHost.OwnWindowReason] = [.sandboxed, .turnedOff, .notInProfileProcess,
                                                            .frameworksDidNotLoad, .missingPieces(["BrowserWindowController"]),
                                                            .notSafarisApplication, .windowDidNotOpen]
         let texts = reasons.map { SimplifiedModeNotice.reasonText($0) }
-        check("simplified mode: each of the seven reasons is said in words of its own, the missing pieces by name",
+        check("simplified mode: each of the seven reasons is said in words of its own, no class name in them",
               texts.allSatisfy { $0.count > 20 && !$0.contains("simplified.") } && Set(texts).count == reasons.count
-                && texts[4].contains("BrowserWindowController"), texts.joined(separator: " | "))
+                && !texts[4].contains("BrowserWindowController"), texts.joined(separator: " | "))
     }
 
     // MARK: A page whose process keeps ending

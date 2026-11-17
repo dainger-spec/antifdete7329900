@@ -1458,7 +1458,7 @@
 
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "Loading was stopped: the page nearly opened outside the profile's data and proxy. Please tell us, with the diagnostics (Settings → Diagnostics).";
-"safari.chrome.missingPieces" = "This macOS's Safari lacks parts of the profile's window (%@). The proxy works as before, but the window may misbehave — Lumen needs an update.";
+"safari.chrome.missingPieces" = "This macOS's Safari lacks parts of the profile's window. The proxy works as before, but the window may misbehave — Lumen needs an update.";
 "safari.unavailable.title" = "This Safari feature is not available in a profile";
 "safari.unavailable.item" = "“%@” works through Safari services a profile does not have. The profile keeps running.";
 "safari.unavailable.action" = "This works through Safari services a profile does not have. The profile keeps running.";
@@ -1467,10 +1467,10 @@
 "simplified.body" = "The profile's window is Lumen's, not Safari's. The proxy and data are the same, but sites can tell it from Safari.";
 "simplified.why" = "Why: %@";
 "simplified.reason.sandboxed" = "this build of Lumen runs in the App Sandbox, where Safari's window does not open.";
-"simplified.reason.turnedOff" = "Safari's window is turned off for profiles (PB_SAFARI_CHROME=0).";
-"simplified.reason.noProfileProcess" = "profiles run inside the app's own process (PB_PROFILE_PROCESS or the PBProfileProcess setting), and Safari's window is hosted only in a profile's own process.";
+"simplified.reason.turnedOff" = "Safari's window for profiles is turned off by a developer setting.";
+"simplified.reason.noProfileProcess" = "profiles run inside the app itself, and Safari's window opens only in a profile's own process.";
 "simplified.reason.frameworks" = "Safari's frameworks on this macOS did not load. Please tell us, with the diagnostics (Settings → Diagnostics).";
-"simplified.reason.missingPieces" = "this macOS's Safari lacks parts of its window (%@). Please tell us, with the diagnostics (Settings → Diagnostics).";
+"simplified.reason.missingPieces" = "this macOS's Safari lacks parts of its window. Please tell us, with the diagnostics (Settings → Diagnostics).";
 "simplified.reason.notSafarisApplication" = "the profile's process could not become Safari's application. Please tell us, with the diagnostics (Settings → Diagnostics).";
 "simplified.reason.windowDidNotOpen" = "Safari did not open its window for this profile. Please tell us, with the diagnostics (Settings → Diagnostics).";
 "safari.autofill.closed.title" = "AutoFill from this Mac is off in profiles";
@@ -3437,13 +3437,13 @@
 "scenarios.when.yesterday" = "yesterday, %@";
 "scenarios.length.seconds" = "%d s";
 "scenarios.length.minutes" = "%1$d min %2$02d s";
-"scenarios.first.text" = "A scenario repeats in a profile what you do — opens pages, types, clicks — with a pointer and keys, as a person does. One scenario runs on many profiles, each with its own login and password.";
+"scenarios.first.text" = "A scenario does in a profile what you would: opens pages, types, clicks. One scenario runs on many profiles, each with its own login and password.";
 "scenarios.first.ways" = "From scratch";
 "scenarios.first.record" = "Record what you do";
 "scenarios.first.record.text" = "Once, in a profile's window. Passwords are not recorded.";
 "scenarios.first.code" = "Write code";
 "scenarios.first.code.text" = "JavaScript: page.goto, page.click, page.type.";
-"scenarios.first.templates" = "Templates people start with";
+"scenarios.first.templates" = "Popular templates";
 "scenarios.form.create" = "Create Scenario";
 "scenarios.form.steps" = "What it will do";
 "scenarios.form.nameFields" = "Name the fields myself";
@@ -3604,7 +3604,7 @@
 "scenarios.template.signin.asks" = "the address, what shows once signed in";
 "scenarios.template.word.signin.name" = "Sign in with a login and password — a Lumen template";
 "scenarios.template.signedin.title" = "Check that the account is signed in";
-"scenarios.template.signedin.text" = "Says for each profile: signed in or not.";
+"scenarios.template.signedin.text" = "Shows which profiles are signed in.";
 "scenarios.template.signedin.asks" = "the address, what only a signed-in person sees";
 "scenarios.template.word.signedin.name" = "Check that the account is signed in — a Lumen template";
 "scenarios.template.opens.title" = "Check that a site opens";
@@ -3612,7 +3612,7 @@
 "scenarios.template.opens.asks" = "the address, a block's words";
 "scenarios.template.word.opens.name" = "Check that a site opens — a Lumen template";
 "scenarios.template.feed.title" = "Scroll a feed";
-"scenarios.template.feed.text" = "Scrolls a page with pauses, as a reader does.";
+"scenarios.template.feed.text" = "Scrolls a page with pauses, as a person does.";
 "scenarios.template.feed.asks" = "the address, how many screens, the pauses";
 "scenarios.template.word.feed.name" = "Scroll a feed — a Lumen template";
 "scenarios.template.search.title" = "Search and open results";

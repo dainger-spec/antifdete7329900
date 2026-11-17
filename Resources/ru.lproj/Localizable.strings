@@ -1458,7 +1458,7 @@
 
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "Загрузка остановлена: страница чуть не открылась мимо данных и прокси профиля. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
-"safari.chrome.missingPieces" = "В Safari этой macOS не хватает частей окна профиля (%@). Прокси работает как прежде, но окно может вести себя странно — нужно обновить Lumen.";
+"safari.chrome.missingPieces" = "В Safari этой macOS не хватает частей окна профиля. Прокси работает как прежде, но окно может вести себя странно — нужно обновить Lumen.";
 "safari.unavailable.title" = "Эта функция Safari недоступна в профиле";
 "safari.unavailable.item" = "Пункт «%@» работает через службы Safari, которых в профиле нет. Профиль работает дальше.";
 "safari.unavailable.action" = "Это действие работает через службы Safari, которых в профиле нет. Профиль работает дальше.";
@@ -1467,10 +1467,10 @@
 "simplified.body" = "Окно профиля — окно Lumen, а не Safari. Прокси и данные те же, но сайты могут отличить его от Safari.";
 "simplified.why" = "Почему: %@";
 "simplified.reason.sandboxed" = "эта сборка Lumen работает в песочнице App Sandbox, где окно Safari не открывается.";
-"simplified.reason.turnedOff" = "окно Safari для профилей выключено (PB_SAFARI_CHROME=0).";
-"simplified.reason.noProfileProcess" = "профили работают в процессе самого приложения (PB_PROFILE_PROCESS или настройка PBProfileProcess), а окно Safari поднимается только в собственном процессе профиля.";
+"simplified.reason.turnedOff" = "окно Safari для профилей выключено в настройках разработчика.";
+"simplified.reason.noProfileProcess" = "профили запущены внутри самого приложения, а окно Safari открывается только в отдельном процессе профиля.";
 "simplified.reason.frameworks" = "фреймворки Safari этой macOS не загрузились. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
-"simplified.reason.missingPieces" = "в Safari этой macOS нет частей его окна (%@). Сообщите нам и приложите диагностику (Настройки → Диагностика).";
+"simplified.reason.missingPieces" = "в Safari этой macOS нет частей его окна. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
 "simplified.reason.notSafarisApplication" = "процесс профиля не смог стать приложением Safari. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
 "simplified.reason.windowDidNotOpen" = "Safari не открыл окно для этого профиля. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
 "safari.autofill.closed.title" = "Автозаполнение из этого Mac в профилях отключено";
@@ -3437,13 +3437,13 @@
 "scenarios.when.yesterday" = "вчера, %@";
 "scenarios.length.seconds" = "%d с";
 "scenarios.length.minutes" = "%1$d мин %2$02d с";
-"scenarios.first.text" = "Сценарий повторяет в профиле ваши действия — открывает страницы, печатает, нажимает — мышью и клавиатурой, как человек. Один сценарий идёт на многих профилях, у каждого со своим логином и паролем.";
+"scenarios.first.text" = "Сценарий делает в профиле то же, что вы: открывает страницы, печатает, нажимает. Один сценарий можно запустить на многих профилях — у каждого свой логин и пароль.";
 "scenarios.first.ways" = "С нуля";
 "scenarios.first.record" = "Записать свои действия";
 "scenarios.first.record.text" = "Один раз в окне профиля. Пароли не записываются.";
 "scenarios.first.code" = "Написать код";
 "scenarios.first.code.text" = "JavaScript: page.goto, page.click, page.type.";
-"scenarios.first.templates" = "С каких шаблонов начинают";
+"scenarios.first.templates" = "Популярные шаблоны";
 "scenarios.form.create" = "Создать сценарий";
 "scenarios.form.steps" = "Что будет делать";
 "scenarios.form.nameFields" = "Указать поля самому";
@@ -3604,7 +3604,7 @@
 "scenarios.template.signin.asks" = "адрес, что видно после входа";
 "scenarios.template.word.signin.name" = "Вход по логину и паролю — шаблон Lumen";
 "scenarios.template.signedin.title" = "Проверить, что аккаунт вошёл";
-"scenarios.template.signedin.text" = "Говорит по каждому профилю: вошёл или нет.";
+"scenarios.template.signedin.text" = "Показывает, в каких профилях вход выполнен.";
 "scenarios.template.signedin.asks" = "адрес, что видно только вошедшему";
 "scenarios.template.word.signedin.name" = "Проверить, что аккаунт вошёл — шаблон Lumen";
 "scenarios.template.opens.title" = "Проверить, что сайт открывается";
@@ -3612,7 +3612,7 @@
 "scenarios.template.opens.asks" = "адрес, текст блокировки";
 "scenarios.template.word.opens.name" = "Проверить, что сайт открывается — шаблон Lumen";
 "scenarios.template.feed.title" = "Пролистать ленту";
-"scenarios.template.feed.text" = "Листает страницу с паузами, как читающий.";
+"scenarios.template.feed.text" = "Листает страницу с паузами, как человек.";
 "scenarios.template.feed.asks" = "адрес, сколько экранов, паузы";
 "scenarios.template.word.feed.name" = "Пролистать ленту — шаблон Lumen";
 "scenarios.template.search.title" = "Поиск и переход по результатам";
