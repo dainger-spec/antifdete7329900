@@ -10,6 +10,7 @@ struct VMStorageView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var confirmingBase = false
+    @State private var confirmingDownload = false
     @State private var confirmingEverything = false
     @State private var error: String?
 
@@ -39,7 +40,10 @@ struct VMStorageView: View {
                         if downloadBytes > 0 {
                             row(symbol: "arrow.down.circle", title: L("vm.storage.download"), detail: L("vm.storage.download.detail"),
                                 bytes: downloadBytes) {
-                                Button(L("vm.storage.delete.now")) { center.removeDownloadedImage() }
+                                // Needed until macOS is installed: then asked first, as in the setup.
+                                Button(L(center.isReady ? "vm.storage.delete.now" : "vm.storage.delete")) {
+                                    if center.isReady { center.removeDownloadedImage() } else { confirmingDownload = true }
+                                }
                                     .buttonStyle(.lumenGhost)
                                     .disabled(center.activity != nil)
                             }
@@ -89,6 +93,11 @@ struct VMStorageView: View {
             Button(L("vm.base.remove.confirm"), role: .destructive) { center.removeBase() }
         } message: {
             Text(L("vm.base.remove.message"))
+        }
+        .confirmationDialog(L("vm.setup.removeDownload.title"), isPresented: $confirmingDownload, titleVisibility: .visible) {
+            Button(L("vm.setup.removeDownload.confirm"), role: .destructive) { center.removeDownloadedImage() }
+        } message: {
+            Text(String(format: L("vm.setup.removeDownload.message"), VMText.bytes(downloadBytes)))
         }
         .confirmationDialog(L("vm.storage.deleteAll.title"), isPresented: $confirmingEverything, titleVisibility: .visible) {
             Button(L("vm.storage.deleteAll.confirm"), role: .destructive) { deleteEverything() }

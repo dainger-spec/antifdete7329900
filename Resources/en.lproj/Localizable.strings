@@ -2805,7 +2805,7 @@
 "vm.setup.guest.fallback" = "If the file does not open, run this in the machine's Terminal:";
 "vm.setup.guest.open" = "The machine is open in a window of its own.";
 "vm.setup.guest.openMachine" = "Open the Machine";
-"vm.setup.guest.startOver" = "Start Over";
+"vm.setup.guest.startOver" = "Start Over…";
 "vm.empty" = "The base system is ready. Each machine you create is a new Mac, made from it in seconds.";
 "vm.limit.reached" = "Machines running: %d — Apple's limit for macOS in virtual machines on one Mac. Shut one down to start another.";
 "vm.memory.tight" = "This Mac has %1$@ of memory, and the machines running now take %2$@ of it: macOS keeps too little for itself, so the Mac and the machines slow down. Shut one down, or give the machines less memory (Edit…).";
@@ -2980,7 +2980,13 @@
 "vm.setup.step.download" = "Download";
 "vm.setup.step.install" = "Installation";
 "vm.setup.step.guest" = "Setup";
-"vm.setup.removeDownload" = "Delete the Download";
+"vm.setup.removeDownload" = "Delete the Download…";
+"vm.setup.removeDownload.title" = "Delete the downloaded macOS image?";
+"vm.setup.removeDownload.message" = "%@ downloaded. To install macOS, the image will have to be downloaded again.";
+"vm.setup.removeDownload.confirm" = "Delete";
+"vm.setup.startOver.title" = "Start the setup over?";
+"vm.setup.startOver.message" = "The installed macOS is deleted with everything already set up in it. It will have to be installed again — and downloaded again, if the downloaded image is gone.";
+"vm.setup.startOver.confirm" = "Delete and Start Over";
 "vm.new.needsBase" = "New machines are made from the base system: add it first.";
 "vm.base.missing" = "The base system was removed. The machines you have work as before; to make new ones, add it again.";
 "vm.base.add" = "Add the Base System";

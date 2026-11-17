@@ -441,6 +441,11 @@ struct VMSetupPanel: View {
 
     private enum StepState { case waiting, active, done }
 
+    /// What was fetched, or the macOS installed, about to be thrown away: asked first — a download
+    /// of some 25 GB went on one click, with nothing said.
+    @State private var confirmingRemoveDownload = false
+    @State private var confirmingStartOver = false
+
     /// 1: fetching, 2: installing, 3: the first-run setup in the machine's window.
     private var step: Int {
         switch center.activity {
@@ -464,6 +469,21 @@ struct VMSetupPanel: View {
     private var isWide: Bool { width >= 940 }
 
     var body: some View {
+        content
+            .confirmationDialog(L("vm.setup.removeDownload.title"), isPresented: $confirmingRemoveDownload, titleVisibility: .visible) {
+                Button(L("vm.setup.removeDownload.confirm"), role: .destructive) { center.removeDownloadedImage() }
+            } message: {
+                Text(String(format: L("vm.setup.removeDownload.message"), VMText.bytes(center.diskUsage[VMCenter.downloadsID] ?? 0)))
+            }
+            .confirmationDialog(L("vm.setup.startOver.title"), isPresented: $confirmingStartOver, titleVisibility: .visible) {
+                Button(L("vm.setup.startOver.confirm"), role: .destructive) { center.removeBase() }
+            } message: {
+                Text(L("vm.setup.startOver.message"))
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         if compact {
             words
                 .padding(24)
@@ -608,7 +628,7 @@ struct VMSetupPanel: View {
                     .buttonStyle(.lumenGhost)
                     .help(L("vm.import.choose.help"))
             }
-            Button(L("vm.setup.removeDownload")) { center.removeDownloadedImage() }
+            Button(L("vm.setup.removeDownload")) { confirmingRemoveDownload = true }
                 .buttonStyle(.lumenGhost)
         case .needsGuestSetup:
             Button(L("vm.setup.guest.openMachine")) { center.continueSetup() }
@@ -618,7 +638,7 @@ struct VMSetupPanel: View {
             Button(L("vm.setup.guest.openOnline")) { center.openBase(online: true) }
                 .buttonStyle(.lumenGhost)
                 .help(L("vm.setup.guest.openOnline.help"))
-            Button(L("vm.setup.guest.startOver")) { center.removeBase() }
+            Button(L("vm.setup.guest.startOver")) { confirmingStartOver = true }
                 .buttonStyle(.lumenGhost)
         case .none, .ready:
             EmptyView()
