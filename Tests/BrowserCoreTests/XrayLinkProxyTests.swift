@@ -195,6 +195,23 @@ final class XrayLinkProxyTests: XCTestCase {
         XCTAssertEqual(ProfileTransfer.format, 4)
     }
 
+    /// A profile on a link travels in its export as its proxy's password does: sealed, and back whole.
+    func testAProfileWithALinkIsExportedSealedAndImportedWhole() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("xray-export-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try ProfileRepository(vault: MasterVault.create(in: root.appendingPathComponent("a"), password: "pw", iterations: 1_000))
+        let target = try ProfileRepository(vault: MasterVault.create(in: root.appendingPathComponent("b"), password: "pw", iterations: 1_000))
+        let proxy = try ProxySettings(shareLink: Self.reality)
+        let profile = try source.create(name: "Linked", configuration: ProfileConfiguration(proxy: proxy))
+        let file = root.appendingPathComponent("Linked.pbprofile")
+        try ProfileTransfer.export(profile.id, from: source, to: file, password: "export pw", kdf: KDFParameters.generate(iterations: 1_000))
+        let bytes = try Data(contentsOf: file)
+        XCTAssertNil(bytes.range(of: Data(Self.uuid.utf8)), "the link's id is not readable in the export")
+        XCTAssertNil(bytes.range(of: Data("nl1.example.com".utf8)))
+        let imported = try ProfileTransfer.importProfile(from: file, password: "export pw", into: target)
+        XCTAssertEqual(try target.loadConfiguration(imported.id).proxy, proxy)
+    }
+
     func testWhereALinkExitsIsKeyedByItsAccountNeverByItsRelay() throws {
         let a = try ProxySettings(shareLink: Self.reality)
         let renamed = try ProxySettings(shareLink: Self.reality.replacingOccurrences(of: "#NL-1", with: "#Other"))
