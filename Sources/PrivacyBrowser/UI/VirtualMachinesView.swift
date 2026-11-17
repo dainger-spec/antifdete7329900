@@ -235,7 +235,13 @@ private struct VirtualMachinesScreen: View {
             }
             if center.isReady, center.activity == nil,
                VMGuestTools.mustBeInstalledAgain(center.library.baseInfo()?.toolsVersion) {
-                VMNote(L("vm.tools.old"), tone: .warning)
+                // The way to the base system beside what asks for it, not only under ⋯.
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    VMNote(L("vm.tools.old"), tone: .warning)
+                    Button(L("vm.base.open")) { center.openBase() }
+                        .buttonStyle(.lumenSecondary)
+                        .disabled(!allowed)
+                }
             }
             if center.runningCount >= VMRequirements.runningLimit {
                 VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
@@ -580,6 +586,8 @@ private struct VMRow: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: 0)
+        .contentShape(Rectangle())
+        .contextMenu { menuItems }
     }
 
     /// What the row says of the machine's UDP while it runs: with a proxy, whether the proxy carries
@@ -681,7 +689,15 @@ private struct VMRow: View {
     }
 
     private var menu: some View {
-        MoreMenu {
+        MoreMenu { menuItems }
+            .help(L("profiles.menu.more"))
+            .accessibilityLabel(L("profiles.menu.more"))
+    }
+
+    /// The row's actions: under its ⋯, and on a right click anywhere on the row.
+    @ViewBuilder
+    private var menuItems: some View {
+        Group {
             if state?.phase == .running {
                 Button(L("vm.row.network"), action: network)
                 Button(L("vm.row.guestFullScreen"), action: guestFullScreen)
@@ -704,8 +720,6 @@ private struct VMRow: View {
             Button(L("vm.row.delete"), role: .destructive, action: delete)
                 .disabled(state != nil)
         }
-        .help(L("profiles.menu.more"))
-        .accessibilityLabel(L("profiles.menu.more"))
     }
 }
 
@@ -833,6 +847,8 @@ struct VMEditorView: View {
     /// "connection" (where this Mac's connection comes out) or "manual".
     @State private var directLocale: String
     @State private var error: String?
+    /// Saves refused so far: each one brings the reason into view.
+    @State private var failures = 0
 
     init(center: VMCenter, proxies: [ProxyListEntry], draft: Draft) {
         self.center = center
@@ -883,6 +899,8 @@ struct VMEditorView: View {
     }
 
     /// The time zone, language and region are the person's own choice below.
+    private static let errorID = "vm.editor.error"
+
     private var setsLocaleByHand: Bool { proxyChoice.isEmpty ? directLocale == "manual" : !followsProxy }
 
     /// The regions a system knows, by their names in the interface's language.
@@ -925,6 +943,7 @@ struct VMEditorView: View {
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: draft.isNew ? L("vm.editor.title.new") : String(format: L("vm.editor.title"), draft.profile.name),
                         subtitle: L("vm.editor.subtitle"))
+            ScrollViewReader { scroller in
             ScrollView {
                 VStack(alignment: .leading, spacing: 26) {
                     if let likeName = draft.likeName {
@@ -945,10 +964,16 @@ struct VMEditorView: View {
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
+                            .id(Self.errorID)
                     }
                 }
                 .padding(.horizontal, 24)
                 .padding(.bottom, 18)
+            }
+            .onChange(of: failures) { _, _ in
+                withAnimation(Theme.appearAnimation) { scroller.scrollTo(Self.errorID, anchor: .bottom) }
+                if let error { AccessibilityNotification.Announcement(error).post() }
+            }
             }
             .frame(minHeight: 360, maxHeight: 620)
             SheetFooter {
@@ -994,6 +1019,7 @@ struct VMEditorView: View {
                             .frame(width: 26, height: 26)
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(String(format: L("editor.avatar.color"), index + 1))
                     .accessibilityAddTraits(colorIndex == index ? .isSelected : [])
                 }
             }
@@ -1300,6 +1326,13 @@ struct VMEditorView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// Says why the machine was not saved, at the foot of a long form: scrolled to, so that Save
+    /// is never a click that seems to do nothing.
+    private func fail(_ text: String) {
+        error = text
+        failures += 1
+    }
+
     private func save() {
         var profile = draft.profile
         profile.name = name
@@ -1327,7 +1360,7 @@ struct VMEditorView: View {
         // The network card's address, as it is written: lower case, and one a card may have.
         let card = macAddress.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard VMProfile.isMACAddress(card) else {
-            error = L("vm.editor.error.mac")
+            fail(L("vm.editor.error.mac"))
             return
         }
         profile.macAddress = card
@@ -1337,13 +1370,13 @@ struct VMEditorView: View {
             let written = line.trimmingCharacters(in: .whitespaces)
             guard !written.isEmpty else { continue }
             guard let host = VMProfile.blockedHost(written) else {
-                error = String(format: L("vm.editor.error.blocked"), written)
+                fail(String(format: L("vm.editor.error.blocked"), written))
                 return
             }
             if !blocked.contains(host) { blocked.append(host) }
         }
         guard blocked.count <= VMProfile.blockedHostsLimit else {
-            error = String(format: L("vm.editor.error.blocked.many"), VMProfile.blockedHostsLimit)
+            fail(String(format: L("vm.editor.error.blocked.many"), VMProfile.blockedHostsLimit))
             return
         }
         profile.blockedHosts = blocked
@@ -1352,7 +1385,7 @@ struct VMEditorView: View {
             profile.computerName = nil
         } else {
             guard let checked = VMGuestSettings.computerName(computer) else {
-                error = L("vm.editor.error.computerName")
+                fail(L("vm.editor.error.computerName"))
                 return
             }
             profile.computerName = checked
@@ -1364,7 +1397,7 @@ struct VMEditorView: View {
             // "example.com" is taken as the address it means.
             let address = start.contains("://") ? start : "https://" + start
             guard let checked = VMGuestSettings.startURL(address) else {
-                error = L("vm.editor.error.start")
+                fail(L("vm.editor.error.start"))
                 return
             }
             profile.startURL = checked
@@ -1376,13 +1409,13 @@ struct VMEditorView: View {
                 let written = line.trimmingCharacters(in: .whitespaces)
                 guard !written.isEmpty else { continue }
                 guard let checked = VMGuestSettings.startURL(written.contains("://") ? written : "https://" + written) else {
-                    error = String(format: L("vm.editor.error.start.more"), written)
+                    fail(String(format: L("vm.editor.error.start.more"), written))
                     return
                 }
                 pages.append(checked)
             }
             guard pages.count <= VMProfile.moreStartURLsLimit else {
-                error = String(format: L("vm.editor.error.start.more.many"), VMProfile.moreStartURLsLimit)
+                fail(String(format: L("vm.editor.error.start.more.many"), VMProfile.moreStartURLsLimit))
                 return
             }
         }
@@ -1424,7 +1457,7 @@ struct VMEditorView: View {
             center.measureDisk()
             dismiss()
         } catch {
-            self.error = errorText(error)
+            fail(errorText(error))
         }
     }
 }

@@ -2858,7 +2858,7 @@
 "vm.row.udp.elsewhere" = "HTTP/3 and WebRTC are off in this machine: this proxy sends UDP out from another address than its pages, and a site would see two addresses.";
 "vm.row.udp.unknown" = "HTTP/3 and WebRTC are off in this machine: whether its proxy carries UDP could not be found out before the start. Start the machine again to check anew.";
 "vm.row.udp.directViaSystemProxy" = "HTTP/3 and WebRTC are off while this Mac's network settings name a proxy: that proxy is not asked for UDP.";
-"vm.row.tools.old" = "This machine was made with Lumen's first tools: the wallpaper, the appearance, the accent colour and the computer's name are not applied in it. Update the tools in the base system (⋯ → Open the Base System → Install Lumen Tools) and make the machine again.";
+"vm.row.tools.old" = "This machine was made with Lumen's first tools: the wallpaper, the appearance, the accent colour and the computer's name are not applied in it. Update the tools in the base system (the ⋯ menu at the top of the section → Open the Base System… → Install Lumen Tools) and make the machine again.";
 "vm.row.wallpaper.failed" = "Lumen's wallpaper was not set in this machine. What its macOS said: %@";
 "vm.window.trouble" = "no internet — Lumen's list of machines says why";
 "vm.editor.title.new" = "New virtual machine";
@@ -3067,7 +3067,7 @@
 "vm.storage.download.detail" = "Needed only until macOS is installed";
 "vm.storage.machines" = "Machines";
 "vm.storage.machine.detail" = "What its macOS changed since it was made";
-"vm.storage.hint" = "A single machine is deleted from its ⋯ menu in the list.";
+"vm.storage.hint" = "A single machine is deleted in the list: from the ⋯ menu on its row, or with a right click on it.";
 "vm.storage.delete" = "Remove…";
 "vm.storage.delete.now" = "Delete";
 "vm.storage.deleteAll" = "Delete Everything…";
@@ -3171,7 +3171,7 @@
 "vm.editor.computerName.placeholder" = "Anna's MacBook Air";
 "vm.editor.computerName.note" = "As macOS's Sharing shows it. Latin letters, digits, spaces, hyphens. Empty: by the Mac the screen is.";
 "vm.editor.error.computerName" = "The computer's name: up to 40 Latin letters, digits, spaces, hyphens or apostrophes.";
-"vm.editor.tools.old" = "The base system has older tools: appearance, accent colour, the computer's name and “do not open Safari” will not apply. To update: ⋯ → Open the Base System → Install Lumen Tools, then make the machine anew.";
+"vm.editor.tools.old" = "The base system has older tools: appearance, accent colour, the computer's name and “do not open Safari” will not apply. To update: the ⋯ menu at the top of the section → Open the Base System… → Install Lumen Tools, then make the machine anew.";
 "vm.editor.opensSafari" = "Open Safari at start";
 "vm.editor.opensSafari.detail" = "Off: the machine starts at its desktop.";
 "vm.editor.wallpaper" = "Lumen wallpaper";
@@ -3233,7 +3233,7 @@
 "vm.editor.error.start.more.many" = "At most %d more pages.";
 "vm.editor.fullScreen" = "Open full screen";
 "vm.editor.fullScreen.detail" = "The machine's window takes this Mac's whole screen when it starts.";
-"vm.tools.old" = "The base system's tools are older than this Lumen: some machine settings will not apply. ⋯ → Open the Base System → Install Lumen Tools updates them (a minute).";
+"vm.tools.old" = "The base system's tools are older than this Lumen: some machine settings will not apply. Open the base system and run Install Lumen Tools in it — it takes a minute.";
 "help.vm.know.same" = "Machines share no data, network or identifiers. But each is a copy of one base system: do not open sites in the base, or their cookies will be in every machine made after. To a page, two machines are two Macs of one model — what differs is what you set: the screen, the time zone and language, the appearance, and where the connection comes from.";
 
 /* Bringing back a vault that is already somewhere (RestoreFlow, RestoreModel, VaultRestore; docs/SYNC_FORMAT.md, "A Mac without a vault") */
