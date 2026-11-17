@@ -38,8 +38,25 @@ enum WebDriverCheck {
     /// Nil when it is serving; else why it is not.
     private static func serve() async -> String? {
         guard !AppEnvironment.isSandboxed else { return "the sandboxed build has no automation API" }
-        guard let port = ProcessInfo.processInfo.environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
-            return "PB_SELFTEST_HTTP_PROXY_PORT is not set: scripts/selftest_proxy.py serves the page"
+        let environment = ProcessInfo.processInfo.environment
+        // The profile's proxy: the self-test proxy, or — PB_WEBDRIVER_OPENVPN naming a .ovpn —
+        // an OpenVPN connection (scripts/openvpn_macos_e2e.sh), its credentials in
+        // PB_WEBDRIVER_OPENVPN_USER and PB_WEBDRIVER_OPENVPN_PASSWORD.
+        let proxy: ProxySettings
+        if let path = environment["PB_WEBDRIVER_OPENVPN"] {
+            do {
+                let configuration = try OpenVPNConfiguration.parse(String(contentsOfFile: path, encoding: .utf8))
+                proxy = ProxySettings.openVPN(configuration, username: environment["PB_WEBDRIVER_OPENVPN_USER"],
+                                              password: environment["PB_WEBDRIVER_OPENVPN_PASSWORD"])
+                try proxy.validate()
+            } catch {
+                return "the OpenVPN configuration \(path) cannot be used: \(error)"
+            }
+        } else {
+            guard let port = environment["PB_SELFTEST_HTTP_PROXY_PORT"].flatMap(Int.init) else {
+                return "PB_SELFTEST_HTTP_PROXY_PORT is not set: scripts/selftest_proxy.py serves the page"
+            }
+            proxy = ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: port)
         }
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-webdriver-\(UUID().uuidString)", isDirectory: true)
         let repository: ProfileRepository
@@ -48,7 +65,7 @@ enum WebDriverCheck {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
             repository = try ProfileRepository(vault: MasterVault.create(in: root, password: "webdriver", iterations: 10_000))
             profile = try repository.create(name: "WebDriver", configuration: ProfileConfiguration(
-                proxy: ProxySettings(kind: .httpConnect, host: "127.0.0.1", port: port), matchProxyLocation: false))
+                proxy: proxy, matchProxyLocation: false))
         } catch {
             return "could not make a profile: \(error)"
         }

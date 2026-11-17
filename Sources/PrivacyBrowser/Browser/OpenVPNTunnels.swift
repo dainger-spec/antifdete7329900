@@ -29,8 +29,9 @@ final class OpenVPNTunnels {
     static let shared = OpenVPNTunnels()
     private static let log = Logger(subsystem: "PrivacyBrowser", category: "OpenVPN")
 
-    /// How long a tunnel that went down may take to come back before its profile is stopped.
-    static var reconnectGrace: TimeInterval = 45
+    /// How long a tunnel that went down may take to come back before its profile is stopped
+    /// (`PB_OPENVPN_RECONNECT_GRACE`, seconds, for the end-to-end check).
+    static var reconnectGrace: TimeInterval = ProcessInfo.processInfo.environment["PB_OPENVPN_RECONNECT_GRACE"].flatMap(TimeInterval.init) ?? 45
     /// How long a tunnel may take to come up at a launch.
     static var startTimeout: TimeInterval = 40
 
@@ -411,7 +412,11 @@ final class OpenVPNTunnel {
         statusReader = LineReader(descriptor: status[0]) { [weak self] line in self?.status(line) }
         let source = DispatchSource.makeProcessSource(identifier: child, eventMask: .exit, queue: .main)
         source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.exited() }
+            // A moment for the last lines of its log, still in the pipe, to be read first: they
+            // say why it ended (AUTH_FAILED, …).
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                MainActor.assumeIsolated { self?.exited() }
+            }
         }
         source.resume()
         processSource = source

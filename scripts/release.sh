@@ -40,6 +40,9 @@
 #                              helper, Contents/MacOS/LumenVM, into the app, signed with Apple's
 #                              virtualization right alone. Without VM the release has no Virtual
 #                              machines section. Needs no provisioning profile.
+#   OVPN=1                     with OpenVPN connections (docs/OPENVPN.md): build-app.sh builds openvpn
+#                              from pinned sources and puts it and LumenTunnel into the app, with their
+#                              licenses and sources (GPL-2.0: docs/LICENSING.md). Needs no profile.
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
