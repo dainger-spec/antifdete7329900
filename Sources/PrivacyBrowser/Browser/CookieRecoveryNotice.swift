@@ -19,8 +19,8 @@ enum CookieRecoveryNotice {
 
     /// The notice's words.
     static func text(_ report: CookieSnapshotKeeper.Report) -> (title: String, detail: String) {
-        (String(format: L("cookieRecovery.notice"), report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened)),
-         String(format: L("cookieRecovery.notice.detail"), report.restored))
+        (String(format: L("cookieRecovery.notice"), report.restored),
+         String(format: L("cookieRecovery.notice.detail"), report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened)))
     }
 
     /// Shows the notice over `session`'s window — Safari's when its chrome is hosted, else ours.

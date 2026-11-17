@@ -3951,8 +3951,8 @@
 "vm.error.openVPN" = "Не запущена: виртуальная машина пока не может использовать подключение OpenVPN. Укажите ей прокси.";
 
 /* Cookie recovery: snapshots of a profile's cookies, put back when its store lost them (CookieSnapshotKeeper, CookieRecoveryNotice, CookieSnapshotsView; docs/COOKIE_RECOVERY.md) */
-"cookieRecovery.notice" = "Cookies восстановлены из снимка от %@";
-"cookieRecovery.notice.detail" = "Хранилище cookies профиля потеряло их после прошлого запуска. Возвращено cookies: %ld.";
+"cookieRecovery.notice" = "Восстановлено cookies: %ld";
+"cookieRecovery.notice.detail" = "Они пропали после прошлого запуска — Lumen вернул их из снимка от %@.";
 "cookieRecovery.notice.close" = "Закрыть";
 "editor.cookies.snapshots" = "Хранить снимки cookies и восстанавливать потерянные";
 "editor.cookies.snapshots.footer" = "Если cookies пропадут после сбоя, Lumen вернёт их при запуске.";

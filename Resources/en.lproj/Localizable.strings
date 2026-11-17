@@ -3951,8 +3951,8 @@
 "vm.error.openVPN" = "Not started: a virtual machine cannot use an OpenVPN connection yet. Give it a proxy instead.";
 
 /* Cookie recovery: snapshots of a profile's cookies, put back when its store lost them (CookieSnapshotKeeper, CookieRecoveryNotice, CookieSnapshotsView; docs/COOKIE_RECOVERY.md) */
-"cookieRecovery.notice" = "Cookies were restored from a snapshot of %@";
-"cookieRecovery.notice.detail" = "The profile’s cookie store had lost them after the last run. Cookies back: %ld.";
+"cookieRecovery.notice" = "%ld cookies restored";
+"cookieRecovery.notice.detail" = "They were lost after the last run — Lumen put them back from the snapshot of %@.";
 "cookieRecovery.notice.close" = "Close";
 "editor.cookies.snapshots" = "Keep cookie snapshots and restore lost cookies";
 "editor.cookies.snapshots.footer" = "If cookies are lost after a crash, Lumen puts them back at launch.";
