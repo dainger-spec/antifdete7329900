@@ -248,7 +248,8 @@ enum XrayCheck {
         let loop = """
             window.__fc = {ok: 0, failed: 0};
             window.__fcTimer = setInterval(() => {
-              fetch('http://fc-\(run).leak.example.com/pb-served.json?t=' + Date.now(), {cache: 'no-store'})
+              // Another origin than the page's: an opaque answer (no-cors) counts as one that came.
+              fetch('http://fc-\(run).leak.example.com/pb-served.json?t=' + Date.now(), {cache: 'no-store', mode: 'no-cors'})
                 .then(r => r.text()).then(() => { window.__fc.ok++; }, () => { window.__fc.failed++; });
             }, 300);
             return true;
