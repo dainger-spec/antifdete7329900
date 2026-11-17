@@ -87,6 +87,8 @@ final class AppModel: ObservableObject {
             ProxyPasswords.removeAll()
             AccountStore.save(nil)   // the iPhone's own identifier stays, as it does through a reinstall
             UserDefaults.standard.removeObject(forKey: "welcome.passed")   // the first launch again
+            // The languages a measurement set (MeasureTests: LUMEN_TEST_SESSION_LANGS) go with it.
+            UserDefaults.standard.removeObject(forKey: "AppleLanguages")
         }
         #if DEBUG
         if AppStoreSeed.active { AppStoreSeed.write(to: store) }   // the App Store's screenshots

@@ -11,6 +11,11 @@ struct LumenApp: App {
         // Text fields offer a clear button while editing, as Safari's address bar does: a long
         // address goes in one touch (and the tests replace one the way a person would).
         UITextField.appearance().clearButtonMode = .whileEditing
+        #if DEBUG
+        // The measurement of 17 November (MeasureTests): the zone set by the app itself at its start,
+        // before WebKit is first used — taken by WebKit's processes as one in the launch's environment is?
+        if TestHooks.enabled, let zone = ProcessInfo.processInfo.environment["LUMEN_TEST_EARLY_XPC_TZ"] { setenv("__XPC_TZ", zone, 1) }
+        #endif
     }
 
     var body: some Scene {

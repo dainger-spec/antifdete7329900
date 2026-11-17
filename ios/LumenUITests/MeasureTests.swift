@@ -1,6 +1,7 @@
 import XCTest
 
-/// Measurements, not checks: run on their own (the workflow's suite input), never in the usual runs.
+/// Measurements, not checks: in the usual runs while a question is open (the owner: in batches, not
+/// runs of their own), then taken out.
 /// What they find is printed ("MEASURE …") and shot, for a decision made from it.
 final class MeasureTests: LumenUITestCase {
     private let lines = ["page zone: ", "worker zone: ", "shared zone: ", "service zone: "]
@@ -30,6 +31,10 @@ final class MeasureTests: LumenUITestCase {
 
         // A second session set otherwise in the same run: does it get a process of its own, in its zone?
         relaunchless(env: "Asia/Kolkata")
+        // Run 176: set as a session opens, the zone is not taken (UTC), the languages are (de-DE).
+        // Set by the app at its very start, before WebKit is first used?
+        relaunch(environment: ["LUMEN_TEST_EARLY_XPC_TZ": "America/Sao_Paulo"])
+        measure("set by the app at its start: America/Sao_Paulo", session: "Замер 4", shot: "93 the engine's zone, set at the start")
     }
 
     /// A second session in the same run, its zone named before it opens (LUMEN_TEST_SESSION_XPC_TZ is
