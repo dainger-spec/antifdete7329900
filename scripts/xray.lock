@@ -3,17 +3,35 @@
 # binary — and put into the app by `XRAY=1 scripts/build-app.sh` as Contents/MacOS/LumenXray.
 #
 # The tag is pinned to its commit (a tag can be moved; the commit cannot), the Go toolchain to its
-# version (fetched by Go itself, checked against Go's checksum database), and the result to its
-# SHA-256 for each architecture: the same source, toolchain and flags give the same bytes on any
-# host (CGO off, -trimpath, no build id), so a build anywhere — CI's macOS runner, a Linux machine,
-# the release Mac — must come out as recorded here, or build-xray.sh fails.
+# version and its bytes (below), and the result to its SHA-256 for each architecture: the same
+# source, toolchain and flags give the same bytes on any host (CGO off, -trimpath, no build id), so a
+# build anywhere — CI's macOS runner, a Linux machine, the release Mac — must come out as recorded
+# here, or build-xray.sh fails.
 #
-# To move to a new Xray: change the tag, the commit and the Go version below, run
-# `scripts/build-xray.sh --record` (it prints the new SHA-256 lines and the notices' diff), review the
-# upstream changes (docs/TUNNEL.md, "Updating Xray"), and commit this file with the notices.
+# The Go toolchain is Go's own module of it — golang.org/toolchain v0.0.1-go<GO_VERSION>.<os>-<arch>,
+# the very archive `GOTOOLCHAIN=go<GO_VERSION>` fetches — downloaded by build-xray.sh from Go's module
+# proxy, checked against the SHA-256 below for the host that builds, and kept in its cache: the
+# building Mac needs no Go of its own (nor Homebrew). Each SHA-256 was taken of the archive whose h1:
+# Go's checksum database (sum.golang.org, a public append-only log) records for that module, which is
+# quoted beside it; any other bytes are refused.
+#
+# To move to a new Xray or Go: change the tag, the commit and the Go version below, and the toolchain
+# lines (`scripts/build-xray.sh --toolchain-lines` prints them for a new GO_VERSION, each checked
+# against sum.golang.org), then run `scripts/build-xray.sh --record` (it prints the new SHA-256 lines
+# of Xray and the notices' diff), review the upstream changes (docs/TUNNEL.md, "Updating Xray"), and
+# commit this file with the notices.
 XRAY_REPOSITORY=https://github.com/XTLS/Xray-core
 XRAY_TAG=v26.10.31
 XRAY_COMMIT=a4a3dff5b20c2faae567b742c172c7b95e75c083
 GO_VERSION=1.27.4
 SHA256_darwin_arm64=2ee7777012cfa0feecbecdc3ebf5afbde639c2aa7a10ad679b785ac5c79d34f0
 SHA256_darwin_amd64=29bd26a0fbcabfcb945e6ca03142832f25403ced3586c05319065a436065a898
+# The Go toolchain for each host that builds (golang.org/toolchain v0.0.1-go1.27.4.<os>-<arch>):
+GO_SHA256_darwin_arm64=fa86864372c70e6d4c0178d5ac70a819cad023774e5a26d3f955ed3a59c5c290
+#   sum.golang.org: h1:87DnSk/ftpTKvVhs/5KkUqpRmq8SWxkmKzbTca6PBTk=
+GO_SHA256_darwin_amd64=c73944a5c8341ad35de6a39e9ffb923109a45c8e94751f417858cfb5bdd058c9
+#   sum.golang.org: h1:pGMKOvDXqmH5hfulCZ4TTqAwXsYPT9QnFQ1zrH0iR6M=
+GO_SHA256_linux_amd64=7ecd542f86ccbbb5017de33ac529872bc48c71f4edb658d63a18d2206f482b9b
+#   sum.golang.org: h1:8Tl0rBb7KdISSdPkZBjlpZxsUBb+004GI/SM2XbmSqI=
+GO_SHA256_linux_arm64=7088ab020c533c258eef3c8ba2a30f13749eec2f559d5d452bd0ddd4eafb51d8
+#   sum.golang.org: h1:vCmfNA8b+T0RfElhx3mNdgu1UrIuyzZCgTrRiUWLnOI=

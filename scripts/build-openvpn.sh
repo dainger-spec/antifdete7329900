@@ -11,6 +11,11 @@
 # Leaves <out>/openvpn (stripped), <out>/licenses/ (each project's license text, and SOURCES.txt:
 # where each source came from, its SHA-256, and that OpenVPN is unmodified) — what build-app.sh puts
 # into the app with OVPN=1. A finished build of the same pins and architectures is reused.
+#
+# Needs only what macOS and Xcode's command line tools have: curl, shasum, tar, make, clang, ar,
+# lipo, strip and otool. No CMake, autotools, pkg-config or anything from Homebrew: each tarball
+# carries its own configure script or Makefile, mbed TLS's with its generated files, and every
+# library's flags are given to OpenVPN's configure directly.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,12 +33,16 @@ LZ4_VERSION=1.10.0
 LZ4_SHA256=537512904744b35e232912055ccf8ec66d768639ff3abe5788d90d792ec5f48b
 LZ4_URLS=("https://github.com/lz4/lz4/releases/download/v$LZ4_VERSION/lz4-$LZ4_VERSION.tar.gz")
 
+for tool in curl shasum tar make clang ar lipo strip otool; do
+  command -v "$tool" >/dev/null || { echo "error: build-openvpn.sh needs $tool (Xcode's command line tools: xcode-select --install)" >&2; exit 1; }
+done
+
 OUT="${1:-build/openvpn}"
 ARCHS="${ARCHS:-$(uname -m)}"
 MINIMUM_MACOS=14.0
 mkdir -p "$OUT"
 OUT="$(cd "$OUT" && pwd)"
-STAMP="openvpn $OPENVPN_VERSION $OPENVPN_SHA256 mbedtls $MBEDTLS_VERSION lzo $LZO_VERSION lz4 $LZ4_VERSION archs $ARCHS macos $MINIMUM_MACOS"
+STAMP="openvpn $OPENVPN_VERSION $OPENVPN_SHA256 mbedtls $MBEDTLS_VERSION make lzo $LZO_VERSION lz4 $LZ4_VERSION archs $ARCHS macos $MINIMUM_MACOS"
 if [[ -x "$OUT/openvpn" && -f "$OUT/STAMP" && "$(cat "$OUT/STAMP")" == "$STAMP" ]]; then
   echo "OpenVPN: reusing $OUT/openvpn ($STAMP)"
   exit 0
@@ -85,22 +94,28 @@ build_arch() {
   tar -xf "$SRC/lz4-$LZ4_VERSION.tar.gz" -C "$dir"
   tar -xf "$SRC/openvpn-$OPENVPN_VERSION.tar.gz" -C "$dir"
   echo "OpenVPN: mbed TLS $MBEDTLS_VERSION ($arch)"
-  cmake -S "$dir/mbedtls-$MBEDTLS_VERSION" -B "$dir/mbedtls-build" -DCMAKE_BUILD_TYPE=Release -DENABLE_TESTING=OFF \
-    -DENABLE_PROGRAMS=OFF -DCMAKE_OSX_ARCHITECTURES="$arch" -DCMAKE_OSX_DEPLOYMENT_TARGET="$MINIMUM_MACOS" \
-    -DCMAKE_INSTALL_PREFIX="$prefix" > "$dir/mbedtls.log" 2>&1
-  cmake --build "$dir/mbedtls-build" -j "$JOBS" >> "$dir/mbedtls.log" 2>&1
-  cmake --install "$dir/mbedtls-build" >> "$dir/mbedtls.log" 2>&1
+  # Its own Makefile, the library alone, in its default configuration (as its CMake build makes it):
+  # the release tarball holds every generated file, so nothing is generated (GEN_FILES empty) and
+  # neither CMake nor Python is needed.
+  (cd "$dir/mbedtls-$MBEDTLS_VERSION" && make -j "$JOBS" lib CC=clang CFLAGS="$flags" GEN_FILES= > "$dir/mbedtls.log" 2>&1) \
+    || { tail -40 "$dir/mbedtls.log" >&2; echo "error: mbed TLS did not build ($arch); see $dir/mbedtls.log" >&2; exit 1; }
+  mkdir -p "$prefix/include" "$prefix/lib"
+  cp -R "$dir/mbedtls-$MBEDTLS_VERSION/include/mbedtls" "$dir/mbedtls-$MBEDTLS_VERSION/include/psa" "$prefix/include/"
+  cp "$dir/mbedtls-$MBEDTLS_VERSION/library/libmbedtls.a" "$dir/mbedtls-$MBEDTLS_VERSION/library/libmbedx509.a" \
+    "$dir/mbedtls-$MBEDTLS_VERSION/library/libmbedcrypto.a" "$prefix/lib/"
   echo "OpenVPN: LZO $LZO_VERSION ($arch)"
-  (cd "$dir/lzo-$LZO_VERSION" && ./configure --host="$host" --prefix="$prefix" --disable-shared --enable-static CFLAGS="$flags" \
-    > "$dir/lzo.log" 2>&1 && make -j "$JOBS" >> "$dir/lzo.log" 2>&1 && make install >> "$dir/lzo.log" 2>&1)
+  (cd "$dir/lzo-$LZO_VERSION" && ./configure --host="$host" --prefix="$prefix" --disable-shared --enable-static CC=clang CFLAGS="$flags" \
+    > "$dir/lzo.log" 2>&1 && make -j "$JOBS" >> "$dir/lzo.log" 2>&1 && make install >> "$dir/lzo.log" 2>&1) \
+    || { tail -40 "$dir/lzo.log" >&2; echo "error: LZO did not build ($arch); see $dir/lzo.log" >&2; exit 1; }
   echo "OpenVPN: LZ4 $LZ4_VERSION ($arch)"
-  (cd "$dir/lz4-$LZ4_VERSION/lib" && make -j "$JOBS" liblz4.a CFLAGS="$flags" > "$dir/lz4.log" 2>&1)
+  (cd "$dir/lz4-$LZ4_VERSION/lib" && make -j "$JOBS" liblz4.a CC=clang CFLAGS="$flags" > "$dir/lz4.log" 2>&1) \
+    || { tail -40 "$dir/lz4.log" >&2; echo "error: LZ4 did not build ($arch); see $dir/lz4.log" >&2; exit 1; }
   mkdir -p "$prefix/include" "$prefix/lib"
   cp "$dir/lz4-$LZ4_VERSION/lib/"{lz4.h,lz4hc.h,lz4frame.h} "$prefix/include/"
   cp "$dir/lz4-$LZ4_VERSION/lib/liblz4.a" "$prefix/lib/"
   echo "OpenVPN: OpenVPN $OPENVPN_VERSION ($arch)"
   # Only static libraries in the prefix: what -l finds there is linked in.
-  (cd "$dir/openvpn-$OPENVPN_VERSION" && ./configure --host="$host" --with-crypto-library=mbedtls \
+  (cd "$dir/openvpn-$OPENVPN_VERSION" && ./configure --host="$host" --with-crypto-library=mbedtls CC=clang \
     --disable-plugins --disable-plugin-auth-pam --disable-plugin-down-root --disable-dco --disable-unit-tests \
     --disable-port-share --disable-ntlm --enable-lzo --enable-lz4 \
     CFLAGS="$flags" LDFLAGS="-arch $arch -L$prefix/lib" \

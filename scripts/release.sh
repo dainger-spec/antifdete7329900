@@ -40,14 +40,23 @@
 #                              helper, Contents/MacOS/LumenVM, into the app, signed with Apple's
 #                              virtualization right alone. Without VM the release has no Virtual
 #                              machines section. Needs no provisioning profile.
-#   OVPN=1                     with OpenVPN connections (docs/OPENVPN.md): build-app.sh builds openvpn
-#                              from pinned sources and puts it and LumenTunnel into the app, with their
-#                              licenses and sources (GPL-2.0: docs/LICENSING.md). Needs no profile.
-#   XRAY=1                     with the relay of VLESS, VMess, Trojan and Shadowsocks links
+#   OVPN=1 (the default)       with OpenVPN connections (docs/OPENVPN.md): build-app.sh builds openvpn
+#                              from pinned sources (scripts/build-openvpn.sh: each tarball checked by
+#                              its SHA-256, built with Xcode's tools alone) and puts it and LumenTunnel
+#                              into the app, with their licenses and sources (GPL-2.0:
+#                              docs/LICENSING.md). Needs no profile.
+#   XRAY=1 (the default)       with the relay of VLESS, VMess, Trojan and Shadowsocks links
 #                              (docs/TUNNEL.md, "Links"): build-app.sh builds Xray-core from its
-#                              pinned source (scripts/build-xray.sh: git and Go on this Mac), checks
-#                              it against scripts/xray.lock and signs it as Contents/MacOS/LumenXray
-#                              with no entitlement. Without XRAY a link's profile does not start.
+#                              pinned source (scripts/build-xray.sh, which fetches its own pinned Go and
+#                              checks it against scripts/xray.lock — no Go on this Mac), checks the
+#                              relay against scripts/xray.lock and signs it as Contents/MacOS/LumenXray
+#                              with no entitlement. Needs no profile.
+#   OVPN=0, XRAY=0             an emergency only: a release without OpenVPN connections, or without
+#                              links — such a profile then does not start, and says why. Said at the
+#                              start and in the release's summary.
+#                              Both need only what Xcode puts on this Mac (git, curl, clang, make…) and
+#                              the network the first time; their downloads are kept for the next
+#                              release (build/openvpn, build/xray-src).
 #   NOTES_FILE=path            the release notes, plain text
 #   OUT=build/release          where everything goes
 #
@@ -101,6 +110,24 @@ if [[ "${SANDBOX:-0}" != "0" ]]; then
 fi
 SANDBOX=0
 DRY=()
+# OpenVPN connections and the links' relay are in every release: off only when asked (OVPN=0,
+# XRAY=0), and then said here and in the summary.
+OVPN="${OVPN:-1}"
+XRAY="${XRAY:-1}"
+[[ "$OVPN" == "0" || "$OVPN" == "1" ]] || { echo "error: OVPN is 1 (the default) or 0, not '$OVPN'" >&2; exit 1; }
+[[ "$XRAY" == "0" || "$XRAY" == "1" ]] || { echo "error: XRAY is 1 (the default) or 0, not '$XRAY'" >&2; exit 1; }
+if [[ "$OVPN" == "1" ]]; then
+  RELAYS_OVPN="OpenVPN connections: openvpn built from its pinned sources (scripts/build-openvpn.sh), and LumenTunnel"
+else
+  RELAYS_OVPN="OpenVPN connections: NOT in this release (OVPN=0) — a profile on one does not start"
+fi
+if [[ "$XRAY" == "1" ]]; then
+  RELAYS_XRAY="links (VLESS, VMess, Trojan, Shadowsocks): Xray built from its pinned source with its pinned Go (scripts/build-xray.sh, scripts/xray.lock)"
+else
+  RELAYS_XRAY="links (VLESS, VMess, Trojan, Shadowsocks): NOT in this release (XRAY=0) — a profile on one does not start"
+fi
+echo "release $VERSION ($BUILD): $RELAYS_OVPN"
+echo "release $VERSION ($BUILD): $RELAYS_XRAY"
 
 # 0. No secret of a release in the repository, which is public: the keys in this environment and
 # anything shaped like R2's, in every commit any ref reaches, the index and what `git add -A` would
@@ -234,7 +261,7 @@ else
   : "${TEAM_ID:?SIGN_IDENTITY needs TEAM_ID (updates must then be signed by this team)}"
   TEAM_FOR_UPDATES="$TEAM_ID"
 fi
-APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" SIGN_IDENTITY="$SIGN_IDENTITY" \
+APP_VERSION="$VERSION" APP_BUILD="$BUILD" SANDBOX="$SANDBOX" APP_DIR="$OUT/app" SIGN_IDENTITY="$SIGN_IDENTITY" OVPN="$OVPN" XRAY="$XRAY" \
   UPDATE_FEED_URL="$FEED_URL" UPDATE_PUBLIC_KEYS="$PUBLIC_KEYS" UPDATE_TEAM_ID="$TEAM_FOR_UPDATES" \
   ACCOUNT_SERVER_URL="$ACCOUNT_SERVER_URL" ACCOUNT_SITE_URL="$ACCOUNT_SITE_URL" ENTITLEMENT_PUBLIC_KEYS="$ENTITLEMENT_PUBLIC_KEYS" \
   scripts/build-app.sh
@@ -376,8 +403,29 @@ if [[ "${VM:-0}" == "1" ]]; then
     || { echo "error: VM=1, but the app has no tools for the machines' macOS (Resources/VMGuest)" >&2; exit 1; }
 fi
 
+# With OpenVPN connections (OVPN=1): openvpn and LumenTunnel, each signed with no entitlement and the
+# hardened runtime, each starts, and their licenses and sources are in the app.
+if [[ "$OVPN" == "1" ]]; then
+  for program in "$APP/Contents/MacOS/openvpn" "$APP/Contents/MacOS/LumenTunnel"; do
+    [[ -x "$program" ]] || { echo "error: OVPN=1, but the app has no $(basename "$program")" >&2; exit 1; }
+    if codesign -d --entitlements - --xml "$program" 2>/dev/null | grep -F "<key>" >/dev/null; then
+      echo "error: $(basename "$program") is signed with an entitlement: it holds none" >&2; exit 1
+    fi
+    [[ "$(codesign -d --verbose=2 "$program" 2>&1 | awk '/^CodeDirectory/ { print }')" == *"runtime"* ]] \
+      || { echo "error: $(basename "$program") is not signed with the hardened runtime" >&2; exit 1; }
+  done
+  # `openvpn --version` ends with status 1 by design: its words are what is checked.
+  [[ "$("$APP/Contents/MacOS/openvpn" --version 2>&1 || true)" == "OpenVPN 2."* ]] \
+    || { echo "error: the app's openvpn does not start: no release" >&2; exit 1; }
+  "$APP/Contents/MacOS/LumenTunnel" --version >/dev/null || { echo "error: the app's LumenTunnel does not start: no release" >&2; exit 1; }
+  for notice in SOURCES.txt OpenVPN-COPYING.txt OpenVPN-COPYRIGHT.GPL.txt MbedTLS-LICENSE.txt LZO-COPYING.txt LZ4-LICENSE.txt lwIP-COPYING.txt; do
+    [[ -s "$APP/Contents/Resources/ThirdParty/OpenVPN/$notice" ]] \
+      || { echo "error: OVPN=1, but the app has no ThirdParty/OpenVPN/$notice" >&2; exit 1; }
+  done
+fi
+
 # With the links' relay (XRAY=1): Xray as pinned, signed with no entitlement, and it starts.
-if [[ "${XRAY:-0}" == "1" ]]; then
+if [[ "$XRAY" == "1" ]]; then
   XRAY_HELPER="$APP/Contents/MacOS/LumenXray"
   [[ -x "$XRAY_HELPER" ]] || { echo "error: XRAY=1, but the app has no links' relay (Contents/MacOS/LumenXray)" >&2; exit 1; }
   if codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | grep -F "<key>" >/dev/null; then
@@ -386,7 +434,7 @@ if [[ "${XRAY:-0}" == "1" ]]; then
   [[ "$(codesign -d --verbose=2 "$XRAY_HELPER" 2>&1 | awk '/^CodeDirectory/ { print }')" == *"runtime"* ]] \
     || { echo "error: the links' relay is not signed with the hardened runtime" >&2; exit 1; }
   "$XRAY_HELPER" version >/dev/null || { echo "error: the links' relay does not start: no release" >&2; exit 1; }
-  [[ -f "$APP/Contents/Resources/Xray-NOTICE.txt" ]] || { echo "error: XRAY=1, but the relay's licences are not in the app" >&2; exit 1; }
+  [[ -s "$APP/Contents/Resources/ThirdParty/Xray/NOTICE.txt" ]] || { echo "error: XRAY=1, but the relay's licences are not in the app" >&2; exit 1; }
 fi
 
 # 2. Notarize and staple (an Apple account's notary profile and a Developer ID signature).
@@ -536,6 +584,8 @@ echo "  $DMG_NAME   at $DOWNLOAD_URL$DMG_NAME (the website's)"
 echo "  appcast.json   at $FEED_URL"
 echo "  update key     $KEY_ID"
 echo "  network guard  $GUARD"
+echo "  $RELAYS_OVPN"
+echo "  $RELAYS_XRAY"
 echo "  the image's window  $WINDOW_VERDICT"
 echo "  $PUBLISHED"
 echo

@@ -5,7 +5,8 @@ name: Links — VLESS, VMess, Trojan, Shadowsocks
 #
 # - the relay's build is the pinned one: Xray-core from its source at the pinned commit with the
 #   pinned Go comes out with the SHA-256 scripts/xray.lock records — recorded on Linux, so the same
-#   bytes from two different hosts (scripts/build-xray.sh);
+#   bytes from two different hosts (scripts/build-xray.sh). The runner's own Go is not used: the
+#   script fetches the pinned toolchain and checks it against the lock, as on a release Mac;
 # - every kind of link Lumen reads, as Lumen's own code configures the relay, works against a real
 #   Xray server — a page and UDP by name, nothing resolved — and the relay takes no one without its
 #   login (scripts/xray_relay_check.py, with its control);
@@ -50,10 +51,6 @@ jobs:
           xcodebuild -version
           swift --version
           defaults read /Applications/Safari.app/Contents/Info.plist CFBundleShortVersionString || true
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27.4'
-          cache: false
       - name: Xray from its pinned source, the bytes scripts/xray.lock records (arm64 and x86_64)
         id: xray
         run: |

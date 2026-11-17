@@ -105,11 +105,15 @@ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
 
 ================================================================================================
-OpenVPN connections (builds with OpenVPN only)
+OpenVPN connections and VLESS, VMess, Trojan and Shadowsocks links
 ================================================================================================
 
-A build of Lumen with OpenVPN connections carries two more programs, each with the license texts
-and the source information it needs in Contents/Resources/ThirdParty/OpenVPN:
+A release of Lumen carries three more programs for these (a build made with OVPN=0 or XRAY=0 lacks
+the ones it names): openvpn and LumenXray are other projects' programs, which Lumen starts and does
+not link into its own code; LumenTunnel is Lumen's own, with lwIP in it.
+
+OpenVPN connections, with the license texts and the source information they need in
+Contents/Resources/ThirdParty/OpenVPN:
 
 - openvpn (Contents/MacOS/openvpn): OpenVPN 2.7 (https://openvpn.net), GPL-2.0, built unmodified
   with mbed TLS (Apache-2.0 OR GPL-2.0-or-later, used under the GPL), LZO (GPL-2.0-or-later) and
@@ -118,3 +122,8 @@ and the source information it needs in Contents/Resources/ThirdParty/OpenVPN:
 - LumenTunnel (Contents/MacOS/LumenTunnel): Lumen's own, with lwIP
   (https://savannah.nongnu.org/projects/lwip/), Copyright (c) 2001-2004 Swedish Institute of
   Computer Science, BSD-3-Clause (lwIP-COPYING.txt there).
+
+Links: LumenXray (Contents/MacOS/LumenXray) is Xray-core (https://github.com/XTLS/Xray-core),
+Mozilla Public License 2.0, built unmodified from its source. Contents/Resources/ThirdParty/Xray/
+NOTICE.txt says which version and commit, where its source is, and holds the license of every Go
+module built into it and of the Go standard library.

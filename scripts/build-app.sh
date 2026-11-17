@@ -33,19 +33,22 @@
 #
 #   OVPN=1 SANDBOX=0 scripts/build-app.sh # with OpenVPN connections (docs/OPENVPN.md): Contents/MacOS/
 #                                   # openvpn (OpenVPN 2.7 from pinned sources, unmodified:
-#                                   # scripts/build-openvpn.sh) and Contents/MacOS/LumenTunnel (its tun),
-#                                   # each signed with no entitlement; their licenses and sources in
+#                                   # scripts/build-openvpn.sh, Xcode's tools alone) and
+#                                   # Contents/MacOS/LumenTunnel (its tun), each signed with no
+#                                   # entitlement; their licenses and sources in
 #                                   # Contents/Resources/ThirdParty/OpenVPN. Without it the app cannot
 #                                   # run an OpenVPN connection and says so.
 #   OVPN=check scripts/build-app.sh # builds both and starts each once, for CI; the app is as without them
 #   XRAY=1 SANDBOX=0 scripts/build-app.sh   # with the relay of VLESS, VMess, Trojan and Shadowsocks links
 #                                   # (docs/TUNNEL.md, "Links"): Xray-core, built from its pinned source
-#                                   # by scripts/build-xray.sh (needs git and Go) and checked against the
-#                                   # SHA-256 scripts/xray.lock records, as Contents/MacOS/LumenXray —
-#                                   # signed apart with no entitlement — with its licences in
-#                                   # Resources/Xray-NOTICE.txt. XRAY_BINARY=path takes a build made
-#                                   # already (CI's), checked the same way. Without it a link's profile
-#                                   # does not start, and says why.
+#                                   # by scripts/build-xray.sh (git, curl and unzip: it fetches its own
+#                                   # pinned Go and checks it) and checked against the SHA-256
+#                                   # scripts/xray.lock records, as Contents/MacOS/LumenXray — signed
+#                                   # apart with no entitlement — with its licences in
+#                                   # Contents/Resources/ThirdParty/Xray/NOTICE.txt. XRAY_BINARY=path
+#                                   # takes a build made already (CI's), checked the same way. Without
+#                                   # it a link's profile does not start, and says why.
+#   scripts/release.sh builds with OVPN=1 and XRAY=1 unless told OVPN=0 or XRAY=0.
 #
 # A profile's process — and every process that runs Safari's code — is started from
 # Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
@@ -391,7 +394,9 @@ fi
 # confined by a sandbox the app applies, without root.
 OVPN_PROGRAMS=()
 if [[ "$OVPN" == "1" || "$OVPN" == "check" ]]; then
-  scripts/build-openvpn.sh build/openvpn
+  # For each architecture the app is built for, as the links' relay is (below).
+  echo "OpenVPN (OVPN=$OVPN): openvpn from its pinned sources for $(lipo -archs "$BIN_DIR/PrivacyBrowser"), and LumenTunnel"
+  ARCHS="$(lipo -archs "$BIN_DIR/PrivacyBrowser")" scripts/build-openvpn.sh build/openvpn
   swift build -c "$CONFIG" --product LumenTunnel
   # Each started once: a program that does not load is found here, not at a person's launch.
   "$BIN_DIR/LumenTunnel" --version
@@ -416,6 +421,7 @@ fi
 XRAY_HELPER=""
 if [[ "$XRAY" == "1" ]]; then
   [[ "$SANDBOX" != "1" ]] || { echo "error: XRAY=1 needs SANDBOX=0 (a sandboxed app's child would inherit the App Sandbox)" >&2; exit 1; }
+  echo "The links' relay (XRAY=1): Xray $(awk -F= '$1 == "XRAY_TAG" { print $2 }' scripts/xray.lock) for $(lipo -archs "$BIN_DIR/PrivacyBrowser")${XRAY_BINARY:+, from $XRAY_BINARY}"
   XRAY_DIR="$PWD/build/xray"
   mkdir -p "$XRAY_DIR"
   XRAY_PARTS=()
@@ -445,7 +451,8 @@ if [[ "$XRAY" == "1" ]]; then
     lipo -create "${XRAY_PARTS[@]}" -output "$XRAY_HELPER"
   fi
   chmod 755 "$XRAY_HELPER"
-  cp Resources/Xray/NOTICE.txt "$APP/Contents/Resources/Xray-NOTICE.txt"
+  mkdir -p "$APP/Contents/Resources/ThirdParty/Xray"
+  cp Resources/Xray/NOTICE.txt "$APP/Contents/Resources/ThirdParty/Xray/NOTICE.txt"
 fi
 
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
