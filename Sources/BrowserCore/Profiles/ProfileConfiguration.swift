@@ -550,9 +550,14 @@ public struct ProxySettings: Codable, Equatable, Sendable {
     public var tlsToProxy: Bool
     /// Domains that bypass the proxy. Empty by default: everything goes via the proxy.
     public var excludedDomains: [String]
+    /// An OpenVPN connection instead of a proxy server (docs/OPENVPN.md): `host` and `port` are then
+    /// its first server's, `kind` SOCKS5 — what the profile is given at a launch, the tunnel's local
+    /// port — and `username`/`password` its auth-user-pass. Nil for every other proxy, and not
+    /// written then: a version without it reads the settings as before.
+    public var openVPN: OpenVPNSettings?
 
     public init(kind: Kind, host: String, port: Int, username: String? = nil, password: String? = nil,
-                tlsToProxy: Bool = false, excludedDomains: [String] = []) {
+                tlsToProxy: Bool = false, excludedDomains: [String] = [], openVPN: OpenVPNSettings? = nil) {
         self.kind = kind
         self.host = host
         self.port = port
@@ -560,6 +565,7 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         self.password = password
         self.tlsToProxy = tlsToProxy
         self.excludedDomains = excludedDomains
+        self.openVPN = openVPN
     }
 
     public func validate() throws {
@@ -575,6 +581,7 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         if (username == nil) != (password == nil) {
             throw CoreError.invalidConfiguration("proxy username and password must both be set or both empty")
         }
+        try validateOpenVPN()
     }
 }
 

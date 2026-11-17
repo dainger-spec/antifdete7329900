@@ -252,7 +252,11 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// type; a new password is the same proxy). Another user name is another proxy: gateway
     /// providers pick the exit — the country, the session — from it.
     public static func identity(of proxy: ProxySettings) -> String {
-        [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
+        let base = [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
+        // Two OpenVPN configurations of the same server and login are two connections (other
+        // certificates, keys, transports): told apart by their configuration.
+        guard let openVPN = proxy.openVPN else { return base }
+        return base + "\u{0}openvpn:" + openVPN.fingerprint
     }
 
     /// `entries` by what makes each one's proxy the proxy it is (`identity(of:)`): for every
