@@ -121,6 +121,18 @@ func nodes(under root: AXUIElement) -> [Node] {
     return found
 }
 
+/// Where to click `node` once it is in view: a person scrolls to what is below the window's fold (a
+/// small screen: the master password's second field, its box and Create Vault were under it on a
+/// 1024×768 runner, CI run 43999545658), as VoiceOver does with AXScrollToVisible.
+func reveal(_ node: Node) -> CGPoint {
+    let visible = NSScreen.screens.first.map { CGRect(x: 0, y: 30, width: $0.frame.width, height: $0.frame.height - 110) } ?? .infinite
+    guard !visible.contains(node.center) else { return node.center }
+    AXUIElementPerformAction(node.element, "AXScrollToVisible" as CFString)
+    pause(0.5)
+    let moved = frame(of: node.element)
+    return CGPoint(x: moved.midX, y: moved.midY)
+}
+
 func describe(_ list: [Node]) -> String {
     list.map { node in
         String(repeating: "  ", count: node.depth) + "\(node.role)\(node.subrole.isEmpty ? "" : "/" + node.subrole) "
@@ -193,16 +205,16 @@ for step in 1...16 {
         typedOn.insert(signature)
         // An account's screen asks an address too: one that goes nowhere.
         for field in fields where field.value.isEmpty {
-            click(field.center)
+            click(reveal(field))
             type(field.name.lowercased().contains("mail") || field.name.lowercased().contains("почт") ? "tester@example.invalid" : "Sweep")
         }
         for field in secure {
-            click(field.center)
+            click(reveal(field))
             key(0, flags: .maskCommand)  // ⌘A
             type(password)
         }
         for box in all where box.role == (kAXCheckBoxRole as String) && box.enabled && box.value == "0" {
-            click(box.center)
+            click(reveal(box))
         }
         pause(0.5)
         key(36)  // Return
@@ -220,14 +232,14 @@ for step in 1...16 {
     }
     if let chosen {
         pressed[chosen.name, default: 0] += 1
-        click(chosen.center)
+        click(reveal(chosen))
         say("step \(step): clicked '\(chosen.name)'")
         pause(4)
         continue
     }
     if !fields.isEmpty, !typedOn.contains(signature) {
         typedOn.insert(signature)
-        click(fields[0].center)
+        click(reveal(fields[0]))
         type("Sweep first profile")
         key(36)
         say("step \(step): typed a name into '\(fields[0].name)', Return")
@@ -279,7 +291,7 @@ if process.isRunning {
                 say("settings: '\(page)' is no longer there")
                 continue
             }
-            click(button.center)
+            click(reveal(button))
             pause(1.5)
             settingsPages += 1
             let shot = out.appendingPathComponent(String(format: "settings-%02d.png", number + 1)).path

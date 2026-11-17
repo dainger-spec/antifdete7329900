@@ -1,5 +1,6 @@
 import AppKit
 import Carbon.HIToolbox
+import MachO
 import ObjCExceptions
 import WebKit
 
@@ -1116,7 +1117,18 @@ enum SweepSteps {
         walk(root)
         guard let table = found else { return "no Reading List in the window" }
         let made = (0..<min(table.numberOfRows, 5)).filter { table.rowView(atRow: $0, makeIfNecessary: false) != nil }.count
-        return "rows \(table.numberOfRows), row views \(made)"
+        // What a row shows: the texts of its cell's visible fields (a page's title, its address).
+        var texts: [String] = []
+        if table.numberOfRows > 0, let cell = table.view(atColumn: 0, row: 0, makeIfNecessary: false) {
+            func read(_ view: NSView) {
+                if let field = view as? NSTextField, !field.isHiddenOrHasHiddenAncestor, !field.stringValue.isEmpty {
+                    texts.append(String(field.stringValue.prefix(60)))
+                }
+                for subview in view.subviews { read(subview) }
+            }
+            read(cell)
+        }
+        return "rows \(table.numberOfRows), row views \(made); the first shows: \(texts.isEmpty ? "nothing" : texts.joined(separator: " | "))"
     }
 
     /// A page added to the Reading List (⇧⌘D), then the Reading List shown by its key equivalent
@@ -1132,8 +1144,9 @@ enum SweepSteps {
         await SweepInput.pause(2)
         let rows = readingListRows()
         S.note("the Reading List: \(rows)")
-        S.expect(rows.hasPrefix("rows ") && !rows.hasPrefix("rows 0") && !rows.hasSuffix("row views 0"),
+        S.expect(rows.hasPrefix("rows ") && !rows.hasPrefix("rows 0") && !rows.contains("row views 0"),
                  "the Reading List shows the page added to it")
+        S.expect(!rows.hasSuffix("shows: nothing"), "its row says which page it is")
         await S.command(kVK_ANSI_L, .maskShift)
         await SweepInput.pause(0.8)
     }
@@ -1240,6 +1253,48 @@ enum SweepSteps {
                  "the search opened in a tab of the profile (tabs \(tabsBefore) → \(S.tabCount()), \(pageAddress()))")
     }
 
+    /// The methods of Safari's classes whose names say they give the downloads folder, and what the
+    /// class methods among them that take nothing answer: where Safari's code takes the folder from.
+    static func downloadsFolderGetters() -> String {
+        let words = ["downloadsfolder", "downloadsdirectory", "downloadspath", "downloaddirectory", "downloadfolder", "downloadlocation"]
+        var said: [String] = []
+        let images = (0..<_dyld_image_count()).compactMap { _dyld_get_image_name($0).map { String(cString: $0) } }
+            .filter { $0.contains(".framework/") && $0.contains("/Safari") }
+        for image in images {
+            var count: UInt32 = 0
+            guard let names = objc_copyClassNamesForImage(image, &count) else { continue }
+            for index in 0..<Int(count) {
+                let className = String(cString: names[index])
+                guard let cls = NSClassFromString(className) else { continue }
+                for (owner, prefix) in [(object_getClass(cls), "+"), (cls as AnyClass?, "-")] {
+                    guard let owner else { continue }
+                    var methodCount: UInt32 = 0
+                    guard let methods = class_copyMethodList(owner, &methodCount) else { continue }
+                    for position in 0..<Int(methodCount) {
+                        let name = NSStringFromSelector(method_getName(methods[position]))
+                        guard words.contains(where: { name.lowercased().contains($0) }) else { continue }
+                        var line = "\(prefix)[\(className) \(name)]"
+                        if prefix == "+", method_getNumberOfArguments(methods[position]) == 2 {
+                            let returns = method_copyReturnType(methods[position])
+                            let isObject = String(cString: returns) == "@"
+                            free(returns)
+                            if isObject {
+                                var answer: AnyObject?
+                                _ = PBCatchException { answer = (cls as AnyObject).perform(NSSelectorFromString(name))?.takeUnretainedValue() }
+                                line += " = \(answer.map { String(describing: $0).prefix(120) } ?? "nil")"
+                            }
+                        }
+                        said.append(line)
+                    }
+                    free(methods)
+                }
+            }
+            free(names)
+        }
+        let path = UserDefaults.standard.string(forKey: HostedDownloads.safarisFolderKey) ?? "unset"
+        return "\(HostedDownloads.safarisFolderKey) \(path); " + (said.isEmpty ? "no such method" : said.prefix(30).joined(separator: "; "))
+    }
+
     /// An image's "Save Image to “Downloads”": named, and saved where the settings say.
     static func saveImageToDownloads() async {
         await focusPage()
@@ -1261,6 +1316,7 @@ enum SweepSteps {
         }
         S.note("the item: \(item.title)")
         S.expect(!item.title.contains("(null)"), "the item names the downloads folder")
+        if item.title.contains("(null)") { S.note("Safari's downloads folder, as its methods answer: " + downloadsFolderGetters()) }
         if let why = await S.choose(item, in: menu) {
             S.expect(false, "chosen with the arrow keys: \(why)")
             return
