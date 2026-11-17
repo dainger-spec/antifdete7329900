@@ -566,6 +566,7 @@ struct ProfileEditorView: View {
     let target: Target
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openSettings) private var openSettings
     @State private var draft = ProfileDraft()
     /// The draft as it was loaded, in words (it is not Equatable): what Cancel compares it with.
     @State private var loadedDraft: String?
@@ -705,6 +706,10 @@ struct ProfileEditorView: View {
                           onChooseCameraVideo: { choosingCameraVideo = true },
                           onOpenCameraPreview: openCameraPreview,
                           cameraAllowed: model.allowsCamera,
+                          onOpenAccount: {
+                              model.settingsSection = .account
+                              openSettings()
+                          },
                           isSaving: savingCookies, saveRefused: settingsUnreadable,
                           keptVersions: keptVersions, onUseVersion: useVersion, onRemoveVersion: { removingVersion = $0 },
                           onWhatSitesSee: target.isNew ? nil : { showingWhatSitesSee = true })

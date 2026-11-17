@@ -254,6 +254,7 @@
 "editor.camera.mode" = "Mode";
 "editor.camera.plan.title" = "A professional-plan feature";
 "editor.camera.plan.note" = "Camera substitution comes with the Pro and Team plans.";
+"editor.camera.plan.open" = "Open Account…";
 "editor.camera.plan.requirement" = "Needs an active Pro or Team plan.";
 "editor.camera.mode.off" = "Real camera";
 "editor.camera.mode.block" = "No camera";

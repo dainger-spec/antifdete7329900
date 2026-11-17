@@ -254,6 +254,7 @@
 "editor.camera.mode" = "Режим";
 "editor.camera.plan.title" = "Функция профессионального тарифа";
 "editor.camera.plan.note" = "Подмена камеры есть в тарифах Pro и Team.";
+"editor.camera.plan.open" = "Открыть аккаунт…";
 "editor.camera.plan.requirement" = "Нужен активный тариф Pro или Team.";
 "editor.camera.mode.off" = "Настоящая камера";
 "editor.camera.mode.block" = "Нет камеры";

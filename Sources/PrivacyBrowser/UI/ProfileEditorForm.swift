@@ -87,6 +87,8 @@ struct ProfileEditorForm: View {
     /// Whether the plan opens camera substitution (pro and team). When false the camera section shows
     /// only that it is a paid feature, and nothing of it can be set (docs/CAMERA.md).
     var cameraAllowed: Bool = true
+    /// Settings › Account, from the camera's "a plan's feature" (nil: no way there, the snapshots).
+    var onOpenAccount: (() -> Void)?
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -826,6 +828,12 @@ struct ProfileEditorForm: View {
         VStack(alignment: .leading, spacing: 10) {
             EditorGroupTitle(L("editor.camera.plan.title"))
             EditorNote(L("editor.camera.plan.note"))
+            // Where the plan is seen and changed, one click away: the note alone left the person
+            // to find it.
+            if let onOpenAccount {
+                Button(L("editor.camera.plan.open"), action: onOpenAccount)
+                    .buttonStyle(.lumenSecondary)
+            }
         }
     }
 
