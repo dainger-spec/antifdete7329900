@@ -756,7 +756,7 @@ final class NetworkLoop: @unchecked Sendable {
                 if snapshot.isResolving {
                     flow.phase = .waiting
                 } else {
-                    fail(flow, "the proxy's address was not found", proxyUnreachable: false, now)
+                    fail(flow, "the proxy's address was not found", proxyUnreachable: false, trouble: .unreachable, now)
                 }
                 return
             }
@@ -777,7 +777,7 @@ final class NetworkLoop: @unchecked Sendable {
         }
         for flow in Array(flows.values) where flow.phase == .waiting {
             if snapshot.addresses.isEmpty {
-                fail(flow, "the proxy's address was not found", proxyUnreachable: false, now)
+                fail(flow, "the proxy's address was not found", proxyUnreachable: false, trouble: .unreachable, now)
             } else {
                 connectNext(flow, now)
             }
@@ -822,7 +822,7 @@ final class NetworkLoop: @unchecked Sendable {
             flow.lastError = Sys.describe(status)
             Sys.close(descriptor)
         }
-        fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, now)
+        fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, trouble: .unreachable, now)
     }
 
     private func connected(_ flow: Flow, _ now: Double) {
@@ -844,12 +844,15 @@ final class NetworkLoop: @unchecked Sendable {
             flow.outgoing = []
             counters.connectionsOpened += 1
             counters.connectionsActive += 1
+            // The proxy carries connections again.
+            counters.proxyFailuresInARow = 0
+            counters.proxyTrouble = nil
             withHost(flow.host, now) { $0.open += 1 }
             flow.tcp.tunnelEstablished(now: now)
             if !leftover.isEmpty { leftover.withUnsafeBytes { flow.tcp.upstreamData($0, now: now) } }
             markDirty(flow)
         case .failed(let failure):
-            fail(flow, failure.reason, proxyUnreachable: false, now)
+            fail(flow, failure.reason, proxyUnreachable: false, trouble: failure.proxyTrouble, now)
         }
     }
 
@@ -871,7 +874,7 @@ final class NetworkLoop: @unchecked Sendable {
             } else if Sys.wouldBlock(sent.1) {
                 return progressed
             } else {
-                fail(flow, "the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, now)
+                fail(flow, "the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, trouble: .unreachable, now)
                 return true
             }
         }
@@ -888,23 +891,33 @@ final class NetworkLoop: @unchecked Sendable {
             return true
         }
         if count == 0 {
-            fail(flow, "the proxy closed the connection", proxyUnreachable: false, now)
+            fail(flow, "the proxy closed the connection", proxyUnreachable: false, trouble: .unreachable, now)
             return true
         }
         let code = errno
         if code == EINTR || Sys.wouldBlock(code) { return false }
-        fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, now)
+        fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, trouble: .unreachable, now)
         return true
     }
 
     /// The proxy gave no tunnel: the guest's SYN is answered with a reset and the connection forgotten.
-    private func fail(_ flow: Flow, _ reason: String, proxyUnreachable: Bool, _ now: Double) {
+    ///
+    /// `trouble`: the failure is the proxy's own (not reached, not answering, the sign-in refused,
+    /// an answer not understood) — counted one after another until a tunnel comes up
+    /// (`VMNetCounters.proxyFailuresInARow`), so that a proxy that goes down while the machine runs
+    /// is said, not left to be guessed. Nil: the proxy answered and said it cannot reach the site
+    /// (a site that is down, a tracker that is gone) — that says nothing of the proxy.
+    private func fail(_ flow: Flow, _ reason: String, proxyUnreachable: Bool, trouble: VMNetProxyTrouble?, _ now: Double) {
         if flow.descriptor >= 0 {
             Sys.close(flow.descriptor)
             flow.descriptor = -1
         }
         flow.phase = .done
         counters.connectionsFailed += 1
+        if let trouble {
+            counters.proxyFailuresInARow += 1
+            counters.proxyTrouble = trouble
+        }
         note(reason, now)
         if proxyUnreachable, let resolver {
             resolver.connectionFailed()
@@ -1098,15 +1111,15 @@ final class NetworkLoop: @unchecked Sendable {
         for flow in due {
             switch flow.phase {
             case .waiting:
-                fail(flow, "the proxy's address was not found in time", proxyUnreachable: false, now)
+                fail(flow, "the proxy's address was not found in time", proxyUnreachable: false, trouble: .unreachable, now)
             case .handshaking:
-                fail(flow, "the proxy did not answer in time", proxyUnreachable: false, now)
+                fail(flow, "the proxy did not answer in time", proxyUnreachable: false, trouble: .unreachable, now)
             case .connecting:
                 Sys.close(flow.descriptor)
                 flow.descriptor = -1
                 flow.lastError = Sys.describe(ETIMEDOUT)
                 if now >= flow.deadline {
-                    fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, now)
+                    fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, trouble: .unreachable, now)
                 } else {
                     connectNext(flow, now)
                 }

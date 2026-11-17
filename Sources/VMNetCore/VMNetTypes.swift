@@ -171,8 +171,26 @@ public struct VMNetCounters: Equatable, Sendable {
     public var udpAssociationsOpened: UInt64 = 0
     public var udpAssociationsFailed: UInt64 = 0
     public var udpAssociationsActive: Int = 0
+    /// The guest's connections the proxy failed one after another, by its own fault, since it last
+    /// carried one (`VMNetProxyTrouble`): a proxy that went down, or stopped taking its sign-in,
+    /// while the machine runs. A site the proxy answers it cannot reach neither counts nor resets.
+    public var proxyFailuresInARow: UInt64 = 0
+    /// Why the last of them failed; nil once a connection is carried again.
+    public var proxyTrouble: VMNetProxyTrouble?
 
     public init() {}
+}
+
+/// Why the proxy itself gave a connection no tunnel — a kind, never where the connection was going.
+public enum VMNetProxyTrouble: String, Equatable, Sendable, CaseIterable {
+    /// The proxy's address was not found, its port did not take the connection, or it closed the
+    /// connection or said nothing in time: the proxy is down, or not where its entry says.
+    case unreachable
+    /// The proxy refused the sign-in: SOCKS5's user name and password, or HTTP's 407.
+    case login
+    /// The proxy's answer is not the protocol the profile names (an HTTP proxy's port given as
+    /// SOCKS5, or the other way round).
+    case notUnderstood
 }
 
 /// A name the guest asked for and the fake address it was given for it (`FakeAddressPool`).

@@ -1141,6 +1141,15 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             trouble = named.rawValue
             troubleDetail = report.detail.map { String($0.prefix(200)) }
         }
+        // A machine with a proxy of its own: the proxy itself failing the guest's connections one
+        // after another — gone down since the start's check, or refusing a sign-in that changed —
+        // is said as such; until now the row went on saying nothing while the machine had no
+        // internet. Nothing goes out past the proxy meanwhile (its network has no other way).
+        if report == nil, request.network == .proxy,
+           let named = VMNetworkTrouble.ofMachineProxy(failuresInARow: counters.proxyFailuresInARow,
+                                                       kind: counters.proxyTrouble?.rawValue) {
+            trouble = named.rawValue
+        }
         let viaSystemProxy = report?.usesSystemProxy ?? false
         guard counters != lastTraffic || trouble != lastTrouble || troubleDetail != lastTroubleDetail
             || viaSystemProxy != lastViaSystemProxy else { return }

@@ -38,6 +38,18 @@ enum ProxyFailure: Equatable, Error {
         case .nameTooLong: return "the host name is too long for SOCKS5"
         }
     }
+
+    /// Whether this says something of the proxy itself — its sign-in refused, an answer that is
+    /// not its protocol — or only of the site it was asked for (nil): a SOCKS5 refusal ("host
+    /// unreachable", "connection refused") or an HTTP status other than 407 is the site's.
+    var proxyTrouble: VMNetProxyTrouble? {
+        switch self {
+        case .authenticationRejected, .noAcceptableMethod, .credentialsTooLong: return .login
+        case .refused(let code): return code == 407 ? .login : nil
+        case .malformedReply: return .notUnderstood
+        case .nameTooLong: return nil
+        }
+    }
 }
 
 /// What to do after the proxy's bytes so far.

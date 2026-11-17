@@ -244,8 +244,9 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public var bytesUp: UInt64?
     public var bytesDown: UInt64?
     public var connections: Int?
-    /// `traffic`, a machine without a proxy: why its connections are not being made — a kind
-    /// (`VMNetworkTrouble`), set while several in a row have failed and none has been made since.
+    /// `traffic`: why the machine's connections are not being made — a kind (`VMNetworkTrouble`),
+    /// set while several in a row have failed and none has been made since: without a proxy, this
+    /// Mac's way out; with one, the machine's own proxy (down, or refusing its sign-in).
     public var trouble: String?
     /// With `trouble`: the same in the helper's log's words — a range of addresses, an error's
     /// name; never a name or an address the machine asked for. Shown as a technical detail.
@@ -319,10 +320,32 @@ public enum VMNetworkTrouble: String, Codable, Sendable, CaseIterable {
     /// This Mac's proxy is set by a configuration file (PAC) or found on the network (WPAD),
     /// which a machine cannot follow: its network stays closed, as for a proxy that is down.
     case proxyConfigurationFile
+    /// The machine's own proxy (its profile's) does not answer: down since the start's check, or
+    /// no longer at its address. Nothing goes out past it.
+    case ownProxyUnreachable
+    /// The machine's own proxy refuses its sign-in: the password changed, or the plan ran out.
+    case ownProxyLogin
+    /// The machine's own proxy answers in another protocol than its entry names.
+    case ownProxyNotUnderstood
 
     /// How many connections must fail one after another, none made since, before the machine is
     /// said to have no way out: a page's one dead address is not that.
     public static let failuresBeforeSaying: UInt64 = 4
+
+    /// A machine with a proxy: what its row and window say once the proxy itself has failed
+    /// `failuresInARow` of the guest's connections one after another (`VMNetCounters` in the
+    /// helper), with `kind` the network's word for why — `unreachable`, `login`, `notUnderstood`
+    /// (`VMNetProxyTrouble`'s raw values). Nil below `failuresBeforeSaying`, and for a kind this
+    /// version has no words for. A proxy that says a site cannot be reached is not counted there.
+    public static func ofMachineProxy(failuresInARow: UInt64, kind: String?) -> VMNetworkTrouble? {
+        guard failuresInARow >= failuresBeforeSaying, let kind else { return nil }
+        switch kind {
+        case "unreachable": return .ownProxyUnreachable
+        case "login": return .ownProxyLogin
+        case "notUnderstood": return .ownProxyNotUnderstood
+        default: return nil
+        }
+    }
 }
 
 /// What the app writes to the helper after its request, a line each.
