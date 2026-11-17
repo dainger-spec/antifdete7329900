@@ -3,6 +3,7 @@ import BrowserCore
 import Combine
 import Foundation
 import os
+import UpdateProgress
 
 /// App-level state: vault lock state, profile list, and the profile manager.
 @MainActor
@@ -135,8 +136,22 @@ final class AppModel: ObservableObject {
     /// Nil when there is none, or once the person put it away for this version, until the app
     /// starts again.
     @Published private(set) var updateOffer: UpdateOffer?
-    private var updateOfferPutAway: String?
+    /// The release waiting — found, downloading or ready — whatever was said of it: the sidebar's
+    /// row stays while there is one (`UpdateSidebarRow`).
+    @Published private(set) var pendingUpdate: UpdateOffer?
+    var updateOfferPutAway: String?
     private var updaterObservation: AnyCancellable?
+    private var phaseObservation: AnyCancellable?
+    /// The update's window (`UpdateWindowView`): what it shows; nil while it is closed.
+    @Published var updateWindowMode: UpdateWindowMode?
+    /// After "Update and Restart": the download's and the checks' progress the window shows.
+    @Published var updateProgress: UpdateProgressModel?
+    let updateWindow = UpdateWindowController()
+    /// The release the window opened by itself for in this run: once each.
+    var updateWindowOpenedFor: String?
+    /// Found while the vault was locked: offered once it opens (a window over the password's field
+    /// would take the keyboard from it).
+    var updateToOffer: AppcastItem?
 
     /// "Later" on the offer: not said again for this version in this run.
     func updateOfferSeen() {
@@ -145,6 +160,10 @@ final class AppModel: ObservableObject {
     }
 
     private func offer(for state: UpdateState) -> UpdateOffer? {
+        offer(for: state, putAway: updateOfferPutAway)
+    }
+
+    private func offer(for state: UpdateState, putAway: String?) -> UpdateOffer? {
         let offer: UpdateOffer?
         switch state {
         case .available(let item): offer = UpdateOffer(version: item.version, stage: .available)
@@ -153,7 +172,7 @@ final class AppModel: ObservableObject {
         case .blocked(let item, _): offer = UpdateOffer(version: item.version, stage: .blocked)
         case .idle, .upToDate, .checking, .failed: offer = nil
         }
-        return offer?.version == updateOfferPutAway ? nil : offer
+        return offer?.version == putAway ? nil : offer
     }
 
     func updatedNoticeSeen() {
@@ -2017,7 +2036,8 @@ final class AppModel: ObservableObject {
 
     /// Once, when the app's window first appears — never in the self-test, the snapshots or a
     /// profile's own process: the updater of a build with a feed, its automatic checks when they
-    /// are on, and what became of the last update when it was not installed.
+    /// are on, and what became of the last update — the new version's welcome, or, when it was not
+    /// installed, why, in the interface's words (`UpdateOutcome.kind`), never the installer's.
     func startUpdates() {
         guard !updatesStarted else { return }
         updatesStarted = true
@@ -2032,19 +2052,38 @@ final class AppModel: ObservableObject {
                 if case .checking = state { return }
                 let offer = self.offer(for: state)
                 if self.updateOffer != offer { self.updateOffer = offer }
+                let pending = self.offer(for: state, putAway: nil)
+                if self.pendingUpdate != pending { self.pendingUpdate = pending }
+                self.offerUpdateWindow(for: state)
+            }
+        }
+        phaseObservation = $phase.sink { [weak self] phase in
+            guard phase == .unlocked else { return }
+            Task { @MainActor in
+                guard let self, let item = self.updateToOffer else { return }
+                self.updateToOffer = nil
+                if let state = self.updater?.state, state.item == item { self.offerUpdateWindow(for: state) }
             }
         }
         updater.start()
+        let log = Logger(subsystem: "PrivacyBrowser", category: "Updates")
         switch updater.notice {
         case .outcome(let outcome)?:
-            switch outcome.result {
-            case .installed: updatedTo = outcome.version // and the Updates section says when
-            case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
-            case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
-            case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))
+            log.notice("Last update: \(outcome.result.rawValue, privacy: .public) (\(outcome.kind.rawValue, privacy: .public)): \(outcome.detail, privacy: .private)")
+            if outcome.result == .installed {
+                // Over the lock screen, once the launch screen (if any) has gone; without the keyboard.
+                let installed = InstalledUpdate(version: outcome.version, notes: updater.installedItem?.notes ?? "")
+                Task { @MainActor [weak self] in
+                    while let self, self.welcome != nil, !self.welcomeFinished { try? await Task.sleep(nanoseconds: 200_000_000) }
+                    self?.showUpdateWindow(.installed(installed), focus: false)
+                }
+            } else {
+                showUpdateWindow(.notice(String(format: L("updates.outcome.\(outcome.kind.rawValue)"), outcome.version)), focus: false)
             }
-        case .deferred(let reason)?:
-            showError(String(format: L("updates.notice.deferred"), reason))
+        case .deferred(.gate)?:
+            showUpdateWindow(.notice(L("updates.notice.deferred")), focus: false)
+        case .deferred(.installer)?:
+            showUpdateWindow(.notice(L("updates.notice.installerDidNotStart")), focus: false)
         case nil:
             break
         }
@@ -2057,38 +2096,140 @@ final class AppModel: ObservableObject {
     }
 
     /// At the end of a quit that sealed every profile (`QuitCoordinator`): the gate, then the
-    /// installer. Whatever stops it is said at the next launch; the app quits either way.
+    /// installer — whose window shows the install, and which opens the new version. Whatever stops
+    /// it is said at the next launch; the app quits either way.
     func installUpdateAtQuit() async {
         guard let updater, updater.isReady else { return }
         switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: forcedExitsBeforeQuit)) {
         case .started, .nothingReady: break
-        case .refused(let reasons): updater.rememberNotInstalled(reasons.joined(separator: "; "))
+        case .refused(let reasons): updater.rememberNotInstalled(.gate, reasons: reasons.joined(separator: "; "))
         case .blocked: break // the Updates sheet says where the app has to be
-        case .failed(let reason): updater.rememberNotInstalled(reason)
+        case .failed(let reason): updater.rememberNotInstalled(.installer, reasons: reason)
         }
     }
 
-    /// "Install Now": the quit path, asked for here — every profile stopped and sealed (the vault
-    /// locked) — then the gate. If it does not pass, the app does not quit: it stays locked, says
-    /// why, and keeps the update for the next quit.
+    /// The quit path, asked for here — every profile stopped and sealed (the vault locked) — then
+    /// the gate, and the installer, which restarts Lumen. The update's window shows "Checking" the
+    /// while; the installer's own window, in the same place, takes over. If the gate does not pass,
+    /// the app does not quit: it stays locked, says why in the window, and keeps the update.
     func installUpdateNow() async {
-        guard let updater, updater.isReady, !isInstallingUpdate else { return }
+        guard let updater, updater.isReady, !isInstallingUpdate, case .ready(let item) = updater.state else { return }
         isInstallingUpdate = true
         defer { isInstallingUpdate = false }
+        if updateProgress == nil { updateProgress = UpdateProgressModel(version: item.version, stage: .step(.checking)) }
+        updateProgress?.cancel = nil
+        updateProgress?.stage = .step(.checking)
+        showUpdateWindow(.installing, focus: true)
         let before = ProfileProcess.forcedExits
         await lock(forQuit: true)
+        let log = Logger(subsystem: "PrivacyBrowser", category: "Updates")
         switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: before)) {
         case .started:
             NSApp.terminate(nil)
         case .refused(let reasons):
-            showError(String(format: L("updates.now.refused"), reasons.joined(separator: "\n")))
+            log.notice("Install Now: the quit's gate did not pass: \(reasons.joined(separator: "; "), privacy: .private)")
+            updateProgress = nil
+            showUpdateWindow(.notice(L("updates.now.notStopped")), focus: true)
         case .blocked:
-            showError(L("updates.now.blocked"))
+            updateProgress = nil
+            showUpdateWindow(.updater, focus: true)
         case .failed(let reason):
-            showError(String(format: L("updates.now.failed"), reason))
+            log.error("Install Now: the installer did not start: \(reason, privacy: .private)")
+            updateProgress = nil
+            showUpdateWindow(.notice(L("updates.now.installerDidNotStart")), focus: true)
         case .nothingReady:
-            break
+            updateProgress = nil
+            showUpdateWindow(.updater, focus: true)
         }
+    }
+
+    /// "Update and Restart": the download, with its bar, if the release is not here yet — Cancel
+    /// stops it —, then `installUpdateNow`. The person does nothing more: Lumen quits, the
+    /// installer swaps it and opens the new version.
+    func updateAndRestart() async {
+        guard let updater, !isInstallingUpdate, let item = updater.state.item else { return }
+        let progress = UpdateProgressModel(version: item.version,
+                                           stage: .downloading(fraction: nil, detail: L("updates.progress.estimating")),
+                                           cancel: { [weak updater] in updater?.cancelDownload() })
+        updateProgress = progress
+        showUpdateWindow(.installing, focus: true)
+        let ticker = Task { @MainActor [weak self, weak updater] in
+            while !Task.isCancelled {
+                if let shown = updater?.downloadProgress, let self {
+                    progress.stage = .downloading(fraction: shown.fraction, detail: self.downloadDetail(shown))
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        if case .available = updater.state {
+            await updater.download()
+        } else {
+            while case .downloading = updater.state { try? await Task.sleep(nanoseconds: 200_000_000) }
+        }
+        ticker.cancel()
+        guard case .ready = updater.state else {
+            // Cancelled, or failed: the window says what the updater has (found again, or the failure with Try Again).
+            updateProgress = nil
+            if updateWindowMode == .installing { updateWindowMode = .updater }
+            updateWindow.update(closable: true, floating: false)
+            return
+        }
+        await installUpdateNow()
+    }
+
+    /// "12.3 MB of 45.6 MB · 20 s left", in the interface's words.
+    func downloadDetail(_ progress: UpdateDownloadProgress) -> String {
+        let size = { (bytes: Int64) in bytes.formatted(.byteCount(style: .file).locale(Localization.locale)) }
+        let amount = String(format: L("updates.progress.downloaded"), size(progress.received), size(progress.total))
+        guard let left = progress.remaining() else { return amount + " · " + L("updates.progress.estimating") }
+        let rounded = left < 60 ? max(1, (left / 5).rounded(.up) * 5) : (left / 60).rounded(.up) * 60
+        let time = Duration.seconds(rounded).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated).locale(Localization.locale))
+        return amount + " · " + String(format: L("updates.progress.remaining"), time)
+    }
+
+    /// The app menu's Check for Updates…, and the palette's: the update's window, a check in it.
+    func checkForUpdatesInWindow() {
+        showUpdateWindow(.updater, focus: true)
+        Task { await updater?.checkNow() }
+    }
+
+    /// Opens the update's window at `mode`. `focus`: brought to the front with the keyboard; else
+    /// shown without taking it — from the lock screen's password field, say.
+    func showUpdateWindow(_ mode: UpdateWindowMode, focus: Bool) {
+        updateWindowMode = mode
+        updateWindow.show(model: self, focus: focus)
+        updateWindow.update(closable: mode != .installing, floating: mode == .installing)
+    }
+
+    /// "Later", "Close": the window goes; a release put away is not offered by itself again in this run.
+    func closeUpdateWindow(later: Bool = false) {
+        if later { updateOfferSeen() }
+        updateWindow.close()
+        updateWindowMode = nil
+    }
+
+    /// The window closed by its own button.
+    func updateWindowClosed() {
+        if updateWindowMode != .installing { updateWindowMode = nil }
+    }
+
+    /// A release found: the update's window opens by itself, once a run for it — when it is
+    /// downloaded (or, "only tell me", found), the person not told already, nothing else in the
+    /// window, and the vault open (else at the unlock).
+    private func offerUpdateWindow(for state: UpdateState) {
+        let item: AppcastItem
+        switch state {
+        case .ready(let ready): item = ready
+        case .available(let found) where updater?.installPolicy == .notifyOnly: item = found
+        default: return
+        }
+        guard updateWindowOpenedFor != item.version, updateOfferPutAway != item.version, updateWindowMode == nil else { return }
+        guard phase == .unlocked else {
+            updateToOffer = item
+            return
+        }
+        updateWindowOpenedFor = item.version
+        showUpdateWindow(.updater, focus: false)
     }
 
     /// What a quit would stop now, one line per profile, for Install Now's confirmation.

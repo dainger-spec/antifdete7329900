@@ -1,0 +1,467 @@
+import AppKit
+import BrowserCore
+import SwiftUI
+
+// The update's windows (docs/UPDATES.md §7), shared by the app and its installer helper so that the
+// window the app shows while it downloads and checks, and the one the helper shows while it swaps
+// and restarts Lumen, are one and the same: the same place, the same size, the same steps. The app
+// draws the rest of the update's windows (found, failed, installed) in the same frame
+// (`UpdateWindowFrame`). The colours and type are the app's Theme's — the helper links no app code.
+
+/// The app's Theme, as the update's windows use it.
+public enum UpdatePalette {
+    public static let backdrop = Color(red: 8 / 255, green: 9 / 255, blue: 11 / 255)
+    /// The sky over the horizon: a breath lighter than the disc.
+    public static let sky = Color(red: 14 / 255, green: 15 / 255, blue: 19 / 255)
+    public static let raised = Color(red: 17 / 255, green: 18 / 255, blue: 22 / 255)
+    public static let raisedInset = Color(red: 23 / 255, green: 24 / 255, blue: 29 / 255)
+    public static let textPrimary = Color(red: 244 / 255, green: 244 / 255, blue: 245 / 255)
+    public static let textSecondary = Color(red: 161 / 255, green: 161 / 255, blue: 170 / 255)
+    public static let textTertiary = Color(red: 133 / 255, green: 133 / 255, blue: 142 / 255)
+    public static let hairline = Color.white.opacity(0.10)
+    /// The horizon's light (the app's `Theme.rim`).
+    public static let rim = Color(red: 236 / 255, green: 240 / 255, blue: 248 / 255)
+    public static let done = Color(red: 95 / 255, green: 211 / 255, blue: 155 / 255)
+    public static let warning = Color(red: 227 / 255, green: 165 / 255, blue: 60 / 255)
+    public static let nsBackdrop = NSColor(srgbRed: 8 / 255, green: 9 / 255, blue: 11 / 255, alpha: 1)
+}
+
+/// The words of the progress window, in the person's language. The helper has no strings of its own:
+/// the app sends them with its request (`UpdateRequest.texts`, these keys — the app's own
+/// `updates.progress.…` strings). English where one is missing.
+public struct UpdateProgressTexts: Equatable {
+    public var title: String
+    public var keepOpen: String
+    /// "Lumen %@": the version being installed.
+    public var version: String
+    public var download: String
+    public var checking: String
+    public var installing: String
+    public var relaunching: String
+    public var cancel: String
+    /// Said once a Lumen opened during the install stepped aside.
+    public var opensItself: String
+
+    public static let titleKey = "updates.progress.title"
+    public static let keepOpenKey = "updates.progress.keepOpen"
+    public static let versionKey = "updates.progress.version"
+    public static let downloadKey = "updates.progress.download"
+    public static let checkingKey = "updates.progress.checking"
+    public static let installingKey = "updates.progress.installing"
+    public static let relaunchingKey = "updates.progress.relaunching"
+    public static let cancelKey = "updates.progress.cancel"
+    public static let opensItselfKey = "updates.progress.opensItself"
+    public static let keys = [titleKey, keepOpenKey, versionKey, downloadKey, checkingKey, installingKey, relaunchingKey, cancelKey,
+                              opensItselfKey]
+
+    public init(_ texts: [String: String]) {
+        title = texts[Self.titleKey] ?? "Installing the update"
+        keepOpen = texts[Self.keepOpenKey] ?? "Don’t close Lumen — it restarts by itself."
+        version = texts[Self.versionKey] ?? "Lumen %@"
+        download = texts[Self.downloadKey] ?? "Download"
+        checking = texts[Self.checkingKey] ?? "Checking"
+        installing = texts[Self.installingKey] ?? "Installing"
+        relaunching = texts[Self.relaunchingKey] ?? "Restarting"
+        cancel = texts[Self.cancelKey] ?? "Cancel"
+        opensItself = texts[Self.opensItselfKey] ?? "Lumen opens by itself as soon as the update is installed."
+    }
+
+    public func step(_ step: UpdateInstallStep) -> String {
+        switch step {
+        case .checking: return checking
+        case .installing: return installing
+        case .relaunching: return relaunching
+        }
+    }
+}
+
+/// What the progress window shows now; changed on the main thread.
+public final class UpdateProgressModel: ObservableObject {
+    public enum Stage: Equatable {
+        /// The archive coming: 0…1 (nil: its size is not known yet), and "12.3 MB of 45.6 MB · 20 s
+        /// left" in the person's words.
+        case downloading(fraction: Double?, detail: String)
+        case step(UpdateInstallStep)
+    }
+
+    @Published public var stage: Stage
+    /// A Lumen opened during the install stepped aside: the window says Lumen opens by itself.
+    @Published public var reopened: Bool
+    public let version: String
+    /// Cancel, offered while downloading; nil: none (the helper's window).
+    public var cancel: (() -> Void)?
+
+    public init(version: String, stage: Stage, reopened: Bool = false, cancel: (() -> Void)? = nil) {
+        self.version = version
+        self.stage = stage
+        self.reopened = reopened
+        self.cancel = cancel
+    }
+}
+
+/// The update windows' width — their height is their content's — and how they are made: the app's
+/// and the helper's alike, so that one stands where the other stood when Lumen hands over.
+public enum UpdateWindowLayout {
+    public static let width: CGFloat = 480
+    /// How far above the window's foot the horizon's rim stands: the buttons are on the disc under
+    /// it, everything else in the sky above, clear of its glow.
+    public static let rimFromBottom: CGFloat = 92
+
+    /// A window for the update's content, centred on the screen with the keyboard, dark, its title
+    /// bar the content's, sized to its content (and following it when the content changes).
+    /// `closable`: the found and failed windows may be closed; the progress window is not, while
+    /// Lumen is being replaced.
+    @MainActor
+    public static func window<Content: View>(closable: Bool, title: String, content: Content) -> NSWindow {
+        var style: NSWindow.StyleMask = [.titled, .fullSizeContentView]
+        if closable { style.insert(.closable) }
+        let host = NSHostingController(rootView: content)
+        host.sizingOptions = [.preferredContentSize]
+        let window = NSWindow(contentViewController: host)
+        window.styleMask = style
+        window.title = title
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = UpdatePalette.nsBackdrop
+        window.isMovableByWindowBackground = true
+        window.isReleasedWhenClosed = false
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.setContentSize(host.view.fittingSize)
+        window.center()
+        return window
+    }
+}
+
+/// The eclipse's horizon the lock screen stands on, at the window's foot: a dark disc rising from
+/// below, light breaking along its rim. The windows' one decoration; nothing is written on it.
+public struct UpdateHorizon: View {
+    public var rimFromBottom: CGFloat
+
+    public init(rimFromBottom: CGFloat = UpdateWindowLayout.rimFromBottom) {
+        self.rimFromBottom = rimFromBottom
+    }
+
+    public var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let rimY = geometry.size.height - rimFromBottom
+            // Flat, as the lock screen's: it drops some 20 pt by the window's edges.
+            let radius = max(width * 2.6, 1250)
+            let centre = CGPoint(x: width / 2, y: rimY + radius)
+            ZStack {
+                UpdatePalette.backdrop
+                // The disc.
+                Circle()
+                    .fill(UpdatePalette.backdrop)
+                    .frame(width: radius * 2, height: radius * 2)
+                    .position(centre)
+                // Its rim: a glow, and a hairline of light brightest at the top.
+                Circle()
+                    .stroke(rimLight(0.45), lineWidth: 6)
+                    .frame(width: radius * 2, height: radius * 2)
+                    .position(centre)
+                    .blur(radius: 6)
+                Circle()
+                    .stroke(rimLight(0.95), lineWidth: 1.1)
+                    .frame(width: radius * 2, height: radius * 2)
+                    .position(centre)
+            }
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func rimLight(_ strength: Double) -> AngularGradient {
+        // Brightest at the top of the disc (270° from the right, clockwise), gone a quarter turn
+        // either way.
+        AngularGradient(stops: [
+            .init(color: .white.opacity(0), location: 0),
+            .init(color: .white.opacity(0), location: 0.62),
+            .init(color: .white.opacity(strength), location: 0.75),
+            .init(color: .white.opacity(0), location: 0.88),
+            .init(color: .white.opacity(0), location: 1),
+        ], center: .center, startAngle: .degrees(0), endAngle: .degrees(360))
+    }
+}
+
+/// Lumen's split disc, as the lock screen stands it in the sky (the app's `LumenGlyph`, the 64-grid
+/// cut of `LumenMarkGeometry.large`, drawn here again: the helper links no app code).
+struct UpdateLumenGlyph: Shape {
+    func path(in rect: CGRect) -> Path {
+        let grid: CGFloat = 64, centreX: CGFloat = 32, centreY: CGFloat = 32, radius: CGFloat = 19, gap: CGFloat = 3, slide: CGFloat = 6
+        let scale = min(rect.width, rect.height) / grid
+        let origin = CGPoint(x: rect.midX - grid * scale / 2, y: rect.midY - grid * scale / 2)
+        let length = (1.0 + 9.0 as CGFloat).squareRoot()
+        let d = CGVector(dx: 1 / length, dy: -3 / length)
+        let n = CGVector(dx: -d.dy, dy: d.dx)
+        var path = Path()
+        for side: CGFloat in [1, -1] {
+            let h = side * gap / 2
+            let shift = side * slide / 2
+            let centre = CGPoint(x: centreX + d.dx * shift, y: centreY + d.dy * shift)
+            let half = (radius * radius - h * h).squareRoot()
+            let a = CGVector(dx: n.dx * h - d.dx * half, dy: n.dy * h - d.dy * half)
+            let b = CGVector(dx: n.dx * h + d.dx * half, dy: n.dy * h + d.dy * half)
+            let m = CGVector(dx: n.dx * side * radius, dy: n.dy * side * radius)
+            let angleA = atan2(a.dy, a.dx), angleB = atan2(b.dy, b.dx), angleM = atan2(m.dy, m.dx)
+            func positive(_ angle: CGFloat) -> CGFloat {
+                var value = angle.truncatingRemainder(dividingBy: 2 * .pi)
+                if value <= 0 { value += 2 * .pi }
+                return value
+            }
+            let whole = positive(angleA - angleB)
+            let sweep = positive(angleM - angleB) < whole ? whole : whole - 2 * .pi
+            func point(_ v: CGVector) -> CGPoint {
+                CGPoint(x: origin.x + (centre.x + v.dx) * scale, y: origin.y + (centre.y + v.dy) * scale)
+            }
+            path.move(to: point(a))
+            path.addLine(to: point(b))
+            path.addArc(center: point(.zero), radius: radius * scale, startAngle: .radians(Double(angleB)),
+                        endAngle: .radians(Double(angleB + sweep)), clockwise: sweep < 0)
+            path.closeSubpath()
+        }
+        return path
+    }
+}
+
+/// Every update window's frame, the lock screen's language: Lumen's disc, a title and a line under
+/// it, the window's own content — all in the sky —, then the horizon's glowing rim, and the buttons
+/// on the disc under it. Clean type, nothing drawn by hand, no text on the glow. As tall as its
+/// content.
+public struct UpdateWindowFrame<Content: View, Buttons: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let content: () -> Content
+    @ViewBuilder let buttons: () -> Buttons
+
+    public init(title: String, subtitle: String, @ViewBuilder content: @escaping () -> Content,
+                @ViewBuilder buttons: @escaping () -> Buttons) {
+        self.title = title
+        self.subtitle = subtitle
+        self.content = content
+        self.buttons = buttons
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            UpdateLumenGlyph()
+                .fill(UpdatePalette.textPrimary)
+                .frame(width: 32, height: 32)
+                .accessibilityHidden(true)
+                .padding(.top, 46)
+            Text(title)
+                .font(.system(size: 22, weight: .bold))
+                .tracking(-0.5)
+                .foregroundStyle(UpdatePalette.textPrimary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 16)
+                .accessibilityAddTraits(.isHeader)
+            Text(subtitle)
+                .font(.system(size: 13))
+                .foregroundStyle(UpdatePalette.textSecondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 6)
+            content()
+                .frame(maxWidth: .infinity)
+                .padding(.top, 24)
+            // The sky's last stretch, clear of everything: the rim's glow is under it.
+            Color.clear.frame(height: 52)
+            HStack(spacing: 10) {
+                buttons()
+            }
+            .frame(height: 32)
+            .padding(.top, UpdateWindowLayout.rimFromBottom - 32 - 26)
+            .padding(.bottom, 26)
+        }
+        .padding(.horizontal, 40)
+        .frame(width: UpdateWindowLayout.width)
+        .fixedSize(horizontal: false, vertical: true)
+        .background(UpdateHorizon())
+        .background(UpdatePalette.backdrop)
+        .environment(\.colorScheme, .dark)
+    }
+}
+
+/// "Installing the update — don't close Lumen": one full-width bar under the title — the
+/// download's, with "12.3 MB of 45.6 MB · 15 s left" under it; once the archive is here, full,
+/// with the step under way under it — and the steps as one centred column: download, checking,
+/// installing, restarting, each ticked off as it is done. The same layout in every state, so
+/// nothing moves from one to the next; the app's window and the installer's are the same.
+public struct UpdateProgressView: View {
+    @ObservedObject var model: UpdateProgressModel
+    let texts: UpdateProgressTexts
+
+    public init(model: UpdateProgressModel, texts: UpdateProgressTexts) {
+        self.model = model
+        self.texts = texts
+    }
+
+    private enum Row: Hashable {
+        case download
+        case step(UpdateInstallStep)
+    }
+
+    private var rows: [Row] { [.download] + UpdateInstallStep.allCases.map { .step($0) } }
+
+    /// Where the install is, as a row's place in `rows`.
+    private var current: Int {
+        switch model.stage {
+        case .downloading: return 0
+        case .step(let step): return 1 + (UpdateInstallStep.allCases.firstIndex(of: step) ?? 0)
+        }
+    }
+
+    private var bar: (fraction: Double?, line: String) {
+        switch model.stage {
+        case let .downloading(fraction, detail): return (fraction, detail)
+        case .step(let step): return (1, texts.step(step) + "…")
+        }
+    }
+
+    public var body: some View {
+        UpdateWindowFrame(title: texts.title,
+                          subtitle: String(format: texts.version, model.version) + " · " + (model.reopened ? texts.opensItself : texts.keepOpen)) {
+            VStack(spacing: 0) {
+                VStack(spacing: 8) {
+                    DownloadBar(fraction: bar.fraction)
+                    Text(bar.line)
+                        .font(.system(size: 12).monospacedDigit())
+                        .foregroundStyle(UpdatePalette.textSecondary)
+                        .lineLimit(1)
+                        .frame(height: 16)
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    ForEach(Array(rows.enumerated()), id: \.element) { index, row in
+                        let state: StepMark.State = index < current ? .done : (index == current ? .now : .later)
+                        HStack(spacing: 12) {
+                            StepMark(state: state)
+                            Text(title(row))
+                                .font(.system(size: 13, weight: state == .now ? .semibold : .regular))
+                                .foregroundStyle(state == .later ? UpdatePalette.textTertiary : UpdatePalette.textPrimary)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+                .frame(width: 180, alignment: .leading)
+                .padding(.top, 26)
+            }
+            .animation(.easeOut(duration: 0.25), value: model.stage)
+        } buttons: {
+            if case .downloading = model.stage, let cancel = model.cancel {
+                Button(texts.cancel, action: cancel)
+                    .buttonStyle(UpdateButtonStyle(primary: false))
+                    .keyboardShortcut(.cancelAction)
+            } else {
+                // The same room whether Cancel is there or not: nothing moves.
+                Color.clear.frame(width: 1, height: 32)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func title(_ row: Row) -> String {
+        switch row {
+        case .download: return texts.download
+        case .step(let step): return texts.step(step)
+        }
+    }
+}
+
+/// A step's mark, 18 pt, every kind the same size: a check when done, a turning arc while under
+/// way, a quiet ring before.
+struct StepMark: View {
+    enum State { case done, now, later }
+    let state: State
+
+    var body: some View {
+        ZStack {
+            switch state {
+            case .done:
+                Image(systemName: "checkmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(UpdatePalette.done)
+            case .now:
+                Circle().inset(by: 1).stroke(Color.white.opacity(0.12), lineWidth: 2)
+                TimelineView(.animation) { context in
+                    let turn = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.1) / 1.1
+                    Circle().inset(by: 1)
+                        .trim(from: 0, to: 0.3)
+                        .stroke(UpdatePalette.textPrimary, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .rotationEffect(.degrees(turn * 360))
+                }
+            case .later:
+                Circle().inset(by: 0.75).stroke(Color.white.opacity(0.16), lineWidth: 1.5)
+            }
+        }
+        .frame(width: 18, height: 18)
+        .padding(1)
+        .accessibilityHidden(true)
+    }
+}
+
+/// The bar, 4 pt and the content's full width: its track at 12 % white, a white fill; with no
+/// size yet, a segment sweeping along.
+struct DownloadBar: View {
+    let fraction: Double?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Color.white.opacity(0.12))
+                if let fraction {
+                    Capsule().fill(UpdatePalette.textPrimary)
+                        .frame(width: max(4, width * min(max(fraction, 0), 1)))
+                        .animation(.easeOut(duration: 0.2), value: fraction)
+                } else {
+                    TimelineView(.animation) { context in
+                        let t = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.4) / 1.4
+                        Capsule().fill(UpdatePalette.textPrimary)
+                            .frame(width: width * 0.3)
+                            .offset(x: -width * 0.3 + width * 1.3 * t)
+                    }
+                }
+            }
+            .clipShape(Capsule())
+        }
+        .frame(height: 4)
+        .accessibilityElement()
+        .accessibilityValue(Text(verbatim: fraction.map { "\(Int(($0 * 100).rounded())) %" } ?? ""))
+    }
+}
+
+/// The update windows' buttons where the app's own styles are not at hand (the helper): the app's
+/// contour buttons (`LumenButtonStyle`), drawn the same — the main one 32 pt with an edge lit from
+/// above, the other quieter.
+public struct UpdateButtonStyle: ButtonStyle {
+    let primary: Bool
+
+    public init(primary: Bool) {
+        self.primary = primary
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: primary ? 10 : 9, style: .continuous)
+        return configuration.label
+            .font(.system(size: 13, weight: primary ? .semibold : .medium))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 14)
+            .frame(height: primary ? 32 : 28)
+            .foregroundStyle(UpdatePalette.textPrimary)
+            .background(shape.fill(primary ? UpdatePalette.raised : UpdatePalette.raised.opacity(0.6)))
+            .background(shape.fill(LinearGradient(colors: [Color.white.opacity(primary ? 0.05 : 0), .clear],
+                                                  startPoint: .top, endPoint: .bottom)))
+            .overlay(shape.strokeBorder(primary
+                                        ? AnyShapeStyle(LinearGradient(colors: [Color.white.opacity(0.46), Color.white.opacity(0.26)],
+                                                                       startPoint: .top, endPoint: .bottom))
+                                        : AnyShapeStyle(Color.white.opacity(0.16)), lineWidth: 1))
+            .scaleEffect(configuration.isPressed ? 0.98 : 1)
+            .contentShape(shape)
+    }
+}

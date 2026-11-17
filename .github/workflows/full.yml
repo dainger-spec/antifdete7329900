@@ -836,8 +836,9 @@ jobs:
         # scripts/update_check.py: the old build's own updater against a local HTTPS feed — no request
         # with checks off (packet capture), an older build never offered, a stale and a forged appcast
         # and a changed archive refused, nothing installed while a profile with a window and a warm-up
-        # without one run — then the quit path, the gate, the real installer: the swap, the new build
-        # started, the old build's data opened by the new one. Its own bundle id (dev.local.PBUpdateCheck).
+        # without one run — then the quit path, the gate, the real installer: Lumen opened again the
+        # moment it quit must step aside and the install go on; the swap, the new build started, the
+        # old build's data opened by the new one. Its own bundle id (dev.local.PBUpdateCheck).
         # Early in the job, and not stopping it: a failure fails the job at its end ("Updates end to end, result").
         id: updates
         continue-on-error: true

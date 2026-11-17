@@ -239,6 +239,9 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
+        // An update being installed this moment is not ended by this start: it steps aside, and
+        // the installer opens Lumen when it is done (UpdateLaunchGuard; docs/UPDATES.md §3).
+        if !arguments.contains("--settings-window-check") { UpdateLaunchGuard.stepAsideIfInstalling() }
         if let index = arguments.firstIndex(of: "--settings-window-check") {
             // The Settings window as the person gets it: this app as it runs, Settings opened as ⌘,
             // opens it, the window server's picture read for a band (SettingsWindowCheck; CI).
