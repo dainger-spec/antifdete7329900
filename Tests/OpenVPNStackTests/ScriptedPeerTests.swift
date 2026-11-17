@@ -374,3 +374,47 @@ extension ScriptedPeerTests {
         XCTAssertEqual(TestSockets.receive(client, count: 10), Array("echo:early".utf8))
     }
 }
+
+extension ScriptedPeerTests {
+    /// A UDP association whose request names its sender takes that sender only: another socket of
+    /// this Mac that sends first is not carried.
+    func testAUDPAssociationThatNamesItsSenderTakesNoOther() {
+        let socketDescriptor = socket(AF_INET, TestSockets.datagram, 0)
+        let intruder = socket(AF_INET, TestSockets.datagram, 0)
+        defer { close(socketDescriptor); close(intruder) }
+        for descriptor in [socketDescriptor, intruder] {
+            var storage = sockaddr_storage()
+            let length = TunnelSystem.fill(&storage, address: TunnelAddress("127.0.0.1")!, port: 0)
+            _ = withUnsafePointer(to: &storage) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(descriptor, $0, length) } }
+            TestSockets.setTimeout(descriptor, seconds: 2)
+        }
+        let ownPort = TunnelSystem.localAddress(socketDescriptor)!.port
+        let control = connectClient()
+        defer { close(control) }
+        TestSockets.sendAll(control, [5, 1, 2])
+        _ = TestSockets.receive(control, count: 2)
+        let user = Array(TestSockets.username.utf8), pass = Array(TestSockets.password.utf8)
+        var auth: [UInt8] = [1, UInt8(user.count)]
+        auth += user
+        auth.append(UInt8(pass.count))
+        auth += pass
+        TestSockets.sendAll(control, auth)
+        _ = TestSockets.receive(control, count: 2)
+        TestSockets.sendAll(control, [5, 3, 0, 1, 127, 0, 0, 1, UInt8(ownPort >> 8), UInt8(ownPort & 0xFF)])
+        let reply = TestSockets.receive(control, count: 10)
+        XCTAssertEqual(reply.count, 10)
+        let relayPort = UInt16(reply[8]) << 8 | UInt16(reply[9])
+        var relay = sockaddr_storage()
+        let length = TunnelSystem.fill(&relay, address: TunnelAddress("127.0.0.1")!, port: relayPort)
+        var datagram: [UInt8] = [0, 0, 0, 1, 10, 99, 0, 1, 0, 7]
+        datagram += Array("x".utf8)
+        // The intruder first: nothing comes back to it, and nothing went out for it.
+        _ = withUnsafePointer(to: &relay) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(intruder, datagram, datagram.count, 0, $0, length) } }
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        XCTAssertLessThan(recv(intruder, &buffer, buffer.count, 0), 0, "the intruder gets nothing")
+        XCTAssertTrue(peer.udpSources.filter { $0.hasSuffix(">10.99.0.1:7") }.isEmpty, "and nothing went out for it")
+        // The named sender is carried.
+        _ = withUnsafePointer(to: &relay) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { sendto(socketDescriptor, datagram, datagram.count, 0, $0, length) } }
+        XCTAssertGreaterThan(recv(socketDescriptor, &buffer, buffer.count, 0), 10)
+    }
+}

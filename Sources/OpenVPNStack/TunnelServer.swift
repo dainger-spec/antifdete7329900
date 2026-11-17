@@ -496,7 +496,15 @@ public final class TunnelServer {
                 }
             }
         case SOCKS5Server.Command.udpAssociate.rawValue:
-            guard let association = UDPAssociation(control: client, server: self) else {
+            var sender: (address: TunnelAddress, port: UInt16)?
+            if case .address(let address) = request.destination, address.isAny || TunnelSystem.isLoopback(address) {
+                sender = (address, request.port)
+            } else if case .address = request.destination {
+                // A sender elsewhere than this Mac could never send to a socket on 127.0.0.1.
+                fail(client, .notAllowed)
+                return
+            }
+            guard let association = UDPAssociation(control: client, server: self, sender: sender) else {
                 fail(client, .generalFailure)
                 return
             }

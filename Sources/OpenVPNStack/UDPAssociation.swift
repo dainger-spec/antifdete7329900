@@ -10,8 +10,9 @@ import CLwIP
 /// and an lwIP endpoint per family for their way through the tunnel. It lives as long as the TCP
 /// connection that asked for it.
 ///
-/// The client is whoever sends the first datagram — from this Mac only (the socket is on
-/// 127.0.0.1) — and nobody else afterwards. Fragmented datagrams (FRAG ≠ 0) are dropped. A
+/// The client is the sender its request named (RFC 1928: the address and port it will send from),
+/// or, when it named none (all zeros), whoever sends the first datagram — from this Mac only (the
+/// socket is on 127.0.0.1) — and nobody else afterwards. Fragmented datagrams (FRAG ≠ 0) are dropped. A
 /// destination named by a host name is looked up through the tunnel first; a few datagrams wait
 /// for it, the rest are dropped.
 final class UDPAssociation {
@@ -26,12 +27,20 @@ final class UDPAssociation {
     private var waitingCount = 0
     private var closed = false
 
-    init?(control: SOCKSClient, server: TunnelServer) {
+    init?(control: SOCKSClient, server: TunnelServer, sender: (address: TunnelAddress, port: UInt16)? = nil) {
         guard let (descriptor, port) = TunnelSystem.loopbackDatagramSocket() else { return nil }
         self.socket = descriptor
         self.port = port
         self.control = control
         self.server = server
+        // A sender named in the request is the client from the start: no other process of this
+        // Mac can take the association by sending first.
+        if let sender, sender.port != 0 {
+            var storage = sockaddr_storage()
+            let address = sender.address.isAny ? TunnelAddress(family: .v4, bytes: [127, 0, 0, 1])! : sender.address
+            _ = TunnelSystem.fill(&storage, address: address, port: sender.port)
+            client = storage
+        }
         TunnelSystem.setBuffer(descriptor, SO_RCVBUF, bytes: 1 << 20)
         TunnelSystem.setBuffer(descriptor, SO_SNDBUF, bytes: 1 << 20)
     }
