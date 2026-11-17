@@ -23,8 +23,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 LOCK=scripts/xray.lock
 NOTICE=Resources/Xray/NOTICE.txt
-# shellcheck disable=SC1090
-source <(grep -E '^[A-Za-z0-9_]+=' "$LOCK")
+# The lock's KEY=value lines (macOS's bash 3.2 cannot `source` a process substitution).
+while IFS='=' read -r key value; do
+  [[ "$key" =~ ^[A-Za-z][A-Za-z0-9_]*$ ]] || continue
+  [[ "$value" =~ ^[A-Za-z0-9._:/+-]+$ ]] || { echo "error: $LOCK: the value of $key is not a plain word" >&2; exit 1; }
+  printf -v "$key" '%s' "$value"
+done < "$LOCK"
 
 ARCH=""
 GOOS_TARGET=darwin
