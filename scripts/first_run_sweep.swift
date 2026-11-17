@@ -123,14 +123,27 @@ func nodes(under root: AXUIElement) -> [Node] {
 
 /// Where to click `node` once it is in view: a person scrolls to what is below the window's fold (a
 /// small screen: the master password's second field, its box and Create Vault were under it on a
-/// 1024×768 runner, CI run 43999545658), as VoiceOver does with AXScrollToVisible.
+/// 1024×768 runner, CI run 43999545658). AXScrollToVisible first, as VoiceOver does; a SwiftUI
+/// scroll view did not answer it (run 44012019641), so then the wheel, over the window's middle.
 func reveal(_ node: Node) -> CGPoint {
-    let visible = NSScreen.screens.first.map { CGRect(x: 0, y: 30, width: $0.frame.width, height: $0.frame.height - 110) } ?? .infinite
-    guard !visible.contains(node.center) else { return node.center }
+    let visible = NSScreen.screens.first.map { CGRect(x: 0, y: 60, width: $0.frame.width, height: $0.frame.height - 150) } ?? .infinite
+    var box = node.frame
+    guard !visible.contains(CGPoint(x: box.midX, y: box.midY)) else { return CGPoint(x: box.midX, y: box.midY) }
     AXUIElementPerformAction(node.element, "AXScrollToVisible" as CFString)
-    pause(0.5)
-    let moved = frame(of: node.element)
-    return CGPoint(x: moved.midX, y: moved.midY)
+    pause(0.4)
+    box = frame(of: node.element)
+    var tries = 0
+    while !visible.contains(CGPoint(x: box.midX, y: box.midY)), tries < 15 {
+        let middle = CGPoint(x: visible.midX, y: visible.midY)
+        CGEvent(mouseEventSource: source, mouseType: .mouseMoved, mouseCursorPosition: middle, mouseButton: .left)?.post(tap: .cghidEventTap)
+        pause(0.05)
+        let lines: Int32 = box.midY > visible.maxY ? -3 : 3
+        CGEvent(scrollWheelEvent2Source: source, units: .line, wheelCount: 1, wheel1: lines, wheel2: 0, wheel3: 0)?.post(tap: .cghidEventTap)
+        pause(0.3)
+        box = frame(of: node.element)
+        tries += 1
+    }
+    return CGPoint(x: box.midX, y: box.midY)
 }
 
 func describe(_ list: [Node]) -> String {
