@@ -75,32 +75,51 @@ class LumenUITestCase: XCTestCase {
 
     /// Scrolls the open form until `element` can be touched, as a person scrolls to a row: a long
     /// form (a session's settings) keeps rows below the screen out of reach (CI run 5: "DuckDuckGo").
+    /// Back up the form when the element stands above what is shown — a field higher up, after one
+    /// further down was typed into (the proxy's form at the largest text: its name below the long
+    /// footer, then its line at the top) — or when it never came going down.
     @discardableResult
     func reveal(_ element: XCUIElement, _ what: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
-        for _ in 0..<12 {
+        for attempt in 0..<16 {
             if element.exists && element.isHittable { return element }
-            scrollTowardEnd()
+            // A form still sliding in: a moment before the first drag, which would otherwise go back
+            // and pull the sheet down.
+            if attempt == 0, element.exists {
+                usleep(700_000)
+                if element.isHittable { return element }
+            }
+            scroll(towardStart: isAbove(element) || (attempt >= 10 && !element.exists))
         }
         XCTAssertTrue(element.exists && element.isHittable, what, file: file, line: line)
         return element
     }
 
-    /// One drag up the open screen, as a person scrolls it. With the keyboard up a person drags the
-    /// part of the form the keyboard leaves free, beside its rows: DeviceTests at the largest text
-    /// (devices run 143) — the swipe from the screen's middle started on the field being typed in, just
-    /// above the keyboard, and twelve of them never moved the form; the tags' field stayed under the
-    /// keyboard. Without a keyboard, the swipe the other tests have always made.
-    func scrollTowardEnd() {
+    /// `element` is there, above the part of the screen below the bar.
+    func isAbove(_ element: XCUIElement) -> Bool {
+        guard element.exists else { return false }
+        let frame = element.frame, window = app.windows.firstMatch.frame
+        return !frame.isEmpty && !window.isEmpty && frame.midY < window.minY + window.height * 0.15
+    }
+
+    /// One drag of the open screen, as a person scrolls it: toward its end (up) or back (down). With
+    /// the keyboard up a person drags the part of the form the keyboard leaves free, beside its rows:
+    /// DeviceTests at the largest text (devices run 143) — the swipe from the screen's middle started
+    /// on the field being typed in, just above the keyboard, and twelve of them never moved the form;
+    /// the tags' field stayed under the keyboard. Without a keyboard, the swipe the other tests have
+    /// always made.
+    func scroll(towardStart: Bool) {
         let keyboard = app.keyboards.firstMatch
         let window = app.windows.firstMatch.frame
-        guard keyboard.exists, !window.isEmpty else { app.swipeUp(velocity: .slow); return }
+        let swipe = { towardStart ? self.app.swipeDown(velocity: .slow) : self.app.swipeUp(velocity: .slow) }
+        guard keyboard.exists, !window.isEmpty else { swipe(); return }
         let top = window.minY + window.height * 0.15                      // below the bar
         let bottom = min(window.maxY, keyboard.frame.minY) - 8
-        guard bottom - top > 80 else { app.swipeUp(velocity: .slow); return }
+        guard bottom - top > 80 else { swipe(); return }
         let screen = app.coordinate(withNormalizedOffset: .zero)
         let x = window.minX + 12                                           // the form's margin, no field there
-        let from = screen.withOffset(CGVector(dx: x, dy: bottom - (bottom - top) * 0.1))
-        let to = screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * 0.1))
+        let low = screen.withOffset(CGVector(dx: x, dy: bottom - (bottom - top) * 0.1))
+        let high = screen.withOffset(CGVector(dx: x, dy: top + (bottom - top) * 0.1))
+        let (from, to) = towardStart ? (high, low) : (low, high)
         from.press(forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.2)
     }
 
