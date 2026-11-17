@@ -19,19 +19,26 @@ struct RootView: View {
 
     var body: some View {
         ZStack {
-            if let welcome = model.welcome, !model.welcomeFinished {
-                // The launch screen, before the first screen or the lock screen (WelcomeSplash). It
-                // opens by itself; when that is over it goes.
-                WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
-                              opening: { openFromWelcome() }, finished: { model.welcomeFinished = true })
-                    // Its window closed meanwhile: a window opened again starts at the first screen.
-                    .onDisappear { model.welcomeFinished = true }
+            if let welcome = model.welcome, !model.welcomeFinished, welcome.firstLaunch {
+                // The first launch: the launch screen, before the first screen (WelcomeSplash). Its
+                // button opens it; when that is over it goes.
+                welcomeSplash(welcome)
             }
-            if model.welcome == nil || model.welcomeFinished || welcomeOpening {
-                // Over the launch screen while it opens, as the prototype has it.
+            if showsScreens {
+                // At the first launch, over the launch screen while it opens, as the prototype has it.
                 screens
+                    .scaleEffect(screensUnderWelcome && !welcomeOpening && !Motion.isReduced(reduceMotion) ? 0.98 : 1)
                     .transition(welcomeArriving)
                     .zIndex(1)
+            }
+            if let welcome = model.welcome, !model.welcomeFinished, !welcome.firstLaunch {
+                // A start with a vault: the lock screen is there from the start, under the launch
+                // screen, its password's field holding the keyboard. The launch screen takes no
+                // focus: a key opens it and goes on to the field, so a password typed at once is
+                // typed whole (it swallowed the first key). It opens by itself, at a key or a
+                // click, fading off the lock screen as that scales in from 98 %.
+                welcomeSplash(welcome)
+                    .zIndex(2)
             }
         }
         .onAppear { showsProfiles = model.phase == .unlocked }
@@ -60,6 +67,28 @@ struct RootView: View {
         } message: {
             Text(model.errorMessage ?? "")
         }
+    }
+
+    /// The launch screen of this start, before the window's screens or over them.
+    private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
+        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+                      opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
+                      overScreens: !welcome.firstLaunch)
+            // Its window closed meanwhile: a window opened again starts at the first screen.
+            .onDisappear { model.welcomeFinished = true }
+    }
+
+    /// The window's screens are in: with no launch screen or once it has gone; at the first launch
+    /// once it opens; on a start with a vault from the start, under it.
+    private var showsScreens: Bool {
+        guard let welcome = model.welcome, !model.welcomeFinished else { return true }
+        return !welcome.firstLaunch || welcomeOpening
+    }
+
+    /// The launch screen is over the window's screens now (a start with a vault).
+    private var screensUnderWelcome: Bool {
+        guard let welcome = model.welcome else { return false }
+        return !welcome.firstLaunch && !model.welcomeFinished
     }
 
     private var lockPhase: EclipseLight.Phase {
@@ -204,7 +233,6 @@ struct ProfileListView: View {
                                                                             launch: { await model.launch($0) }),
                                  // The profile's check, on the same snapshot: the panel opens on it.
                                  check: { taken in ProfileCheckRun(profileID: profile.id, snapshot: taken, model: { [weak model] in model }) },
-                                 mobileView: (model.details[profile.id]?.deviceGeneration.platform ?? .macOS) != .macOS,
                                  showProxy: model.details[profile.id]?.proxyIdentity == nil ? nil : {
                                      let identity = model.details[profile.id]?.proxyIdentity
                                      let entry = identity.flatMap { identity in
@@ -561,7 +589,6 @@ struct ProfileListView: View {
                     String(format: $0.notStarted ? L("proxyProblem.subtitle.notStarted") : L("proxyProblem.subtitle"),
                            $0.proxy.displayAddress)
                 },
-                deviceSymbol: details.flatMap { ProfileRowItem.deviceSymbol($0.deviceGeneration) },
                 exportOnly: exportOnly(profile.id),
                 directCountry: details?.proxyEndpoint == nil ? details?.exitCountryCode : nil,
                 proxyFailed: proxyFailed)
@@ -710,8 +737,6 @@ struct ProfileRowItem: Identifiable {
     /// Why it did not start, when its last launch failed (a proxy that did not answer): the row is
     /// among "Need attention" and says so.
     var problem: String?
-    /// The device it presents as, by its symbol, when not a Mac ("iphone", "ipad").
-    var deviceSymbol: String?
     /// The license lets it open only for export (CONTRACT §8.4, the owner's decision of 1 November):
     /// the row says "Export only" where a stopped profile's state is; an open one keeps working.
     var exportOnly = false
@@ -761,16 +786,6 @@ struct ProfileRowItem: Identifiable {
         return (parts + tags).joined(separator: " · ")
     }
 
-    /// The symbol of the device the profile presents as, when not a Mac.
-    static func deviceSymbol(_ generation: DeviceGeneration) -> String? {
-        switch generation.platform {
-        case .macOS: return nil
-        case .iOS: return "iphone"
-        case .iPadOS: return "ipad"
-        }
-    }
-
-    /// "Mac · Safari 26", "iPhone · Safari 26": the device the profile presents as.
     /// Why a proxy's country is not known: the lookup at its last launch got no answer, the proxy
     /// was never checked (and no launch looked it up), its last check failed, or the check that
     /// passed got no country for its address.
@@ -784,14 +799,8 @@ struct ProfileRowItem: Identifiable {
     /// settings pin, else this Mac's own Safari — what its User-Agent declares
     /// (`DeviceGeneration.userAgent(hostSafariVersion:)`); the catalog's "26" went stale on a Mac
     /// whose Safari is 27 (the owner, 1 November: "Mac · Safari 26" beside a page measuring 27.0.1).
-    /// Mobile views declare a fixed Safari, their catalog's.
     static func appearsAs(_ generation: DeviceGeneration, safariVersion: String? = nil, hostSafariVersion: String) -> String {
-        let device: String
-        switch generation.platform {
-        case .macOS: device = L("profiles.device.mac")
-        case .iOS: device = L("profiles.device.iphone")
-        case .iPadOS: device = L("profiles.device.ipad")
-        }
+        let device = L("profiles.device.mac")
         var version = generation.osVersionLabel
         if generation.matchesEngine {
             let declared = safariVersion.flatMap { DeviceGeneration.isSafariVersion($0) ? $0 : nil } ?? hostSafariVersion
@@ -2163,12 +2172,6 @@ private struct ProfileRow: View {
 
     private var seenCell: some View {
         HStack(spacing: 6) {
-            if let symbol = row.deviceSymbol {
-                Image(systemName: symbol)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Theme.textTertiary)
-                    .accessibilityHidden(true)
-            }
             Text(row.appearsAs)
                 .font(.lumenBody)
                 .foregroundStyle(Theme.textSecondary)

@@ -509,13 +509,32 @@ enum ScenarioWords {
         return whole < 60 ? String(format: L("scenarios.length.seconds"), whole) : String(format: L("scenarios.length.minutes"), whole / 60, whole % 60)
     }
 
-    /// A scenario's line under its name: "6 steps · takes login, password".
+    /// A scenario's line under its name: "6 steps · takes login, password" — and, when its code
+    /// reads `params` by names it builds, that those get nothing (`ScenarioValues.parametersJSON`
+    /// gives a run only the values its text names).
     static func summary(_ scenario: Scenario) -> String {
         let cut = ScenarioSteps(scenario.source)
         var parts = [cut.isCut ? String(format: L("scenarios.steps.count"), cut.steps.count) : L("scenarios.steps.code")]
         let names = ScenarioValues.namesRead(by: scenario.source)
         if !names.isEmpty { parts.append(String(format: L("scenarios.takes"), names.joined(separator: ", "))) }
+        if ScenarioValues.readsByBuiltNames(scenario.source) { parts.append(L("scenarios.values.built")) }
         return parts.joined(separator: " · ")
+    }
+
+    /// The import's "Profile's values it reads": the names its text has — all a run of it is given —
+    /// and, when its code reads `params` by names it builds, that those get nothing.
+    static func valuesRead(_ names: [String], builtNames: Bool) -> String {
+        let listed = names.joined(separator: ", ")
+        guard builtNames else { return names.isEmpty ? "—" : listed }
+        return names.isEmpty ? L("scenarios.values.built") : listed + "; " + L("scenarios.values.built")
+    }
+
+    /// The import's "Sites it names": the hosts written out in it, and whether it may open
+    /// addresses its code builds (`ScenarioFile.buildsAddresses`).
+    static func sitesNamed(_ hosts: [String], builtAddresses: Bool) -> String {
+        if hosts.isEmpty { return builtAddresses ? L("scenarios.import.sites.builtOnly") : L("scenarios.import.sites.none") }
+        let listed = hosts.joined(separator: ", ")
+        return builtAddresses ? String(format: L("scenarios.import.sites.built"), listed) : listed
     }
 }
 
@@ -1005,33 +1024,70 @@ struct ScenarioSettingField: View {
     }
 }
 
+/// What the import's review shows of a file's text (`ScenarioImportReview`), read off the main
+/// thread: a text from outside may be 2 MB of anything.
+struct ScenarioImportReading: Sendable {
+    let isCut: Bool
+    let steps: [ScenarioSteps.Step]
+    let settings: [ScenarioSettings.Setting]
+    let hosts: [String]
+    let buildsAddresses: Bool
+    let names: [String]
+    let readsByBuiltNames: Bool
+
+    init(_ source: String) {
+        let cut = ScenarioSteps(source)
+        isCut = cut.isCut
+        steps = cut.steps
+        settings = cut.isCut ? ScenarioSettings(source).settings : []
+        hosts = ScenarioFile.hosts(in: source)
+        buildsAddresses = ScenarioFile.buildsAddresses(source)
+        names = ScenarioValues.namesRead(by: source)
+        readsByBuiltNames = ScenarioValues.readsByBuiltNames(source)
+    }
+}
+
 /// What a scenario from someone else will do, before it is added: its steps, the sites it names,
-/// the profile's values it reads.
+/// the profile's values it reads. The text is read off the main thread (`ScenarioImportReading`),
+/// and Add waits for it: what is added has been shown.
 struct ScenarioImportReview: View {
     let file: ScenarioFile
     let add: () -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var reading: ScenarioImportReading?
+
+    /// The steps listed at most; the others are counted.
+    static let shownSteps = 300
 
     var body: some View {
-        let cut = ScenarioSteps(file.source)
-        let names = ScenarioValues.namesRead(by: file.source)
         VStack(alignment: .leading, spacing: 0) {
             SheetHeader(title: String(format: L("scenarios.import.title"), file.name), subtitle: L("scenarios.import.subtitle"))
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    fact(L("scenarios.import.sites"), file.hosts.isEmpty ? L("scenarios.import.sites.none") : file.hosts.joined(separator: ", "))
-                    fact(L("scenarios.import.values"), names.isEmpty ? "—" : names.joined(separator: ", "))
-                    Text(cut.isCut ? String(format: L("scenarios.steps.count"), cut.steps.count) : L("scenarios.steps.code"))
-                        .font(.lumenLabel)
-                        .foregroundStyle(Theme.textSecondary)
-                        .padding(.top, 4)
-                    if cut.isCut {
-                        let settings = ScenarioSettings(file.source).settings
-                        ForEach(Array(cut.steps.enumerated()), id: \.offset) { index, step in
-                            ScenarioStepLine(number: index + 1, step: step, settings: settings, compact: true)
+                    if let reading {
+                        fact(L("scenarios.import.sites"), ScenarioWords.sitesNamed(reading.hosts, builtAddresses: reading.buildsAddresses))
+                        fact(L("scenarios.import.values"), ScenarioWords.valuesRead(reading.names, builtNames: reading.readsByBuiltNames))
+                        Text(reading.isCut ? String(format: L("scenarios.steps.count"), reading.steps.count) : L("scenarios.steps.code"))
+                            .font(.lumenLabel)
+                            .foregroundStyle(Theme.textSecondary)
+                            .padding(.top, 4)
+                        if reading.isCut {
+                            ForEach(Array(reading.steps.prefix(Self.shownSteps).enumerated()), id: \.offset) { index, step in
+                                ScenarioStepLine(number: index + 1, step: step, settings: reading.settings, compact: true)
+                            }
+                            if reading.steps.count > Self.shownSteps {
+                                Text(String(format: L("scenarios.import.more"), reading.steps.count - Self.shownSteps))
+                                    .font(.lumenSecondary)
+                                    .foregroundStyle(Theme.textTertiary)
+                            }
+                        } else {
+                            Text(verbatim: String(file.source.prefix(4000))).font(.lumenMono).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
                         }
                     } else {
-                        Text(verbatim: String(file.source.prefix(4000))).font(.lumenMono).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 24)
                     }
                 }
                 .padding(.horizontal, 24)
@@ -1043,10 +1099,15 @@ struct ScenarioImportReview: View {
                     .keyboardShortcut(.cancelAction)
                 Button(L("scenarios.import.add"), action: add)
                     .buttonStyle(.lumenPrimary)
+                    .disabled(reading == nil)
             }
         }
         .sheetFrame(width: 620, height: 600)
         .background(Theme.raised)
+        .task {
+            let source = file.source
+            reading = await Task.detached(priority: .userInitiated) { ScenarioImportReading(source) }.value
+        }
     }
 
     private func fact(_ name: String, _ text: String) -> some View {

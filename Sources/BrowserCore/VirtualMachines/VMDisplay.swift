@@ -77,6 +77,19 @@ public enum VMRequirements {
         if host >= 16 { return 6 }
         return standardMemoryGB
     }
+    /// What this Mac keeps for itself with machines of these memories (in GB) running at once.
+    public static func memoryLeft(hostMemory: Int64, runningGB: [Int]) -> Int64 {
+        hostMemory - runningGB.reduce(Int64(0)) { $0 + Int64(max($1, 0)) * gibibyte }
+    }
+
+    /// Whether the machines running at once leave this Mac less than 4 GB: each fits on its own
+    /// (a new machine gets 4 GB on a Mac with 8, and the editor warns of more), but two of them on
+    /// a Mac with 8 GB take all of it, and the Mac and both machines then work from the disk. A
+    /// warning, never a refusal: the person may know better.
+    public static func isMemoryTight(hostMemory: Int64, runningGB: [Int]) -> Bool {
+        !runningGB.isEmpty && memoryLeft(hostMemory: hostMemory, runningGB: runningGB) < 4 * gibibyte
+    }
+
     /// Safari reports at most 8 cores, and no Mac with Apple silicon has fewer: a machine with
     /// fewer would be told apart. Virtual cores cost no memory.
     public static let coresWanted = 8

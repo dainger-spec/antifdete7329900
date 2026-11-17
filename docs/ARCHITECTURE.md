@@ -622,7 +622,10 @@ windows be merged and needs one `NSWindow` per tab.
 
 A profile targets an Apple OS generation (`DeviceGeneration` / `DeviceGenerations` in
 `BrowserCore`), stored as `ProfileConfiguration.deviceGenerationID` (tolerant decode; old
-configs read as the default generation).
+configs read as the default generation). The catalog holds the Mac's generation alone since the
+iPhone and iPad views were taken out (16 November): their ids (`DeviceGenerations.retiredIDs`)
+are read as the default generation's wherever a configuration is decoded or made
+(`DeviceGenerations.migrated(id:)`), and a stored `phoneDisguise` is ignored.
 
 - `ProfileConfiguration.effectiveUserAgent` = explicit `userAgent` override, else the
   generation's UA, else the WebKit default. `BrowserSession` applies it to every tab and
@@ -687,7 +690,11 @@ SettingsView (Settings scene: ⌘, — and ⋯ → Settings…) ── AppSettin
    │                 Safari's engine (SafariChrome's search providers);
    │                 newProfileRandomWindowSize → WindowSize.randomSafe(fitting: visible screen) →
    │                 ProfileConfiguration.windowSize → WindowSizing.apply on each BrowserWindowController
-   │                 (and the first window of Safari's chrome): a real frame, never a declared screen
+   │                 (and the first window of Safari's chrome): a real frame, never a declared screen;
+   │                 newProfileWebRTCAutomatic (on) → ProfileDraft.webRTC = .automatic →
+   │                 ProfileConfiguration.webRTCAutomatic → webRTCLaunchPolicy → WebRTCGate (the relay
+   │                 through SOCKS5, Safari's own without a proxy, else WebRTCGate.silence: present,
+   │                 connecting nowhere where nothing can go around the connection)
    │  Behavior       BrowsingPreferences (AutoFill, tab position, closing several tabs, zoom,
    │  Downloads      download folder, ask each time, Dock letters) → BrowsingPreferences.current here;
    │                 ProfileCommand.preferences to every profile process (ProfileManager.sendPreferences),

@@ -1,3 +1,4 @@
+import BrowserCore
 import Foundation
 import MachO
 import os
@@ -31,6 +32,20 @@ enum SafariPaths {
 
     /// The getters `redirectGetters` patched, as "-[Class selector]" (the network report).
     private(set) static var redirected: [String] = []
+
+    /// What each patched getter answered when Safari's code asked it, as "-[Class selector]" → the
+    /// path given (in the home, once moved; "nil" for none): where Safari's frameworks look for their
+    /// stores in this process (the address bar check's store report). From any thread.
+    static var answers: [String: String] { answersLock.withLock { answersByGetter } }
+    nonisolated(unsafe) private static var answersByGetter: [String: String] = [:]
+    private static let answersLock = NSLock()
+
+    private static func note(_ getter: String, _ answer: String) {
+        answersLock.withLock {
+            guard answersByGetter[getter] != answer, answersByGetter.count < 800 || answersByGetter[getter] != nil else { return }
+            answersByGetter[getter] = answer
+        }
+    }
 
     /// Patches the path getters of every Safari image loaded, and the ones Safari's images add to
     /// Foundation's classes, so that a path under `realHome`/Library comes back under `home`.
@@ -84,6 +99,42 @@ enum SafariPaths {
         return isSafariImage(String(cString: image))
     }
 
+    /// Safari's container settings folder in a profile's home: where Safari, which runs in its own
+    /// container, keeps CloudTabs.db, SafariTabs.db, its profiles' folders and its extensions' state
+    /// (`~/Library/Containers/com.apple.Safari/Data/Library/Safari`, measured on CI's runners). The
+    /// same path under the profile's home, as `moved` puts anything of that container's.
+    static let containerSettingsFolder = SafariStoreLayout.containerSettingsFolder
+
+    /// Getters of Safari's that answer nil in a profile's process — they ask for Safari's own
+    /// container, and a profile's process has none — and the folder in the profile's home they answer
+    /// instead. With nil, what Safari keeps there had no place at all: the iCloud tabs the address
+    /// bar completes from (CloudTabs.db), the tab collection ("Failed to instantiate tab collection"),
+    /// Safari's profiles' folder (measured nil: the address bar check's getters, CI, macOS 27.0.1).
+    /// Another browser hosting Safari's chrome gives each of its profiles this folder of its own.
+    /// Not the extensions' folder (`safari_webExtensionsSettingsDirectoryURL`): extensions stay off.
+    static let nilAnswers: [String: String] = [
+        "-[NSFileManager safari_containerSettingsDirectory]": containerSettingsFolder,
+        "-[NSFileManager safari_productionSafariContainerSettingsDirectory]": containerSettingsFolder,
+        "-[NSFileManager safari_profilesDirectoryURL]": containerSettingsFolder + "/Profiles",
+    ]
+
+    /// Whether a getter of `nilAnswers` answers with a URL or with a path string: a name that ends in
+    /// URL does; otherwise as its sibling for the account's own settings folder does
+    /// (`safari_productionSafariSettingsDirectory`, which answers in a profile's process too).
+    private static func answersWithURL(_ getter: String, receiver: AnyObject) -> Bool {
+        if getter.hasSuffix("URL]") { return true }
+        if let known = siblingAnswersWithURL { return known }
+        let sibling = NSSelectorFromString("safari_productionSafariSettingsDirectory")
+        var isURL = true
+        if let object = receiver as? NSObject, object.responds(to: sibling),
+           let answer = object.perform(sibling)?.takeUnretainedValue() {
+            isURL = answer is NSURL
+        }
+        siblingAnswersWithURL = isURL
+        return isURL
+    }
+    nonisolated(unsafe) private static var siblingAnswersWithURL: Bool?
+
     /// Where `path` goes in the profile's home: a path under the real ~/Library comes back under
     /// `home`, with the rest of it as it was; nil for a path that stays as it is — one outside the
     /// real ~/Library, and one already in the profile's home.
@@ -105,23 +156,43 @@ enum SafariPaths {
         typealias Getter = @convention(c) (AnyObject, Selector) -> Unmanaged<AnyObject>?
         let selector = method_getName(method)
         let original = unsafeBitCast(method_getImplementation(method), to: Getter.self)
+        let kind = class_isMetaClass(owner) ? "+" : "-"
+        let name = "\(kind)[\(NSStringFromClass(owner)) \(NSStringFromSelector(selector))]"
         let replacement: @convention(block) (AnyObject) -> Unmanaged<AnyObject>? = { receiver in
             let result = original(receiver, selector)
-            guard let value = result?.takeUnretainedValue() else { return result }
-            if let url = value as? NSURL, url.isFileURL, let path = url.path,
-               let target = SafariPaths.moved(path, realHome: realHome, home: home) {
+            guard let value = result?.takeUnretainedValue() else {
+                if let folder = SafariPaths.nilAnswers[name] {
+                    let path = home + "/" + folder
+                    SafariPaths.note(name, path)
+                    let answer: AnyObject = SafariPaths.answersWithURL(name, receiver: receiver)
+                        ? NSURL(fileURLWithPath: path, isDirectory: true) : NSString(string: path)
+                    return Unmanaged.passRetained(answer).autorelease()
+                }
+                SafariPaths.note(name, "nil")
+                return result
+            }
+            if let url = value as? NSURL, url.isFileURL, let path = url.path {
+                guard let target = SafariPaths.moved(path, realHome: realHome, home: home) else {
+                    SafariPaths.note(name, path)
+                    return result
+                }
+                SafariPaths.note(name, target)
                 let moved = NSURL(fileURLWithPath: target, isDirectory: url.hasDirectoryPath)
                 return Unmanaged.passRetained(moved as AnyObject).autorelease()
             }
-            if let string = value as? NSString, let target = SafariPaths.moved(string as String, realHome: realHome, home: home) {
+            if let string = value as? NSString, (string as String).hasPrefix("/") {
+                guard let target = SafariPaths.moved(string as String, realHome: realHome, home: home) else {
+                    SafariPaths.note(name, string as String)
+                    return result
+                }
+                SafariPaths.note(name, target)
                 let moved = NSString(string: target)
                 return Unmanaged.passRetained(moved as AnyObject).autorelease()
             }
             return result
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
-        let kind = class_isMetaClass(owner) ? "+" : "-"
-        redirected.append("\(kind)[\(NSStringFromClass(owner)) \(NSStringFromSelector(selector))]")
+        redirected.append(name)
     }
 
     /// Whether `path` is in the real Safari's places — `sandboxFilter`'s, as a test of one path (the

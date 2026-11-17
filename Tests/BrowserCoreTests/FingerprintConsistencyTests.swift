@@ -9,9 +9,6 @@ final class SafariUserAgentTests: XCTestCase {
         // Unknown or malformed host version: the catalog UA.
         XCTAssertEqual(mac.userAgent(hostSafariVersion: nil), mac.userAgent)
         XCTAssertEqual(mac.userAgent(hostSafariVersion: "26.0 beta"), mac.userAgent)
-        // Mobile generations never take the Mac's Safari version.
-        let ios = DeviceGenerations.resolved(id: "ios-26")
-        XCTAssertEqual(ios.userAgent(hostSafariVersion: "18.6"), ios.userAgent)
     }
 
     /// CI run 718: Safari 27.2 on a Mac whose apps run WebKit 21624.5.1.11.3 (Safari 26.6.2's).
@@ -62,20 +59,19 @@ final class SafariUserAgentTests: XCTestCase {
         XCTAssertTrue(ProfileConfiguration().userAgent(hostSafariVersion: "26.1").hasSuffix("Version/26.1 Safari/605.1.15"))
         XCTAssertEqual(ProfileConfiguration(userAgent: "Custom/1.0").userAgent(hostSafariVersion: "26.1"), "Custom/1.0")
         XCTAssertTrue(ProfileConfiguration(userAgent: "").userAgent(hostSafariVersion: "26.1").contains("Macintosh"))
-        let ios = ProfileConfiguration(deviceGenerationID: "ios-27")
-        XCTAssertEqual(ios.userAgent(hostSafariVersion: "26.1"), DeviceGenerations.generation(id: "ios-27")?.userAgent)
+        // A profile stored as an iPhone view, from before it was taken out: a Mac's.
+        let iPhone = ProfileConfiguration(deviceGenerationID: "ios-27")
+        XCTAssertEqual(iPhone.userAgent(hostSafariVersion: "26.1"), ProfileConfiguration().userAgent(hostSafariVersion: "26.1"))
     }
 
     /// A macOS profile may name another Safari version: only "Version/" changes; a typed
-    /// User-Agent and a mobile generation ignore it; how far it is from the engine is said.
+    /// User-Agent ignores it; how far it is from the engine is said.
     func testANamedSafariVersionChangesOnlyTheName() throws {
         let named = ProfileConfiguration(safariVersion: "18.6").userAgent(hostSafariVersion: "27.0.1")
         XCTAssertEqual(named, "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15")
         XCTAssertTrue(ProfileConfiguration().userAgent(hostSafariVersion: "27.0.1").contains("Version/27.0.1 Safari/"),
                       "none named: this Mac's Safari")
         XCTAssertEqual(ProfileConfiguration(userAgent: "Custom/1", safariVersion: "18.6").userAgent(hostSafariVersion: "27.0"), "Custom/1")
-        let iPhone = ProfileConfiguration(deviceGenerationID: "ios-26", safariVersion: "18.6")
-        XCTAssertEqual(iPhone.userAgent(hostSafariVersion: "27.0"), DeviceGenerations.generation(id: "ios-26")?.userAgent)
 
         XCTAssertTrue(SafariVersions.givesWindowSafari("26.6.2"))
         XCTAssertTrue(SafariVersions.givesWindowSafari("27.0.1"))
@@ -316,15 +312,18 @@ final class ProxiedWebRTCTests: XCTestCase {
     /// WebKit's WebRTC sockets never use the data store's proxy: a proxied profile gets no WebRTC.
     func testAProxyTurnsWebRTCOffWithoutForgettingTheChoice() throws {
         let proxy = ProxySettings(kind: .socks5, host: "127.0.0.1", port: 1080)
+        // Without a proxy, Disabled is present and connecting nowhere: the engine's WebRTC on,
+        // relay-only with no server (`WebRTCRouting.silent`).
+        let withoutProxy: (WebRTCPolicy) -> WebRTCPolicy = { $0 == .disabled ? .relayOnly : $0 }
         for policy in WebRTCPolicy.allCases {
-            XCTAssertEqual(ProfileConfiguration(webRTCPolicy: policy).effectiveWebRTCPolicy, policy)
+            XCTAssertEqual(ProfileConfiguration(webRTCPolicy: policy).effectiveWebRTCPolicy, withoutProxy(policy))
             var proxied = ProfileConfiguration(proxy: proxy, webRTCPolicy: policy)
             XCTAssertEqual(proxied.effectiveWebRTCPolicy, .disabled, policy.rawValue)
             // The stored choice is kept (and saved) for when the proxy is removed.
             let decoded = try JSONCoding.decoder.decode(ProfileConfiguration.self, from: JSONCoding.encoder.encode(proxied))
             XCTAssertEqual(decoded.webRTCPolicy, policy)
             proxied.proxy = nil
-            XCTAssertEqual(proxied.effectiveWebRTCPolicy, policy)
+            XCTAssertEqual(proxied.effectiveWebRTCPolicy, withoutProxy(policy))
         }
     }
 
@@ -347,33 +346,5 @@ final class ProxiedWebRTCTests: XCTestCase {
         let json = String(decoding: try JSONCoding.encoder.encode(socks), as: UTF8.self)
         XCTAssertFalse(json.contains("turn:"), json)
         XCTAssertNil(try JSONCoding.decoder.decode(ProfileConfiguration.self, from: Data(json.utf8)).webRTCRelay)
-    }
-
-    /// Safari on iOS 26.1 and later freezes the OS token; an iPad shows desktop websites.
-    func testMobileGenerationsSendWhatSafariSends() {
-        for id in ["ios-26", "ios-27"] {
-            let ua = DeviceGenerations.generation(id: id)?.userAgent ?? ""
-            XCTAssertTrue(ua.hasPrefix("Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/"), ua)
-            XCTAssertTrue(ua.hasSuffix(" Mobile/15E148 Safari/604.1"), ua)
-        }
-        let iPad = DeviceGenerations.generation(id: "ipados-26")?.userAgent ?? ""
-        XCTAssertTrue(iPad.hasPrefix("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26."), iPad)
-        XCTAssertTrue(iPad.hasSuffix(" Safari/605.1.15"), iPad)
-    }
-
-    /// The processor count WebKit is given in an iPhone view: an iPhone's six cores, which WebKit
-    /// reports as 4 (fewer than 8), as the owner's iPhone does. The Mac and the iPad view (the
-    /// Mac's User-Agent) keep this Mac's own.
-    func testAnIPhoneViewIsGivenAnIPhonesProcessorCount() {
-        for id in ["ios-26", "ios-27"] {
-            let cores = DeviceGenerations.generation(id: id)?.processorCores
-            XCTAssertEqual(cores, 6, id)
-            XCTAssertLessThan(cores ?? 8, 8, "WebKit would report 8 for \(id)")
-        }
-        XCTAssertNil(DeviceGenerations.generation(id: DeviceGenerations.defaultID)?.processorCores)
-        XCTAssertNil(DeviceGenerations.generation(id: "ipados-26")?.processorCores)
-        for generation in DeviceGenerations.all where generation.platform == .iOS {
-            XCTAssertNotNil(generation.processorCores, "an iPhone generation without a processor count: \(generation.id)")
-        }
     }
 }

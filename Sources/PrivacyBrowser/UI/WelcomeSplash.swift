@@ -256,8 +256,8 @@ struct WelcomeLayout {
 /// quit, a greeting like the one a new MacBook writes while you set it up — in different languages,
 /// drawn beautifully as with a pen, a couple of seconds, then the app opens smoothly"; the mock: a
 /// handwritten greeting in liquid glass over the eclipse's horizon, "L U M E N" under it, a small
-/// button; the look and timing the owner approved in design/prototypes/welcome.html). Shown once,
-/// at the first launch only (the owner, the same day; `WelcomeSplashPolicy`).
+/// button; the look and timing the owner approved in design/prototypes/welcome.html). Shown at
+/// every start a person makes of the app (the owner, 16 November; `WelcomeSplashPolicy`).
 ///
 /// The greeting is Pacifico's own outline, revealed by a pen moving along its letters
 /// (WelcomeLettering), in clear glass lit by the horizon (WelcomeGlass: Metal, compiled as the app
@@ -266,6 +266,10 @@ struct WelcomeLayout {
 /// button (setup comes next); at a later launch a moment's hold and the opening by itself. Any click
 /// or key opens at once. The opening is the screen's own — it eases up 30 pt and fades in 0.6 s —
 /// while RootView brings the window's content in over it (`opening`), then lets it go (`finished`).
+/// On a start with a vault the screen is `overScreens`: the lock screen is under it from the start,
+/// its password's field holding the keyboard; the screen takes no focus, its backdrop fades with
+/// the rest, and a key opens it and still goes on to the field — the password typed at once is
+/// the whole password.
 /// Under Reduce Motion (or with the animations off) the greeting fades in whole and the screen
 /// cross-fades. VoiceOver reads the greeting as text, in its own language, with an action that goes on.
 struct WelcomeSplash: View {
@@ -280,6 +284,9 @@ struct WelcomeSplash: View {
     var still: Double?
     /// The snapshots: the glass as drawn where Metal is missing.
     var fallbackGlass = false
+    /// Over the window's screens (a start with a vault: the lock screen): not focusable, the
+    /// backdrop fading with the opening, keys watched and passed on (`watchKeys`).
+    var overScreens = false
 
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.lumenStillFrame) private var stillFrame
@@ -293,6 +300,8 @@ struct WelcomeSplash: View {
     @State private var openedAt: Double?
     @State private var cache = WelcomeSplashCache()
     @FocusState private var focused: Bool
+    /// `overScreens`: the app's key events, looked at on their way (`NSEvent`'s local monitor).
+    @State private var keyMonitor: Any?
 
     private var reduced: Bool { Motion.isReduced(systemReduceMotion) }
     private var timing: WelcomeTiming { WelcomeTiming(duration: greeting.duration, reduced: reduced) }
@@ -319,20 +328,42 @@ struct WelcomeSplash: View {
                     .accessibilityAction(named: L("welcome.skip")) { go() }
             }
         }
-        .background(Theme.backdrop)
+        // Over the screens the backdrop is the scene's, and fades with it.
+        .background(overScreens ? Color.clear : Theme.backdrop)
         .ignoresSafeArea()
         .contentShape(Rectangle())
         .onTapGesture { go() }
-        // Any key goes on; the screen holds the keyboard's focus without a ring.
-        .focusable()
+        // Over the screens, once it opens, a click is the screen's under it.
+        .allowsHitTesting(!overScreens || openedAt == nil)
+        // Any key goes on; the screen holds the keyboard's focus without a ring — but over the
+        // screens the keyboard stays with what has it there (`watchKeys`).
+        .focusable(!overScreens)
         .focused($focused)
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { _ in
             go()
             return .handled
         }
-        .onAppear { focused = true }
+        .onAppear {
+            if overScreens { watchKeys() } else { focused = true }
+        }
+        .onDisappear { stopWatchingKeys() }
         .task { await run() }
+    }
+
+    /// Over the screens: a key opens the launch screen and goes on, unchanged, to what has the
+    /// keyboard — the lock screen's password field, so the first key typed is the password's.
+    private func watchKeys() {
+        guard keyMonitor == nil, stillTime == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            MainActor.assumeIsolated { go() }
+            return event
+        }
+    }
+
+    private func stopWatchingKeys() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 
     private func time(at date: Date) -> Double {
@@ -401,6 +432,12 @@ struct WelcomeSplash: View {
         let horizonImage = cache.horizon(size: layout.size, scale: displayScale)
 
         ZStack(alignment: .topLeading) {
+            if overScreens {
+                // The lock screen is under it: the backdrop fades with the rest as it opens.
+                Theme.backdrop
+                    .frame(width: layout.size.width, height: layout.size.height)
+                    .opacity(splashAlpha)
+            }
             if let horizonImage {
                 Image(decorative: horizonImage, scale: displayScale)
                     .resizable()

@@ -123,6 +123,40 @@ final class ScenarioBatchTests: XCTestCase {
         XCTAssertEqual(ScenarioFile.read(Data(count: ScenarioFile.maximumBytes + 1)), .failure(.tooLarge))
     }
 
+    /// The review's sites: those written out — the host, not a name before `@`, in any case — and
+    /// whether the code may open addresses it builds, said beside them.
+    func testTheReviewSaysWhenTheCodeBuildsAddresses() {
+        XCTAssertEqual(ScenarioFile.hosts(in: "goto('HTTPS://Social.Example@evil.example/x'); goto('http://a.example:8080/')"), ["evil.example", "a.example"])
+        let written = [
+            "await page.goto('https://shop.example/login');\nawait page.type('#u', params.login || '');\n",
+            "await page.goto(\"https://shop.example/\", { waitUntil: 'load' });\n",
+            "const PAGE_URL = 'https://shop.example/'; // where\n\nif (PAGE_URL) { await page.goto(PAGE_URL); }\n",
+            "// page, goto, evaluate and eval in a comment are not code\nawait page.goto('https://shop.example/');\n",
+            "await page.click('text=Next page'); await page.click('.page-header');\n",
+            "",
+        ]
+        for text in written { XCTAssertFalse(ScenarioFile.buildsAddresses(text), text) }
+        let built = [
+            "const report = ['ht', 'tps:/', '/stats.', 'example'].join('') + '/r';\nawait page.goto(report);\n",
+            "await page.goto('https://social.example/');\nawait page.evaluate((a) => fetch('htt' + 'ps://c.example.net/x'), 1, {world: 'page'});\n",
+            "await page.goto('ht\\x74ps://evil.example/');\n",
+            "await page.goto(`https://${host}/`);\n",
+            "const PAGE_URL = 'ht\\x74ps://evil.example/'; // where\n\nawait page.goto(PAGE_URL);\n",
+            "const PAGE_URL = 'https://shop.example/'; // where\n\n{ const PAGE_URL = 'ht' + 'tps://evil.example'; await page.goto(PAGE_URL); }\n",
+            "const go = page.goto; await go('https://x.example');\n",
+            "await page['go' + 'to']('https://x.example');\n",
+            "await __command('goto', ['https://x.example']);\n",
+            "with (o) { await page.goto(PAGE_URL); }\n",
+        ]
+        for text in built { XCTAssertTrue(ScenarioFile.buildsAddresses(text), text) }
+        // The templates that open a setting's address say nothing more; those that build one, or run code in the page, say so.
+        let building: Set<String> = ["search", "pages", "list", "screens"]
+        for template in ScenarioTemplate.all {
+            let source = template.source(settings: ["PAGE_URL": .text("https://shop.example/"), "LOGIN_URL": .text("https://shop.example/login")]) { "<\($0)>" }
+            XCTAssertEqual(ScenarioFile.buildsAddresses(source), building.contains(template.id), template.id)
+        }
+    }
+
     func testAnOlderLibraryReadsAndACopyHasAFreeName() throws {
         let old = "{\"format\":1,\"scenarios\":[{\"id\":\"\(UUID().uuidString)\",\"name\":\"Old\",\"source\":\"log(1);\",\"createdAt\":0,\"updatedAt\":0}]}"
         var library = try JSONDecoder().decode(ScenarioLibrary.self, from: Data(old.utf8))

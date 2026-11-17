@@ -73,6 +73,12 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     public var macAddress: String?
     public var network: Network
     public var proxy: ProxySettings?
+    /// The machine's UDP — HTTP/3 (QUIC), WebRTC — goes out in this run: through the proxy's own
+    /// UDP relay (`VMUDPRoute.throughProxy`, found by the check before the start), or, without a
+    /// proxy, as this Mac's own (`direct`). Nil or false: answered "port unreachable", as a
+    /// helper before this did for every datagram but DNS and the time. Not in `stamp`: the
+    /// network is made anew at each start.
+    public var relaysUDP: Bool?
     /// Names the machine's network answers "no such name" for (`VMRequirements.blockedHosts`).
     public var blockedHosts: [String]
     /// What the guest plays is heard on this Mac. Off: the machine keeps its speakers, silent.
@@ -99,6 +105,11 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// The app's own "animations off" (Settings → Appearance): the cover moves nothing, as under
     /// macOS's Reduce Motion, which the helper reads itself.
     public var reducesMotion: Bool?
+    /// The machine's display is put to sleep while its window has been out of sight for a while,
+    /// and woken when the window is seen again (`VMScreenSleep`; the profile's choice). Nil: the
+    /// display stays as the guest has it. Not in `stamp`: the guest is told while it runs, by a
+    /// word in the shared folder, not at its start.
+    public var sleepsScreenWhenHidden: Bool?
     /// The window's title, and its few words, in the person's language (the helper has no strings
     /// of its own): `stop`, `stopQuestion`, `stopDetail`, `stopNow`, `cancel`, `stopping`, the
     /// start's cover's (`cover.…`) — and `hint`, a line shown above the machine's screen (what is
@@ -111,8 +122,8 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
                 display: Display = Display(VMDisplay.standard), macAddress: String? = nil, network: Network = .closed,
                 proxy: ProxySettings? = nil, blockedHosts: [String] = [], sound: Bool = true, fullScreen: Bool? = nil,
                 keepsState: Bool? = nil, stateStamp: String? = nil, browserMode: Bool? = nil,
-                settingsRevision: String? = nil, reducesMotion: Bool? = nil, windowTitle: String = "",
-                texts: [String: String] = [:]) {
+                settingsRevision: String? = nil, reducesMotion: Bool? = nil, sleepsScreenWhenHidden: Bool? = nil,
+                windowTitle: String = "", texts: [String: String] = [:]) {
         self.mode = mode
         self.restoreImagePath = restoreImagePath
         self.machineDirectory = machineDirectory
@@ -132,13 +143,16 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         self.browserMode = browserMode
         self.settingsRevision = settingsRevision
         self.reducesMotion = reducesMotion
+        self.sleepsScreenWhenHidden = sleepsScreenWhenHidden
         self.windowTitle = windowTitle
         self.texts = texts
     }
 
     /// The request to start a profile's machine. A profile with a proxy never gets the direct
-    /// network: without a usable proxy it is closed.
-    public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String]) -> VMHelperRequest {
+    /// network: without a usable proxy it is closed. `udp`: where the machine's UDP goes in this
+    /// run, as the check before the start found it; nil — not decided — keeps it off.
+    public static func run(profile: VMProfile, library: VMLibrary, hostCores: Int, texts: [String: String],
+                           udp: VMUDPRoute? = nil) -> VMHelperRequest {
         var request = VMHelperRequest(mode: .run, machineDirectory: library.machineDirectory(for: profile.id).path,
                                       baseDirectory: library.baseDirectory.path,
                                       cores: min(profile.cores ?? VMRequirements.coresWanted, VMRequirements.cores(hostCores: hostCores)),
@@ -152,13 +166,18 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
         let revision = VMGuestSettings(profile: profile).revision
         request.stateStamp = request.stamp(settingsRevision: revision)
         request.settingsRevision = revision
+        request.sleepsScreenWhenHidden = profile.sleepsScreenWhenHidden ? true : nil
+        // UDP only by the route decided for this run, and only the way the machine's network goes:
+        // a proxy's relay for a machine with a proxy, this Mac's own for one without.
+        if let udp, udp.carriesUDP, (udp == .direct) == (profile.proxy == nil) { request.relaysUDP = true }
         return request
     }
 
     /// What a saved state of this request's machine goes with (`stateStamp`): its hardware as the
     /// framework is told of it, and the revision of the settings its macOS starts with. Not the
     /// proxy, nor what is blocked: the network is this process's own and is made anew each time.
-    /// Nor sound: a machine whose state is kept has none.
+    /// Nor sound: a machine whose state is kept has none. Nor whether its display sleeps while
+    /// its window is hidden: that is said to the guest while it runs.
     public func stamp(settingsRevision: String) -> String {
         VMGuestSettings.revision(of: [
             "cores=\(cores)", "memory=\(memoryBytes)",
@@ -225,8 +244,9 @@ public struct VMHelperEvent: Codable, Equatable, Sendable {
     public var bytesUp: UInt64?
     public var bytesDown: UInt64?
     public var connections: Int?
-    /// `traffic`, a machine without a proxy: why its connections are not being made — a kind
-    /// (`VMNetworkTrouble`), set while several in a row have failed and none has been made since.
+    /// `traffic`: why the machine's connections are not being made — a kind (`VMNetworkTrouble`),
+    /// set while several in a row have failed and none has been made since: without a proxy, this
+    /// Mac's way out; with one, the machine's own proxy (down, or refusing its sign-in).
     public var trouble: String?
     /// With `trouble`: the same in the helper's log's words — a range of addresses, an error's
     /// name; never a name or an address the machine asked for. Shown as a technical detail.
@@ -300,10 +320,32 @@ public enum VMNetworkTrouble: String, Codable, Sendable, CaseIterable {
     /// This Mac's proxy is set by a configuration file (PAC) or found on the network (WPAD),
     /// which a machine cannot follow: its network stays closed, as for a proxy that is down.
     case proxyConfigurationFile
+    /// The machine's own proxy (its profile's) does not answer: down since the start's check, or
+    /// no longer at its address. Nothing goes out past it.
+    case ownProxyUnreachable
+    /// The machine's own proxy refuses its sign-in: the password changed, or the plan ran out.
+    case ownProxyLogin
+    /// The machine's own proxy answers in another protocol than its entry names.
+    case ownProxyNotUnderstood
 
     /// How many connections must fail one after another, none made since, before the machine is
     /// said to have no way out: a page's one dead address is not that.
     public static let failuresBeforeSaying: UInt64 = 4
+
+    /// A machine with a proxy: what its row and window say once the proxy itself has failed
+    /// `failuresInARow` of the guest's connections one after another (`VMNetCounters` in the
+    /// helper), with `kind` the network's word for why — `unreachable`, `login`, `notUnderstood`
+    /// (`VMNetProxyTrouble`'s raw values). Nil below `failuresBeforeSaying`, and for a kind this
+    /// version has no words for. A proxy that says a site cannot be reached is not counted there.
+    public static func ofMachineProxy(failuresInARow: UInt64, kind: String?) -> VMNetworkTrouble? {
+        guard failuresInARow >= failuresBeforeSaying, let kind else { return nil }
+        switch kind {
+        case "unreachable": return .ownProxyUnreachable
+        case "login": return .ownProxyLogin
+        case "notUnderstood": return .ownProxyNotUnderstood
+        default: return nil
+        }
+    }
 }
 
 /// What the app writes to the helper after its request, a line each.

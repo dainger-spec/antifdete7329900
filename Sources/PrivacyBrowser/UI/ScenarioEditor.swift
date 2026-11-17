@@ -78,6 +78,7 @@ struct ScenarioEditor: View {
             // A recording whose profile stopped while this was not on screen ends now.
             if recordingStopped { stopRecording() }
         }
+        // Edits not saved yet are kept on the way out — not those of a scenario just deleted (`save`).
         .onDisappear { if sample == nil, edited { save() } }
         .onChange(of: profiles.map(\.id)) { _, ids in
             if let profileID, !ids.contains(profileID) { self.profileID = ids.first }
@@ -460,7 +461,11 @@ struct ScenarioEditor: View {
         save()
     }
 
+    /// Writes the name and the text as they are on screen — only while the scenario is still in
+    /// the library: one deleted from here (or gone with the vault) leaves the editor with its edits
+    /// unsaved, and its `onDisappear` must not put it back.
     private func save() {
+        guard model.scenarios.scenario(scenario.id) != nil else { return }
         var changed = scenario
         changed.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L("scenarios.untitled") : name
         changed.source = source

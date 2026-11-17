@@ -874,31 +874,11 @@ test('macOS profile: navigator, screen and window keep their native values', () 
   assert.equal(run(w, `Object.getOwnPropertyDescriptor(Navigator.prototype, 'platform').get.toString().includes("illegal(this, Navigator)")`), true);
 });
 
-test('a profile without the full phone disguise replaces no navigator, screen or window value', () => {
-  // A Mac profile, the iPad view, and an iPhone view that leaves no script's trace (engineOnly):
-  // the script has no phone to give, and touches none of the touch points, the platform or the screen.
+test('a profile with every setting replaces no navigator, screen or window value', () => {
+  // The script touches none of the touch points, the platform or the screen.
   const w = makeWindow(everything);
   assert.equal(run(w, surface), JSON.stringify(['MacIntel', 0, 8, 'en-US', ['en-US'], 'undefined', 1728, 1117, 1728, 1079, 2, 1200, 820]));
   assert.equal(run(w, `'orientation' in window`), false);
-});
-
-const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
-test('an iPhone view with the full disguise: the phone in the navigator, the screen and the window, through accessors as the engine makes them', () => {
-  const w = makeWindow({ ...everything, safariObject: false, phone });
-  // The pixel density is WebKit's own (PhoneEngine), not the script's: the realm's 2 stays.
-  assert.equal(run(w, surface), JSON.stringify(['iPhone', 5, 8, 'en-US', ['en-US'], 'undefined', 402, 874, 402, 874, 2, 402, 874]));
-  for (const [proto, name] of [['Navigator.prototype', 'platform'], ['Navigator.prototype', 'maxTouchPoints'], ['Screen.prototype', 'width'],
-                               ['Screen.prototype', 'availHeight']]) {
-    assert.equal(run(w, `Object.getOwnPropertyDescriptor(${proto}, '${name}').get.toString()`), nativeText(name), `${proto}.${name}`);
-    assert.equal(run(w, `Object.getOwnPropertyNames(Object.getOwnPropertyDescriptor(${proto}, '${name}').get).join()`), 'length,name');
-  }
-  // The engine's receiver check is kept: the wrong receiver throws the engine's error.
-  assert.equal(run(w, `try { Object.getOwnPropertyDescriptor(Navigator.prototype, 'maxTouchPoints').get.call({}); 'no error' } catch (e) { e.message }`),
-               'illegal invocation');
-  assert.equal(run(w, `Object.getOwnPropertyDescriptor(window, 'outerWidth').get.toString()`), nativeText('outerWidth'));
-  // Held upright, as iOS says: window.orientation 0, with its event handler.
-  assert.equal(run(w, `[window.orientation, 'onorientationchange' in window, Object.getOwnPropertyDescriptor(window, 'orientation').get.toString()].join('|')`),
-               `0|true|${nativeText('orientation')}`);
 });
 
 test('no rendering patches: canvas, audio and fonts stay native', () => {
@@ -908,6 +888,10 @@ test('no rendering patches: canvas, audio and fonts stay native', () => {
     assert.equal(run(w, `AudioContext.prototype.createAnalyser.toString().includes('return {}')`), true);
   }
   assert.doesNotMatch(body, /getImageData|createAnalyser|document\.fonts|deviceMemory/);
+  // Nothing of the fonts in the script, nor in what a worker is given.
+  assert.doesNotMatch(body, /measureText|FontFace|fontFamily|queryLocalFonts|getComputedStyle|offsetWidth/);
+  assert.doesNotMatch(swift.split('struct ShimConfiguration')[1].split('static func shimConfiguration')[0], /font/i,
+                     'the script\'s configuration carries no font list');
 });
 
 test('window.safari, as Safari on the Mac exposes it', () => {
@@ -944,7 +928,6 @@ test('workers made from a blob are hooked whenever a substitution reaches them, 
   assert.equal(hooked(base), false, 'no substitution: no hook');
   assert.equal(hooked({ ...base, storageQuota: 0.6 * 128 * 2 ** 30 }), true, 'the storage quota alone, this Mac\'s time zone');
   assert.equal(hooked({ ...base, timeZone: 'Asia/Tokyo' }), true, 'a time zone');
-  assert.equal(hooked({ ...base, phone: { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 } }), true, 'an iPhone');
   // The iOS app always sends a fingerprint: only a mode that changes something, or a language, counts.
   const real = { seed: 's', canvas: 'real', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
   assert.equal(hooked({ ...base, fingerprint: real }), false, 'the iOS app\'s fingerprint with everything real');
@@ -982,16 +965,15 @@ test('a blob worker gets only what a worker uses: never the camera\'s media, nev
   assert.ok(evaluated.startsWith('(function install(CONFIG) {'));
   const workerConfig = JSON.parse(evaluated.slice(evaluated.lastIndexOf('})(') + 3, -2));
   assert.deepEqual(workerConfig, { timeZone: 'Europe/Berlin', storageQuota: config.storageQuota });
-  // The iOS app's fingerprint and an iPhone's platform go too: a worker answers them.
-  const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
+  // The iOS app's fingerprint goes too: a worker answers it.
   const fingerprint = { seed: 's', canvas: 'noise', webgl: 'real', audio: 'real', language: null, unstable: false, naive: false };
-  const ios = makeWindow({ ...base, phone, fingerprint });
+  const ios = makeWindow({ ...base, fingerprint });
   const iosURL = run(ios, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
   const iosScript = JSON.parse(/^try \{ \(0, eval\)\((.*)\); \} catch \(e\) \{\}/s.exec(run(ios, `__engine.blobs.get(${JSON.stringify(iosURL)}).parts.join('')`))[1]);
-  assert.deepEqual(JSON.parse(iosScript.slice(iosScript.lastIndexOf('})(') + 3, -2)), { phone, fingerprint });
+  assert.deepEqual(JSON.parse(iosScript.slice(iosScript.lastIndexOf('})(') + 3, -2)), { fingerprint });
 });
 
-test('the script a blob worker starts with runs in a worker: the profile\'s zone, quota and platform there, printed as the engine prints its own', async () => {
+test('the script a blob worker starts with runs in a worker: the profile\'s zone and quota there, the engine\'s platform, printed as the engine prints its own', async () => {
   // A worker's realm, as far as the script reaches it: no window, a WorkerGlobalScope, a navigator
   // with the engine's platform and storage.
   const worker = vm.createContext({});
@@ -1001,13 +983,12 @@ test('the script a blob worker starts with runs in a worker: the profile\'s zone
     globalThis.WorkerNavigator = class WorkerNavigator { get platform() { if (!(this instanceof WorkerNavigator)) throw new TypeError('illegal invocation'); return 'MacIntel'; } };
     var navigator = Object.assign(Object.create(WorkerNavigator.prototype), { storage: new StorageManager() });`, worker);
   worker.Function = vm.runInContext('Function', worker);
-  const phone = { platform: 'iPhone', width: 402, height: 874, maxTouchPoints: 5 };
-  const page = makeWindow({ ...base, timeZone: 'Asia/Tokyo', storageQuota: 0.6 * 128 * 2 ** 30, phone });
+  const page = makeWindow({ ...base, timeZone: 'Asia/Tokyo', storageQuota: 0.6 * 128 * 2 ** 30 });
   const url = run(page, `new Worker(URL.createObjectURL(new Blob(['postMessage(1)']))).url`);
   const bootstrap = run(page, `__engine.blobs.get(${JSON.stringify(url)}).parts[0]`);
   assert.doesNotMatch(bootstrap, new RegExp(CHANNEL), 'the family\'s channel is not a worker\'s to read');
   vm.runInContext(bootstrap, worker);
-  assert.equal(run(worker, `[new Date(Date.UTC(2024, 0, 15, 12)).getHours(), Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.platform].join()`), '21,Asia/Tokyo,iPhone');
+  assert.equal(run(worker, `[new Date(Date.UTC(2024, 0, 15, 12)).getHours(), Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.platform].join()`), '21,Asia/Tokyo,MacIntel');
   assert.equal(await run(worker, `navigator.storage.estimate().then((e) => e.quota)`), 82463372084);
   assert.equal(run(worker, `[Date, Date.prototype.getHours, navigator.storage.estimate, Function.prototype.toString].map((f) => Function.prototype.toString.call(f)).join()`),
                ['Date', 'getHours', 'estimate', 'toString'].map(nativeText).join());
@@ -1156,38 +1137,42 @@ test('WebRTC through the tunnel: getStats() names the page\'s servers, never the
   assert.throws(() => run(w, `RTCPeerConnection.prototype.getStats.call({})`), (e) => e.name === 'TypeError');
 });
 
+// What a hostile page does before it makes a peer connection: replaces the built-ins the shim could
+// call, or puts accessors on Object.prototype that a configuration object would inherit.
+const attacker = `[{ urls: 'stun:attacker.example:3478' }]`;
+const RTC_ATTACKS = {
+  'accessors on Object.prototype': `
+    Object.defineProperty(Object.prototype, 'iceServers', { get() { return ${attacker}; }, set() {}, configurable: true });
+    Object.defineProperty(Object.prototype, 'iceTransportPolicy', { get() { return 'all'; }, set() {}, configurable: true });
+    Object.defineProperty(Object.prototype, 'urls', { get() { return 'stun:attacker.example:3478'; }, set() {}, configurable: true });`,
+  'Reflect': `
+    const construct = Reflect.construct, apply = Reflect.apply;
+    Reflect.construct = function (T, args, nt) { (window.__seen = window.__seen || []).push(T); return construct(T, [{ iceServers: ${attacker}, iceTransportPolicy: 'all' }], nt); };
+    Reflect.apply = function (f, t, a) { (window.__seen = window.__seen || []).push(f); return apply(f, t, a); };`,
+  'Function.prototype.call and apply': `
+    const apply = Reflect.apply;
+    Function.prototype.call = function (t, ...a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a); };
+    Function.prototype.apply = function (t, a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a || []); };`,
+  'Object.assign, Array.prototype.slice and the array iterator': `
+    Object.assign = function (target) { target.iceServers = ${attacker}; target.iceTransportPolicy = 'all'; return target; };
+    Array.prototype.slice = function () { return ['stun:attacker.example:3478']; };
+    Array.prototype[Symbol.iterator] = function* () { yield { urls: 'stun:attacker.example:3478' }; };`,
+  'Object.create and Object.defineProperty': `
+    Object.create = function () { return { iceServers: ${attacker}, iceTransportPolicy: 'all' }; };
+    const define = Object.defineProperty;
+    Object.defineProperty = function (o, k, d) { (window.__seen = window.__seen || []).push(d && d.value); return define(o, k, d); };`,
+  'WeakMap and Promise methods': `
+    WeakMap.prototype.get = function (k) { (window.__seen = window.__seen || []).push(k); return undefined; };
+    WeakMap.prototype.set = function (k, v) { (window.__seen = window.__seen || []).push(v); return this; };
+    Promise.prototype.then = function (f) { (window.__seen = window.__seen || []).push(f); return this; };`,
+};
+
 // A hostile page replaces the built-ins the shim could call when a peer connection is made, or puts
 // accessors on Object.prototype that a configuration object would inherit. The engine must still
 // get only the relay, relay-only; the native constructor and methods must never reach the page.
 test('WebRTC through the tunnel: a page that tampers with built-ins still gets only the relay', () => {
   const relay = { urls: ['turn:192.0.2.10:3478?transport=udp', 'turn:[fd6b:3a1c:94e2:1::a]:3478?transport=udp'], username: 'u1', credential: 'c1' };
-  const attacker = `[{ urls: 'stun:attacker.example:3478' }]`;
-  const attacks = {
-    'accessors on Object.prototype': `
-      Object.defineProperty(Object.prototype, 'iceServers', { get() { return ${attacker}; }, set() {}, configurable: true });
-      Object.defineProperty(Object.prototype, 'iceTransportPolicy', { get() { return 'all'; }, set() {}, configurable: true });
-      Object.defineProperty(Object.prototype, 'urls', { get() { return 'stun:attacker.example:3478'; }, set() {}, configurable: true });`,
-    'Reflect': `
-      const construct = Reflect.construct, apply = Reflect.apply;
-      Reflect.construct = function (T, args, nt) { (window.__seen = window.__seen || []).push(T); return construct(T, [{ iceServers: ${attacker}, iceTransportPolicy: 'all' }], nt); };
-      Reflect.apply = function (f, t, a) { (window.__seen = window.__seen || []).push(f); return apply(f, t, a); };`,
-    'Function.prototype.call and apply': `
-      const apply = Reflect.apply;
-      Function.prototype.call = function (t, ...a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a); };
-      Function.prototype.apply = function (t, a) { (window.__seen = window.__seen || []).push(this); return apply(this, t, a || []); };`,
-    'Object.assign, Array.prototype.slice and the array iterator': `
-      Object.assign = function (target) { target.iceServers = ${attacker}; target.iceTransportPolicy = 'all'; return target; };
-      Array.prototype.slice = function () { return ['stun:attacker.example:3478']; };
-      Array.prototype[Symbol.iterator] = function* () { yield { urls: 'stun:attacker.example:3478' }; };`,
-    'Object.create and Object.defineProperty': `
-      Object.create = function () { return { iceServers: ${attacker}, iceTransportPolicy: 'all' }; };
-      const define = Object.defineProperty;
-      Object.defineProperty = function (o, k, d) { (window.__seen = window.__seen || []).push(d && d.value); return define(o, k, d); };`,
-    'WeakMap and Promise methods': `
-      WeakMap.prototype.get = function (k) { (window.__seen = window.__seen || []).push(k); return undefined; };
-      WeakMap.prototype.set = function (k, v) { (window.__seen = window.__seen || []).push(v); return this; };
-      Promise.prototype.then = function (f) { (window.__seen = window.__seen || []).push(f); return this; };`,
-  };
+  const attacks = RTC_ATTACKS;
   for (const [name, attack] of Object.entries(attacks)) {
     const w = makeWindow({ ...base, webRTC: 'tunnel', webRTCRelay: relay });
     run(w, attack);
@@ -1292,6 +1277,125 @@ test('WebRTC through the tunnel: the validating connection never gathers', () =>
 test('WebRTC unrestricted', () => {
   const w = makeWindow({ ...base, webRTC: 'unrestricted' });
   assert.equal(run(w, `new RTCPeerConnection({ iceTransportPolicy: 'all' }).config.iceTransportPolicy`), 'all');
+});
+
+// ---- WebRTC present, connecting nowhere ('silent') --------------------------------------------
+// WebRTC that must not connect (off by choice, an HTTP proxy, a proxy whose UDP does not hold) is
+// kept in the page as Safari has it, not removed — a removed WebRTC, and the "blocked" a page then
+// reads, is a mark no Safari shows. The engine's WebRTC is on, and the script alone gives it
+// relay-only with no ICE server: what libwebrtc then gathers, below, is nothing at all.
+// What libwebrtc gathers for a configuration: relay-only gathers one relay candidate per TURN
+// server and nothing else (no host address, no STUN request); otherwise host candidates and a
+// server-reflexive one per STUN or TURN server. Each entry names the server it would be sent to.
+const wouldGather = (config) => {
+  const servers = config.iceServers || [];
+  const urls = servers.flatMap((s) => (typeof s.urls === 'string' ? [s.urls] : [...s.urls]));
+  if (config.iceTransportPolicy === 'relay') return urls.filter((u) => /^turns?:/i.test(u)).map((u) => 'relay via ' + u);
+  return ['host'].concat(urls.map((u) => 'srflx via ' + u));
+};
+// The engine's capabilities, as Safari reports them (a sample: the test checks they are the engine's own, untouched).
+const capabilitiesPrelude = `
+  globalThis.RTCRtpSender.getCapabilities = function getCapabilities(kind) {
+    return kind === 'audio' ? { codecs: [{ mimeType: 'audio/opus', clockRate: 48000, channels: 2 }], headerExtensions: [{ uri: 'urn:ietf:params:rtp-hdrext:ssrc-audio-level' }] }
+      : { codecs: [{ mimeType: 'video/H264', clockRate: 90000 }, { mimeType: 'video/VP8', clockRate: 90000 }], headerExtensions: [] };
+  };
+  globalThis.RTCRtpReceiver = class RTCRtpReceiver { static getCapabilities(kind) { return globalThis.RTCRtpSender.getCapabilities(kind); } };
+  globalThis.RTCSessionDescription = function RTCSessionDescription() {};
+  globalThis.RTCIceCandidate = function RTCIceCandidate() {};
+  globalThis.MediaStream = function MediaStream() {};
+  navigator.mediaDevices = { enumerateDevices() { return Promise.resolve([]); } };
+`;
+
+test('WebRTC silent: present as in Safari, every interface and capability the engine\'s own', () => {
+  const engine = engineWindow(capabilitiesPrelude);
+  const w = makeWindow({ ...base, webRTC: 'silent' }, null, capabilitiesPrelude);
+  const names = (x) => run(x, `Object.getOwnPropertyNames(window).filter((n) => /^(webkit)?RTC[A-Z]/.test(n)).sort().join()`);
+  assert.equal(names(w), names(engine), 'no RTC interface removed');
+  assert.equal(run(w, `typeof RTCPeerConnection`), 'function');
+  assert.equal(run(w, `'RTCPeerConnection' in window && 'RTCDataChannel' in window && 'RTCRtpSender' in window`), true);
+  // Capabilities, media devices: not touched — the engine's own functions and answers.
+  for (const kind of ['audio', 'video']) {
+    assert.equal(run(w, `JSON.stringify(RTCRtpSender.getCapabilities('${kind}'))`), run(engine, `JSON.stringify(RTCRtpSender.getCapabilities('${kind}'))`));
+    assert.equal(run(w, `JSON.stringify(RTCRtpReceiver.getCapabilities('${kind}'))`), run(engine, `JSON.stringify(RTCRtpReceiver.getCapabilities('${kind}'))`));
+  }
+  assert.equal(run(w, `Object.getOwnPropertyDescriptor(RTCRtpSender, 'getCapabilities').value.name`), 'getCapabilities');
+  assert.equal(run(w, `typeof navigator.mediaDevices.enumerateDevices`), 'function');
+  // The constructor and the methods the script answers look as the engine's do.
+  assert.equal(run(w, `RTCPeerConnection.toString()`), nativeText('RTCPeerConnection'));
+  assert.equal(run(w, `RTCPeerConnection.name + RTCPeerConnection.length`), 'RTCPeerConnection0');
+  for (const name of ['getConfiguration', 'setConfiguration', 'getStats', 'addIceCandidate', 'setRemoteDescription']) {
+    assert.equal(run(w, `RTCPeerConnection.prototype.${name}.toString()`), nativeText(name), name);
+  }
+  assert.equal(run(w, `new RTCPeerConnection() instanceof RTCPeerConnection`), true);
+  assert.equal(run(w, `RTCPeerConnection.prototype.constructor === RTCPeerConnection`), true);
+});
+
+test('WebRTC silent: the engine gets relay-only with no ICE server, the page sees its own configuration', () => {
+  const w = makeWindow({ ...base, webRTC: 'silent' });
+  // What creepjs and the like make: Google's STUN servers, a candidate pool.
+  run(w, `var pc = new RTCPeerConnection({ iceCandidatePoolSize: 1, iceServers: [{ urls: ['stun:stun4.l.google.com:19302', 'stun:stun3.l.google.com:19302'] }] })`);
+  assert.equal(run(w, `JSON.stringify({ iceServers: pc.config.iceServers, iceTransportPolicy: pc.config.iceTransportPolicy })`),
+               JSON.stringify({ iceServers: [], iceTransportPolicy: 'relay' }));
+  assert.equal(run(w, `JSON.stringify(pc.getConfiguration().iceServers)`), JSON.stringify([{ urls: ['stun:stun4.l.google.com:19302', 'stun:stun3.l.google.com:19302'] }]));
+  assert.equal(run(w, `pc.getConfiguration().iceTransportPolicy`), 'all');
+  // A TURN server of the page's own, with its credentials, and a change of policy: the same.
+  run(w, `pc.setConfiguration({ iceServers: [{ urls: 'turn:turn.example:3478', username: 'a', credential: 'b' }], iceTransportPolicy: 'all' })`);
+  assert.equal(run(w, `JSON.stringify([pc.config.iceServers, pc.config.iceTransportPolicy])`), JSON.stringify([[], 'relay']));
+  assert.equal(run(w, `pc.getConfiguration().iceServers[0].urls`), 'turn:turn.example:3478');
+  // Every way a connection is made.
+  for (const make of [`new RTCPeerConnection({ iceServers: [{ urls: 'stun:s.example' }], iceTransportPolicy: 'all' })`,
+                      `new RTCPeerConnection()`, `new RTCPeerConnection(null)`, `new webkitRTCPeerConnection({ iceServers: [{ urls: 'turn:t.example', username: 'u', credential: 'c' }] })`,
+                      `new (class extends RTCPeerConnection {})({ iceServers: [{ urls: 'stun:s.example' }] })`]) {
+    const config = JSON.parse(run(w, `JSON.stringify((${make}).config)`));
+    assert.deepEqual([config.iceServers, config.iceTransportPolicy], [[], 'relay'], make);
+  }
+  // The engine's own validation of the page's configuration still applies.
+  assert.throws(() => run(w, `new RTCPeerConnection({ iceServers: [{ urls: 'http://bad' }] })`), (e) => e.name === 'SyntaxError');
+  assert.throws(() => run(w, `new RTCPeerConnection({ iceServers: [{}] })`), (e) => e.name === 'TypeError');
+  assert.throws(() => run(w, `new RTCPeerConnection(5)`), (e) => e.name === 'TypeError');
+});
+
+test('WebRTC silent: nothing is gathered, nothing is sent anywhere — whatever the page tampers with', () => {
+  const pageServers = `[{ urls: ['stun:stun.l.google.com:19302', 'turn:turn.example:3478?transport=tcp'], username: 'a', credential: 'b' }]`;
+  const attacks = { 'nothing': '', ...RTC_ATTACKS };
+  for (const [name, attack] of Object.entries(attacks)) {
+    const w = makeWindow({ ...base, webRTC: 'silent' });
+    run(w, attack);
+    try { run(w, `window.pc = new RTCPeerConnection({ iceServers: ${pageServers}, iceTransportPolicy: 'all', iceCandidatePoolSize: 4 })`); } catch (e) {}
+    try { run(w, `pc.setConfiguration({ iceServers: ${pageServers}, iceTransportPolicy: 'all', iceCandidatePoolSize: 4 })`); } catch (e) {}
+    try { run(w, `class Sub extends RTCPeerConnection {}; window.sub = new Sub({ iceServers: ${pageServers}, iceTransportPolicy: 'all' })`); } catch (e) {}
+    try { run(w, `pc.getConfiguration(); pc.getStats()`); } catch (e) {}
+    const report = JSON.parse(run(w, `JSON.stringify({
+      live: __engine.instances.filter((pc) => !pc.closed).map((pc) => pc.config),
+      // A connection that gathered (a candidate pool) without being relay-only and server-less.
+      gatheredOpen: __engine.instances.filter((pc) => pc.gathered && (pc.config.iceTransportPolicy !== 'relay' || (pc.config.iceServers || []).length)).length,
+      nativeSeen: (window.__seen || []).some((f) => f === __engine.Native || __engine.methods.includes(f)),
+    })`));
+    assert.ok(report.live.length >= 1, `${name}: a peer connection was made`);
+    for (const config of report.live) {
+      assert.deepEqual(wouldGather(config), [], `${name}: not a candidate, not a server to send to (${JSON.stringify(config)})`);
+    }
+    assert.equal(report.gatheredOpen, 0, `${name}: the closed connections that check the page's servers gather nothing`);
+    assert.equal(report.nativeSeen, false, `${name}: the native constructor and methods stay out of the page's reach`);
+  }
+});
+
+test('WebRTC silent: a remote candidate named by a host name never reaches the resolver', async () => {
+  const w = makeWindow({ ...base, webRTC: 'silent' });
+  run(w, `var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.example' }] })`);
+  const sdp = ['v=0', 'a=candidate:1 1 udp 2122260223 192.0.2.44 50000 typ host',
+               'a=candidate:3 1 udp 2122260223 4c1a2b3c-aaaa-bbbb-cccc-0123456789ab.local 50002 typ host',
+               'a=candidate:4 1 tcp 1518280447 peer-run7.leak.example 9 typ host tcptype active', ''].join('\r\n');
+  await run(w, `pc.setRemoteDescription({ type: 'offer', sdp: ${JSON.stringify(sdp)} })`);
+  await run(w, `pc.addIceCandidate({ candidate: 'candidate:7 1 udp 2122260223 another.local 50004 typ host', sdpMid: '0' })`);
+  assert.deepEqual(JSON.parse(run(w, `JSON.stringify(__engine.resolved)`)), []);
+});
+
+test('WebRTC silent: the relay-only of the other modes is untouched by it', () => {
+  // 'disabled' still removes (where the engine could not be switched off); 'relayOnly' keeps the page's servers.
+  assert.equal(run(makeWindow(base), `typeof RTCPeerConnection`), 'undefined');
+  const w = makeWindow({ ...base, webRTC: 'relayOnly' });
+  assert.equal(run(w, `new RTCPeerConnection({ iceServers: [{ urls: 'turn:t.example', username: 'u', credential: 'c' }] }).config.iceServers.length`), 1);
 });
 
 // ---- System camera (patchSystemCamera) ---------------------------------------------------------

@@ -36,8 +36,10 @@ final class NetworkLoopTests: XCTestCase {
     }
 
     private func proxy(_ kind: FakeProxy.Kind, credentials: (String, String)? = nil, behaviour: FakeProxy.Behaviour = .tunnel,
-                       afterHeaders: [UInt8] = [], origin: @escaping @Sendable (Int32) -> Void = { _ in }) -> FakeProxy {
-        let proxy = FakeProxy(kind: kind, credentials: credentials, behaviour: behaviour, afterHeaders: afterHeaders, origin: origin)
+                       afterHeaders: [UInt8] = [], dropsFirst: Int = 0,
+                       origin: @escaping @Sendable (Int32) -> Void = { _ in }) -> FakeProxy {
+        let proxy = FakeProxy(kind: kind, credentials: credentials, behaviour: behaviour, afterHeaders: afterHeaders,
+                              dropsFirst: dropsFirst, origin: origin)
         proxies.append(proxy)
         return proxy
     }
@@ -324,6 +326,117 @@ final class NetworkLoopTests: XCTestCase {
         case .refused(let seconds): XCTAssertLessThan(seconds, 4)
         default: XCTFail("not refused")
         }
+    }
+
+    // MARK: - The proxy's own trouble, while the machine runs
+
+    /// A proxy that goes away while the machine runs: every connection after that fails by the
+    /// proxy's fault, counted one after another, so that the machine's row can say the proxy
+    /// does not answer. Nothing goes anywhere else meanwhile.
+    func testAProxyThatGoesAwayIsCountedAsTheProxysTrouble() throws {
+        let socks = proxy(.socks5, origin: FakeProxy.echo)
+        let guest = start(socks.upstream())
+        let address = try XCTUnwrap(guest.resolve("before.example")?.address)
+        let connection = try XCTUnwrap(open(guest, address))
+        connection.reset()
+        var counters = waitForCounters { $0.connectionsOpened == 1 }
+        XCTAssertEqual(counters.proxyFailuresInARow, 0)
+        XCTAssertNil(counters.proxyTrouble)
+        socks.stop()
+        let later = try XCTUnwrap(guest.resolve("after.example")?.address)
+        assertRefused(guest, later)
+        assertRefused(guest, later)
+        assertRefused(guest, later)
+        counters = waitForCounters { $0.proxyFailuresInARow == 3 }
+        XCTAssertEqual(counters.proxyFailuresInARow, 3)
+        XCTAssertEqual(counters.proxyTrouble, .unreachable)
+        XCTAssertEqual(counters.connectionsOpened, 1)
+    }
+
+    /// A proxy that is back: the first tunnel it carries ends the trouble.
+    func testAProxyThatComesBackEndsTheTrouble() throws {
+        let socks = proxy(.socks5, dropsFirst: 2, origin: FakeProxy.echo)
+        let guest = start(socks.upstream())
+        let address = try XCTUnwrap(guest.resolve("back.example")?.address)
+        assertRefused(guest, address)
+        assertRefused(guest, address)
+        var counters = waitForCounters { $0.proxyFailuresInARow == 2 }
+        XCTAssertEqual(counters.proxyFailuresInARow, 2)
+        XCTAssertEqual(counters.proxyTrouble, .unreachable)
+        let connection = try XCTUnwrap(open(guest, address))
+        XCTAssertTrue(connection.write([7, 8, 9]))
+        connection.read(atLeast: 3)
+        XCTAssertEqual(connection.takeReceived(), [7, 8, 9])
+        counters = waitForCounters { $0.proxyFailuresInARow == 0 }
+        XCTAssertEqual(counters.proxyFailuresInARow, 0)
+        XCTAssertNil(counters.proxyTrouble)
+    }
+
+    func testAProxyThatIsNotThereIsTheProxysTrouble() throws {
+        let (listener, port) = TestSocket.listen()
+        Sys.close(listener)
+        let guest = start(.socks5(host: "127.0.0.1", port: port, username: nil, password: nil))
+        let address = try XCTUnwrap(guest.resolve("any.example")?.address)
+        assertRefused(guest, address)
+        let counters = waitForCounters { $0.proxyFailuresInARow == 1 }
+        XCTAssertEqual(counters.proxyTrouble, .unreachable)
+    }
+
+    /// A password that stopped working (the provider changed it, the plan ran out): the sign-in's
+    /// trouble, by SOCKS5's refusal and by HTTP's 407.
+    func testARefusedSignInIsTheProxysTrouble() throws {
+        let socks = proxy(.socks5, credentials: ("alice", "s3cret"))
+        let guest = start(socks.upstream(username: "alice", password: "expired"))
+        let address = try XCTUnwrap(guest.resolve("signed-in.example")?.address)
+        assertRefused(guest, address)
+        assertRefused(guest, address)
+        let counters = waitForCounters { $0.proxyFailuresInARow == 2 }
+        XCTAssertEqual(counters.proxyFailuresInARow, 2)
+        XCTAssertEqual(counters.proxyTrouble, .login)
+    }
+
+    func testAnHTTPProxysRefusedSignInIsTheProxysTrouble() throws {
+        let http = proxy(.http, credentials: ("bob", "pw"))
+        let guest = start(http.upstream(username: "bob", password: "old"))
+        let address = try XCTUnwrap(guest.resolve("signed-in.example")?.address)
+        assertRefused(guest, address)
+        let counters = waitForCounters { $0.proxyFailuresInARow == 1 }
+        XCTAssertEqual(counters.proxyTrouble, .login)
+    }
+
+    /// The wrong kind of proxy (an HTTP proxy's port named as SOCKS5): its answer is not understood.
+    func testAProxyOfAnotherKindIsNotUnderstood() throws {
+        let socks = proxy(.socks5, behaviour: .garbage(Array("HTTP/1.1 400 Bad Request\r\n\r\n".utf8)))
+        let guest = start(socks.upstream())
+        let address = try XCTUnwrap(guest.resolve("any.example")?.address)
+        assertRefused(guest, address)
+        let counters = waitForCounters { $0.proxyFailuresInARow == 1 }
+        XCTAssertEqual(counters.proxyTrouble, .notUnderstood)
+    }
+
+    /// A proxy that answers and says the site cannot be reached is a proxy that works: a page's
+    /// dead tracker is not the machine's trouble — neither counted nor taken for the proxy's.
+    func testASiteTheProxyCannotReachIsNotTheProxysTrouble() throws {
+        let socks = proxy(.socks5, behaviour: .refuse(5))
+        let guest = start(socks.upstream())
+        let address = try XCTUnwrap(guest.resolve("closed.example")?.address)
+        assertRefused(guest, address)
+        assertRefused(guest, address)
+        let counters = waitForCounters { $0.connectionsFailed == 2 }
+        XCTAssertEqual(counters.connectionsFailed, 2)
+        XCTAssertEqual(counters.proxyFailuresInARow, 0)
+        XCTAssertNil(counters.proxyTrouble)
+        let http = proxy(.http, behaviour: .refuse(502))
+        network?.stop()
+        network = nil
+        Sys.close(guestEnd)
+        Sys.close(stackEnd)
+        let second = start(http.upstream())
+        let other = try XCTUnwrap(second.resolve("gone.example")?.address)
+        assertRefused(second, other)
+        let after = waitForCounters { $0.connectionsFailed == 1 }
+        XCTAssertEqual(after.connectionsFailed, 1)
+        XCTAssertEqual(after.proxyFailuresInARow, 0)
     }
 
     // MARK: - HTTP CONNECT

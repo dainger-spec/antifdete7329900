@@ -35,6 +35,10 @@ public enum VMFailureKind: String, Codable, Sendable, CaseIterable {
     case needsUpdate
     /// The installation did not finish.
     case installation
+    /// This Mac does not let an app run a virtual machine at all (`VZVirtualMachine.isSupported`
+    /// is false): above all a Mac that is itself a virtual machine — macOS runs no virtual machine
+    /// inside another. Named by the helper, which asks the framework exactly that.
+    case noVirtualization
 
     /// One error of a chain: its domain and code.
     public struct Cause: Equatable, Sendable {
@@ -120,9 +124,52 @@ public struct VMFailure: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? { message }
 }
 
+/// Whether this Mac is itself a virtual machine: macOS runs no virtual machine inside another, so
+/// the section says so at once instead of offering a setup that cannot start (a tester's Mac in a
+/// virtual machine, or a cloud Mac).
+public enum VMHostSupport {
+    /// `model`: the system's `hw.model` ("VirtualMac2,1" in Apple's virtual Macs); `vmmPresent`:
+    /// `kern.hv_vmm_present`, 1 under a hypervisor — nil where the system has neither.
+    public static func isVirtualMachine(model: String?, vmmPresent: Int?) -> Bool {
+        if let vmmPresent, vmmPresent != 0 { return true }
+        return model?.hasPrefix("VirtualMac") == true
+    }
+
+    #if canImport(Darwin)
+    /// This Mac, as the system says it.
+    public static var thisMacIsAVirtualMachine: Bool {
+        isVirtualMachine(model: sysctlText("hw.model"), vmmPresent: sysctlNumber("kern.hv_vmm_present"))
+    }
+
+    private static func sysctlNumber(_ name: String) -> Int? {
+        var value: Int32 = 0
+        var size = MemoryLayout<Int32>.size
+        guard sysctlbyname(name, &value, &size, nil, 0) == 0 else { return nil }
+        return Int(value)
+    }
+
+    private static func sysctlText(_ name: String) -> String? {
+        var size = 0
+        guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0, size < 4096 else { return nil }
+        var bytes = [CChar](repeating: 0, count: size)
+        guard sysctlbyname(name, &bytes, &size, nil, 0) == 0 else { return nil }
+        return String(decoding: bytes.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    }
+    #endif
+}
+
 /// What stands in the way of starting a machine on a Mac whose disk is nearly full, known before
 /// the machine is started (`VMCenter.start`).
 public enum VMStartRoom {
+    /// The room on a volume as a machine's setup and start go by it: the larger of the system's
+    /// two figures — the one "for important usage" counts what macOS can free at need, and is zero
+    /// (or none) on volumes that have no such thing, such as an external disk that is not APFS,
+    /// where the plain one is the answer. Nil where the system says neither: nothing is then
+    /// refused on a guess.
+    public static func free(importantUsage: Int64?, available: Int64?) -> Int64? {
+        [importantUsage, available].compactMap { $0 }.max()
+    }
+
     /// The least free room a machine is started with. Its macOS writes from its first second —
     /// swap, caches, logs — to a disk that is a file on this Mac's, and this Mac's own memory for
     /// the machine is backed by the same disk; writes that fail because the disk is full are a

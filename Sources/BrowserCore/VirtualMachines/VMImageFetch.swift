@@ -31,12 +31,17 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
         public var speed: Double?
         /// Connections at work now.
         public var connections: Int
+        /// Nothing has come for a while (`VMImageFetch.stallAfter`): the network is gone, or
+        /// the server does not answer. The download goes on by itself once bytes come again; until
+        /// then the setup says it waits, not a speed and a time left that are no longer true.
+        public var stalled: Bool
 
-        public init(have: Int64, total: Int64?, speed: Double?, connections: Int = 0) {
+        public init(have: Int64, total: Int64?, speed: Double?, connections: Int = 0, stalled: Bool = false) {
             self.have = have
             self.total = total
             self.speed = speed
             self.connections = connections
+            self.stalled = stalled
         }
     }
 
@@ -86,6 +91,14 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
     /// The tests' local server speaks plain http on loopback; nothing else is fetched but https.
     var acceptsLoopbackHTTP = false
 
+    /// Seconds without a byte after which the download is said to wait (`Progress.stalled`), and
+    /// how often that is looked at. A network that dropped (Wi-Fi gone, a VPN reconnecting) brings
+    /// nothing and fails nothing — its requests wait for the connection — and the setup used to
+    /// show the last speed and time left for as long as that lasted, as if it went on. Shorter in
+    /// the tests.
+    var stallAfter: TimeInterval = 8
+    var tickInterval: TimeInterval = 1
+
     private var state: VMDownloadState
     private var map: VMChunkMap?
     /// The server has no ranges: one stream, the whole file.
@@ -105,6 +118,11 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
     private var lastReport = Date.distantPast
     private var speedMark: (at: Date, have: Int64)?
     private var speed: Double?
+    /// When the last byte came (or the download began), as the system's uptime.
+    private var lastDataAt = ProcessInfo.processInfo.systemUptime
+    /// Looks every `tickInterval` whether the download waits, so that the setup says it while no
+    /// byte comes to report anything (`tick`).
+    private var ticker: DispatchSourceTimer?
 
     /// `configuration`: each connection's session settings; the system's own by default (its
     /// proxy and VPN, as any app's download has them), no cookies, no cache.
@@ -127,6 +145,10 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
         super.init()
     }
 
+    deinit {
+        ticker?.cancel()
+    }
+
     static func standardConfiguration() -> URLSessionConfiguration {
         let configuration = URLSessionConfiguration.ephemeral
         #if canImport(Darwin)
@@ -142,6 +164,7 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
 
     public func start() {
         queue.addOperation { self.begin() }
+        startTicking()
     }
 
     /// Stops the download; what was fetched stays for the next start.
@@ -157,13 +180,47 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
             self.close()
             self.endSessions()
             self.finished = true
+            self.stopTicking()
         }
+    }
+
+    private func startTicking() {
+        let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
+        let interval = max(0.05, tickInterval)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(200))
+        let queue = self.queue
+        timer.setEventHandler { [weak self] in
+            queue.addOperation { [weak self] in self?.tick() }
+        }
+        queue.addOperation {
+            // Resumed before it may be cancelled: a dispatch source let go of while never
+            // resumed ends the process.
+            timer.resume()
+            self.ticker = timer
+            if self.finished { self.stopTicking() }
+        }
+    }
+
+    private func stopTicking() {
+        ticker?.cancel()
+        ticker = nil
+    }
+
+    /// Nothing came for a while: said now, not when the next byte comes.
+    private func tick() {
+        guard !cancelled, !finished, isStalled else { return }
+        report(force: true)
+    }
+
+    private var isStalled: Bool {
+        ProcessInfo.processInfo.systemUptime - lastDataAt >= stallAfter
     }
 
     // MARK: - Where it starts
 
     private func begin() {
         guard !cancelled, !finished else { return }
+        lastDataAt = ProcessInfo.processInfo.systemUptime
         let loopback = acceptsLoopbackHTTP && image.url.scheme == "http" && image.url.host == "127.0.0.1"
         guard image.isFetchable || loopback else { return finish(.failure(Failure.notFetchable)) }
         do {
@@ -351,6 +408,7 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
         }
         work.next += Int64(bytes.count)
         work.received += Int64(bytes.count)
+        if !bytes.isEmpty { lastDataAt = ProcessInfo.processInfo.systemUptime }
         if work.chunk != nil, !single { inFlightBytes += Int64(bytes.count) }
         emptyFailures = 0
         works[key] = work
@@ -474,6 +532,7 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
     private func finish(_ result: Result<Void, Error>) {
         guard !finished else { return }
         finished = true
+        stopTicking()
         for work in works.values { work.task.cancel() }
         works.removeAll()
         if map != nil { saveState(force: true) }
@@ -501,7 +560,12 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
         guard force || now.timeIntervalSince(lastReport) >= 0.5 else { return }
         lastReport = now
         let have = self.have
-        if let mark = speedMark {
+        let stalled = isStalled
+        if stalled {
+            // No speed while nothing comes; measured afresh once bytes come again.
+            speed = 0
+            speedMark = nil
+        } else if let mark = speedMark {
             let elapsed = now.timeIntervalSince(mark.at)
             if elapsed >= 3 {
                 speed = Double(max(0, have - mark.have)) / elapsed
@@ -510,6 +574,44 @@ public final class VMImageFetch: NSObject, URLSessionDataDelegate, @unchecked Se
         } else {
             speedMark = (now, have)
         }
-        onProgress(Progress(have: have, total: state.expectedLength, speed: speed, connections: works.count))
+        onProgress(Progress(have: have, total: state.expectedLength, speed: speed, connections: works.count, stalled: stalled))
     }
+}
+
+/// What a download that stopped is said as, by what stopped it — for the setup's words, in the
+/// person's language, with what to do (`VMImageDownloader`): never the system's sentence alone, in
+/// the system's language, with its domain and number.
+public enum VMDownloadFailure: Equatable, Sendable {
+    /// Apple's server said no, with this status.
+    case refused(Int)
+    /// The file did not come whole.
+    case incomplete
+    /// The image's address is not one to fetch.
+    case notFetchable
+    /// The file changed under the download again and again.
+    case keepsChanging
+    /// This Mac's disk is full: what was fetched is kept, and Continue goes on once there is room.
+    case noRoom
+    /// The network: no connection, one lost again and again, a server that does not answer.
+    case network
+    /// Anything else: the system's words, under the app's.
+    case other
+
+    public static func of(_ error: Error) -> VMDownloadFailure {
+        if let failure = error as? VMImageFetch.Failure {
+            switch failure {
+            case .refused(let status): return .refused(status)
+            case .incomplete: return .incomplete
+            case .notFetchable: return .notFetchable
+            case .keepsChanging: return .keepsChanging
+            }
+        }
+        // A full disk anywhere in the chain is the reason, whatever is said over it.
+        if VMFailureKind.of(error) == .noRoom { return .noRoom }
+        if VMFailureKind.causes(of: error).contains(where: { $0.domain == Self.urlDomain }) { return .network }
+        return .other
+    }
+
+    /// Foundation's domain of URL loading's errors, written out: the same on Linux.
+    static let urlDomain = "NSURLErrorDomain"
 }

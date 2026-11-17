@@ -57,6 +57,34 @@ final class GuardPolicyTests: XCTestCase {
         XCTAssertEqual(verdict(.other, "203.0.113.5", 0), .drop, "another transport, even to the proxy")
     }
 
+    /// A process held only so that a WebRTC that must not connect can stay in its pages: the proxy's
+    /// TCP port, and nothing else of its host — no STUN or TURN server it might also run.
+    func testAHoldWithoutTheRelayLetsOnlyTheProxysTCPPortThrough() {
+        let silent = GuardRegistration(pid: 4244, proxyHost: "proxy.example", proxyPort: 8080,
+                                       proxyAddresses: ["203.0.113.5"], relaysUDP: false)
+        XCTAssertEqual(verdict(.tcp, "203.0.113.5", 8080, silent), .allow, "the proxy, by address")
+        XCTAssertEqual(verdict(.tcp, nil, 8080, name: "proxy.example", silent), .allow, "the proxy, by name")
+        XCTAssertEqual(verdict(.udp, "203.0.113.5", 3478, silent), .drop, "a STUN server on the proxy's host")
+        XCTAssertEqual(verdict(.udp, "203.0.113.5", 8080, silent), .drop, "UDP to the proxy's own port")
+        XCTAssertEqual(verdict(.udp, nil, 8080, name: "proxy.example", silent), .drop)
+        XCTAssertEqual(verdict(.tcp, "203.0.113.5", 3478, silent), .drop, "TURN over TCP on the proxy's host")
+        XCTAssertEqual(verdict(.tcp, "203.0.113.5", 443, name: "proxy.example", silent), .drop)
+        XCTAssertEqual(verdict(.udp, "127.0.0.1", 50000, silent), .allow, "loopback, as for every hold")
+        XCTAssertEqual(verdict(.udp, "74.125.250.129", 19302, silent), .drop)
+        // The relay's holds are as before.
+        XCTAssertTrue(named.relaysUDP)
+        XCTAssertEqual(verdict(.udp, "203.0.113.5", 61234), .allow)
+    }
+
+    /// The app and the guard are one version; a registration without the field reads as the relay's.
+    func testARegistrationKeepsWhetherItRelaysUDP() throws {
+        let silent = GuardRegistration(pid: 4245, proxyHost: "proxy.example", proxyPort: 8080, proxyAddresses: [], relaysUDP: false)
+        let decoded = try JSONDecoder().decode(GuardRegistration.self, from: JSONEncoder().encode(silent))
+        XCTAssertEqual(decoded, silent)
+        let older = #"{"format":1,"pid":7,"proxyHost":"proxy.example","proxyPort":1080,"proxyAddresses":["203.0.113.5"]}"#
+        XCTAssertTrue(try JSONDecoder().decode(GuardRegistration.self, from: Data(older.utf8)).relaysUDP)
+    }
+
     func testDNS() {
         XCTAssertEqual(verdict(.udp, "192.168.1.1", 53), .inspectDNS)
         XCTAssertEqual(verdict(.udp, "8.8.8.8", 53), .inspectDNS)

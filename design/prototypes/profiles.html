@@ -138,7 +138,6 @@
 
   const T = (ruText, enText) => (en ? enText : ruText);
   const mac = L('profiles.appearsAs', L('profiles.device.mac'), '26');
-  const iphone = L('profiles.appearsAs', L('profiles.device.iphone'), '26');
   // PROPOSED: in the table, dates older than yesterday in the short form
   // (.relative(presentation: .numeric, unitsStyle: .abbreviated)); «на прошлой неделе» does not fit a column.
   const ago = {
@@ -158,7 +157,7 @@
       { n: 1, name: 'Personal', activity: 'running', exit: null, ephemeral: false, appears: mac, last: 'now' },
       { n: 2, name: 'Northwind', activity: 'running', exit: { code: 'DE', endpoint: 'proxy.northwind.example:1080' }, appears: mac, last: 'now', warmUp: { page: 4, total: 12, cookies: 84 } },
       { n: 3, name: 'Launch Review', activity: 'starting', exit: { code: 'US', endpoint: 'us-east.gateway.example:8080' }, appears: mac, last: 'now' },
-      { n: 4, name: 'Research', activity: 'stopped', exit: { code: 'NL', endpoint: 'nl.gateway.example:1080' }, appears: iphone, last: ago.yesterday },
+      { n: 4, name: 'Research', activity: 'stopped', exit: { code: 'NL', endpoint: 'nl.gateway.example:1080' }, appears: mac, last: ago.yesterday },
       { n: 5, name: 'Travel', activity: 'sealing', exit: { code: 'PT', endpoint: 'lisbon.example:1080' }, appears: mac, last: 'now' },
       { n: 6, name: 'Shopping', activity: 'stopped', exit: null, ephemeral: true, appears: mac, last: ago.days3 },
       { n: 7, name: 'Banking', activity: 'stopped', exit: { code: null, endpoint: '10.20.0.2:3128' }, appears: mac, last: 'never' },
@@ -170,7 +169,7 @@
     const rows = sampleRows();
     const specs = [
       ['Retail DE', 'DE', 6], ['Retail NL', 'NL', 3], ['Market US', 'US', 5], ['Social UK', 'GB', 3], ['Social FR', 'FR', 2],
-      ['QA iPhone', 'US', 3], ['Support PT', 'PT', 2], ['Ads SE', 'SE', 2], ['Ads JP', 'JP', 1], ['Ops PL', 'PL', 2], ['Ops ES', 'ES', 2],
+      ['QA US', 'US', 3], ['Support PT', 'PT', 2], ['Ads SE', 'SE', 2], ['Ads JP', 'JP', 1], ['Ops PL', 'PL', 2], ['Ops ES', 'ES', 2],
     ];
     const lastValues = [ago.hours2, ago.yesterday, ago.days3, ago.days5, ago.week, ago.month, 'never'];
     let n = 8;
@@ -178,7 +177,7 @@
       for (let i = 1; i <= count; i++) {
         rows.push({ n, name: `${base} ${String(i).padStart(2, '0')}`, activity: 'stopped',
           exit: { code, endpoint: `${code.toLowerCase()}${i}.gateway.example:1080` },
-          appears: base === 'QA iPhone' ? iphone : mac, last: lastValues[(n * 3) % lastValues.length], ephemeral: n % 11 === 0 });
+          appears: mac, last: lastValues[(n * 3) % lastValues.length], ephemeral: n % 11 === 0 });
         n++;
       }
     }

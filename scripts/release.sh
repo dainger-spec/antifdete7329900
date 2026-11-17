@@ -197,6 +197,12 @@ if [[ -n "${PREVIOUS_APPCAST:-}" ]]; then
   for entry in "${TRUSTED[@]}"; do [[ -z "$entry" ]] || VERIFY_KEYS+=(--public-key "$entry"); done
   "$PBUPDATE" verify --appcast "$PREVIOUS_APPCAST" "${VERIFY_KEYS[@]}" \
     || { echo "error: $PREVIOUS_APPCAST does not check with this update key or UPDATE_EXTRA_PUBLIC_KEYS: its releases cannot be kept" >&2; exit 1; }
+  # BUILD is greater than every build published: the appcast lists a build once, so one listed
+  # already would take that release's place (its users then told they are up to date), and a lower
+  # one would offer the older release as an update to whoever has this one. pbupdate appcast
+  # refuses it too, at step 4; here it stops before the build.
+  "$PBUPDATE" verify --appcast "$PREVIOUS_APPCAST" "${VERIFY_KEYS[@]}" --new-build "$BUILD" --new-version "$VERSION" >/dev/null \
+    || { echo "error: BUILD $BUILD cannot follow the releases of $PREVIOUS_APPCAST (pbupdate's line above): give a build greater than every published one" >&2; exit 1; }
 fi
 
 # The account server and the keys of its documents of rights (the server's docs/CONTRACT.md §2,

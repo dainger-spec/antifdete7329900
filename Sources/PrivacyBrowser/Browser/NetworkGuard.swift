@@ -409,7 +409,7 @@ final class NetworkGuard: NSObject, ObservableObject {
     /// Asks the guard to hold the process `pid` — a profile's own process, and what WebKit's
     /// processes and the system do on its behalf — to `proxy`. False when it did not: the profile
     /// then runs with WebRTC off.
-    func hold(pid: pid_t, proxy: ProxySettings) async -> Bool {
+    func hold(pid: pid_t, proxy: ProxySettings, relaysUDP: Bool = true) async -> Bool {
         if selfTestStandIn {
             log.notice("self-test: a stand-in takes the guard's place for process \(pid, privacy: .public)")
             standIns.insert(pid)
@@ -417,7 +417,7 @@ final class NetworkGuard: NSObject, ObservableObject {
         }
         guard installedState == .ready, let connection, let port = UInt16(exactly: proxy.port) else { return false }
         let registration = GuardRegistration(pid: pid, proxyHost: proxy.host, proxyPort: port,
-                                             proxyAddresses: await Self.addresses(of: proxy.host))
+                                             proxyAddresses: await Self.addresses(of: proxy.host), relaysUDP: relaysUDP)
         if let refusal = await give(registration, to: connection) {
             log.error("the guard did not take process \(pid, privacy: .public): \(refusal, privacy: .public)")
             return false

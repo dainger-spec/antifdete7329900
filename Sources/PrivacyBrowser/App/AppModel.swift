@@ -741,9 +741,12 @@ final class AppModel: ObservableObject {
         automationServer?.stop()
         automationServer = nil
         automationState = .stopped
-        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again.
+        // Before the profiles stop: nothing waiting in the warm-up queue may launch one again,
+        // nor a run on many profiles start its next (it would change a proxy's IP for a launch
+        // that cannot happen, and write the profile down as one that did not start).
         warmUps?.shutDown()
         warmUps = nil
+        scenarioBatches.shutDown()
         scheduleCoordinator?.shutDown()
         scheduleCoordinator = nil
         scenarioSchedules = ScenarioSchedules()
@@ -1621,7 +1624,8 @@ final class AppModel: ObservableObject {
     /// when the plan has no automation, the profile did not start, or a run of it is going.
     /// `inBackground`: a schedule's run, which must not take the keyboard from what the person is
     /// doing (`SafariChromeHost.openScenarioPage`). The run's `params` are the profile's own
-    /// values (`scenarioValues`): the same scenario on another profile has that one's.
+    /// values (`scenarioValues`) that the scenario's text names — none it reads otherwise: the same
+    /// scenario on another profile has that one's.
     func runScenario(_ scenario: Scenario, on id: UUID, inBackground: Bool = false, runID: UUID = UUID()) async -> Bool {
         guard license.allowsAutomation, manager != nil else { return false }
         // A stopped profile is started without a window of its own: the run opens the one it acts
@@ -1629,7 +1633,8 @@ final class AppModel: ObservableObject {
         if !isRunning(id) { await launch(id, openingWindow: false) }
         guard let manager, isRunning(id) else { return false }
         return manager.runScenario(id, name: scenario.name, source: scenario.source,
-                                   parametersJSON: scenarioValues.parametersJSON(for: id), runID: runID, inBackground: inBackground)
+                                   parametersJSON: scenarioValues.parametersJSON(for: id, readBy: scenario.source), runID: runID,
+                                   inBackground: inBackground)
     }
 
     // MARK: A profile's values for scenarios
@@ -1930,8 +1935,10 @@ final class AppModel: ObservableObject {
             let matching = self?.scenarios.scenarios.filter { $0.name == name } ?? []
             return matching.count == 1 ? matching[0] : nil
         }
-        // A saved scenario run through the API has the profile's own values under the request's.
-        handler.profileParameters = { [weak self] id, given in self?.scenarioValues.parametersJSON(for: id, over: given) ?? given }
+        // A saved scenario run through the API has the profile's own values that it names, under the request's.
+        handler.profileParameters = { [weak self] id, scenario, given in
+            self?.scenarioValues.parametersJSON(for: id, readBy: scenario.source, over: given) ?? given
+        }
         let server = AutomationServer(settings: settings, handler: handler)
         // WebDriver, on the same listener: a session starts a profile as the API's start does.
         let webDriver = WebDriverService(manager: manager, repository: repository)
@@ -2132,6 +2139,11 @@ struct ProfileDetails: Equatable {
     /// The WebRTC choice stored; what it amounts to with a proxy depends on the gate at launch
     /// (`ProfileConfiguration.webRTCRouting`), which the inspector says as the editor does.
     var webRTCChoice: WebRTCPolicy
+    /// The choice as the editor shows it, Automatic included, and what of the proxy decides what it
+    /// comes to (`WebRTCGate.outlook`): its kind, and whether some sites bypass it.
+    var webRTCMode: WebRTCMode
+    var proxyKindValue: ProxySettings.Kind?
+    var proxyBypassesSites: Bool
     /// It would carry WebRTC through its SOCKS5 proxy if the network guard worked
     /// (`WebRTCProtectionNotice`): the profiles window says when the guard does not.
     var wantsNetworkGuard: Bool
@@ -2167,7 +2179,10 @@ struct ProfileDetails: Equatable {
             timeZone = L("inspector.asThisMac")
         }
         webRTCChoice = configuration.webRTCPolicy
-        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCPolicy)
+        webRTCMode = configuration.webRTCMode
+        proxyKindValue = configuration.proxy?.kind
+        proxyBypassesSites = !(configuration.proxy?.excludedDomains.isEmpty ?? true)
+        wantsNetworkGuard = WebRTCProtectionNotice.wants(proxyKind: configuration.proxy?.kind, webRTC: configuration.webRTCLaunchPolicy)
         // Nil: the connection's — its proxy's country when the profile follows it — else this Mac's.
         languages = configuration.languageOverride
             ?? (configuration.needsProxyLocation

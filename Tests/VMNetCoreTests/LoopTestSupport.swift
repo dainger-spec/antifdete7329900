@@ -52,8 +52,10 @@ final class FakeProxy: @unchecked Sendable {
     let requests = Locked<[Request]>([])
     let accepted = Locked(0)
 
+    /// `dropsFirst`: the first connections are closed as soon as they are taken, without a word —
+    /// a proxy that is down for a while, then back.
     init(kind: Kind, credentials: (String, String)? = nil, behaviour: Behaviour = .tunnel, afterHeaders: [UInt8] = [],
-         origin: @escaping @Sendable (Int32) -> Void = { _ in }) {
+         dropsFirst: Int = 0, origin: @escaping @Sendable (Int32) -> Void = { _ in }) {
         self.kind = kind
         self.credentials = credentials
         self.behaviour = behaviour
@@ -68,6 +70,10 @@ final class FakeProxy: @unchecked Sendable {
                 let connection = TestSocket.accept(listener, timeout: 0.05)
                 guard connection >= 0 else { continue }
                 accepted.update { $0 += 1 }
+                if accepted.value <= dropsFirst {
+                    Sys.close(connection)
+                    continue
+                }
                 open.update { $0.append(connection) }
                 running.update { $0 += 1 }
                 let handler = Thread { [self] in

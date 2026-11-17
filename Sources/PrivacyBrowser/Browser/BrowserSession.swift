@@ -155,8 +155,6 @@ final class BrowserSession {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           hasProxy: configuration.proxy != nil,
-                          phoneScale: PhoneEngine.phone(of: configuration)?.scale,
-                          phonePlatform: PhoneEngine.phone(of: configuration)?.platform,
                           proxyCredential: configuration.proxy.flatMap { proxy in
                               proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
                           },
@@ -267,10 +265,12 @@ final class BrowserSession {
     /// for the ones Safari's chrome builds, so that neither can have them the other way round.
     ///
     ///   * WebRTC opens its sockets outside the data store's proxy: off in the engine, as Lockdown
-    ///     Mode does, whenever the profile's WebRTC is off (the default, and always with a proxy
-    ///     whose WebRTC the gate did not allow: `webRTCRouting`). No RTC interface in any frame, nothing for a
-    ///     page to reach before the shim runs; the shim's removal stays as the fallback for a
-    ///     WebKit without this preference.
+    ///     Mode does, whenever the profile's WebRTC is off (with a proxy whose WebRTC the gate did
+    ///     not allow, and the network guard not holding the process: `webRTCRouting`). No RTC
+    ///     interface in any frame, nothing for a page to reach before the shim runs; the shim's
+    ///     removal stays as the fallback for a WebKit without this preference. WebRTC that must not
+    ///     connect but may stay in the pages (`WebRTCRouting.silent`: no proxy, or the guard holding
+    ///     the process) keeps the engine's on, and the shim gives it no ICE server.
     ///   * Safe Browsing lookups are made by a system service, outside the proxy: per profile,
     ///     off by default. Safari's own configuration has it on.
     ///   * With a proxy, the features whose traffic does not go through the data store's proxy
@@ -326,8 +326,8 @@ final class BrowserSession {
         }
     }
 
-    /// `window.browser` in every page, as Safari gives it (the Mac's Safari 27.0.1 and 27.2, the
-    /// owner's iPhone; claude/measure-canvas-browser, 8 November): WebKit's own WebPageNamespace —
+    /// `window.browser` in every page, as Safari gives it (the Mac's Safari 27.0.1 and 27.2;
+    /// claude/measure-canvas-browser, 8 November): WebKit's own WebPageNamespace —
     /// `runtime.sendMessage` and `runtime.connect`, for pages to reach an extension — which WebKit
     /// puts in the main world of every frame of a web view whose configuration has an extension
     /// controller, with no extension loaded. Measured: the object, its runtime, the property and
@@ -358,15 +358,12 @@ final class BrowserSession {
         // page sees as document.fullscreenEnabled === undefined).
         webConfiguration.preferences.isElementFullscreenEnabled = true
         applyPrivacyPreferences(to: webConfiguration.preferences)
-        // Apple Pay's interfaces, as a profile in Safari's window has them from Safari's own code
-        // and an iPhone's Safari has them: WebKit's `ApplePayEnabled`, off for an app that is not
+        // Apple Pay's interfaces, as a profile in Safari's window has them from Safari's own code:
+        // WebKit's `ApplePayEnabled`, off for an app that is not
         // Safari. Their calls then answer as Safari's do on the same Mac — no card: false, a session
         // without a gesture refused (payments check, full run 17: "on-page", all six Apple Pay and
         // Payment Request calls as Safari's). Push stays off here: two of its calls answer otherwise.
         WebKitPreferences.setBool(webConfiguration.preferences, "_setApplePayEnabled:", true)
-        // An iPhone view: what WebKit itself answers as an iPhone (the platform, no Notification);
-        // the pixel density per web view (`BrowserTab`).
-        PhoneEngine.apply(to: webConfiguration, for: configuration)
         return webConfiguration
     }
 

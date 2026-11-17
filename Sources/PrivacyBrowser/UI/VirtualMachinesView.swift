@@ -43,6 +43,7 @@ private struct VirtualMachinesScreen: View {
         switch VMCenter.availability {
         case .notAppleSilicon: return .unavailable(L("vm.unavailable.intel"))
         case .sandboxed, .notInThisBuild: return .unavailable(L("vm.unavailable.build"))
+        case .insideVirtualMachine: return .unavailable(L("vm.unavailable.insideVM"))
         case .available: break
         }
         if license.isConfigured, !license.record.isSignedIn { return .signedOut }
@@ -239,6 +240,11 @@ private struct VirtualMachinesScreen: View {
             if center.runningCount >= VMRequirements.runningLimit {
                 VMNote(String(format: L("vm.limit.reached"), VMRequirements.runningLimit), tone: .plain, symbol: "info.circle")
             }
+            if let taken = center.memoryTakenIfTight {
+                // Each machine fits on its own; two at once on a Mac with 8 GB take all of it.
+                VMNote(String(format: L("vm.memory.tight"), VMText.memory(Int64(clamping: ProcessInfo.processInfo.physicalMemory)),
+                              VMText.memory(taken)), tone: .warning, symbol: "memorychip")
+            }
             if center.profiles.isEmpty {
                 VStack(spacing: 14) {
                     LumenEmptyHint(symbol: "macwindow.on.rectangle", text: L("vm.empty"))
@@ -363,6 +369,11 @@ enum VMText {
 
     static func bytes(_ value: UInt64) -> String {
         bytes(Int64(clamping: value))
+    }
+
+    /// Memory as macOS says it: in binary units, so that a Mac with 8 GB reads "8 GB", not "8.59 GB".
+    static func memory(_ value: Int64) -> String {
+        value.formatted(.byteCount(style: .memory).locale(Localization.locale))
     }
 
     /// "about 12 min left", from what is still to fetch and how fast it comes.
@@ -545,6 +556,13 @@ private struct VMRow: View {
                         .foregroundStyle(Theme.textTertiary)
                         .lineLimit(1)
                 }
+                if let udp = udpNote {
+                    // Whether HTTP/3 and WebRTC (UDP) leave the machine in this run, and why not.
+                    Label(udp.text, systemImage: udp.carried ? "checkmark.circle" : "nosign")
+                        .font(.lumenSecondary)
+                        .foregroundStyle(udp.carried ? Theme.textTertiary : Theme.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Spacer(minLength: 10)
             if let state, state.phase == .running {
@@ -562,6 +580,17 @@ private struct VMRow: View {
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
         .card(padding: 0)
+    }
+
+    /// What the row says of the machine's UDP while it runs: with a proxy, whether the proxy carries
+    /// it (the check before this start); without one, only that it is off while this Mac's own
+    /// settings name a proxy — otherwise it goes as the machine's TCP does, which needs no word.
+    private var udpNote: (text: String, carried: Bool)? {
+        guard let state, state.phase == .running, let udp = state.udp else { return nil }
+        if udp == .direct {
+            return state.viaSystemProxy ? (L("vm.row.udp.directViaSystemProxy"), false) : nil
+        }
+        return (L("vm.row.udp.\(udp.rawValue)"), udp.carriesUDP)
     }
 
     /// The keyboard's layouts, or browser mode's menu bar, were written in the machine's macOS at
@@ -777,6 +806,7 @@ struct VMEditorView: View {
     /// 0: as a Mac has them.
     @State private var cores: Int
     @State private var soundEnabled: Bool
+    @State private var sleepsScreenWhenHidden: Bool
     /// "": as the base system has it.
     @State private var appearance: String
     @State private var accent: String
@@ -828,6 +858,7 @@ struct VMEditorView: View {
         _memoryGB = State(initialValue: profile.memoryGB)
         _cores = State(initialValue: profile.cores ?? 0)
         _soundEnabled = State(initialValue: profile.soundEnabled)
+        _sleepsScreenWhenHidden = State(initialValue: profile.sleepsScreenWhenHidden)
         _appearance = State(initialValue: profile.appearance ?? "")
         _accent = State(initialValue: profile.accent ?? "")
         _computerName = State(initialValue: profile.computerName ?? "")
@@ -1009,10 +1040,27 @@ struct VMEditorView: View {
             .labelsHidden()
             .fixedSize()
             note(proxyChoice.isEmpty ? L("vm.editor.proxy.direct.note") : L("vm.editor.proxy.note"), warns: proxyChoice.isEmpty)
+            note(udpNote)
             if proxies.isEmpty {
                 note(L("vm.editor.proxy.empty"))
             }
         }
+    }
+
+    /// What the machine's UDP (HTTP/3, WebRTC) does with the proxy chosen, as far as its last check
+    /// said; it is checked again at every start.
+    private var udpNote: String {
+        let route: VMUDPRoute
+        switch proxyChoice {
+        case "":
+            route = .direct
+        case "current":
+            route = VMUDPRoute.expected(for: draft.profile.proxy, check: center.exits[draft.profile.id])
+        default:
+            guard let entry = chosenEntry else { return L("vm.editor.udp.unknown") }
+            route = VMUDPRoute.forProxy(entry.proxy, check: entry.lastCheck)
+        }
+        return L("vm.editor.udp.\(route.rawValue)")
     }
 
     // MARK: Where it says it is
@@ -1127,6 +1175,11 @@ struct VMEditorView: View {
         EditorToggle(L("vm.editor.sound"), detail: L(instantWake ? "vm.editor.sound.asleep" : "vm.editor.sound.detail"),
                      isOn: Binding(get: { soundEnabled && !instantWake }, set: { soundEnabled = $0 }))
             .disabled(instantWake)
+        EditorToggle(L("vm.editor.screenSleep"), detail: L("vm.editor.screenSleep.detail"), isOn: $sleepsScreenWhenHidden)
+        if sleepsScreenWhenHidden, center.guests[draft.profile.id]?.screenSleepWouldLock == true {
+            // The machine said so when it was last asked: its display was left on.
+            note(L("vm.editor.screenSleep.locks"), warns: true)
+        }
     }
 
     // MARK: How its system looks
@@ -1256,6 +1309,7 @@ struct VMEditorView: View {
         profile.memoryGB = memoryGB
         profile.cores = cores == 0 ? nil : cores
         profile.soundEnabled = soundEnabled
+        profile.sleepsScreenWhenHidden = sleepsScreenWhenHidden
         profile.appearance = appearance.isEmpty ? nil : appearance
         profile.accent = accent.isEmpty ? nil : accent
         profile.opensSafari = opensSafari || browserMode

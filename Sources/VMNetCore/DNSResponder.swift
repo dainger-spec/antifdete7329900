@@ -162,8 +162,11 @@ struct FakeAddressPool {
 
 /// The guest's DNS server. It answers every query itself and asks nobody: an address query gets
 /// a fake address (`FakeAddressPool`), a blocked name does not exist, and every other kind of
-/// record is "no such record" — so the guest never learns an IPv6 address or that a site speaks
-/// HTTP/3, and stays on TCP over IPv4, which is what the proxy carries.
+/// record is "no such record" — so the guest never learns an IPv6 address. HTTPS and SVCB records
+/// too: their real content cannot be known without the query leaving, and a made-up one would
+/// claim HTTP/3 for every name; a browser learns HTTP/3 from the site's Alt-Svc header over TCP,
+/// and its QUIC then goes to the same fake address, through the proxy's relay where the run
+/// carries UDP (docs/VM_NETWORK.md).
 struct DNSResponder {
     enum Outcome: Equatable {
         /// A well-formed query, answered.

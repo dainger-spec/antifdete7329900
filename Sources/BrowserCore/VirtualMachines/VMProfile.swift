@@ -106,6 +106,12 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
     /// The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock
     /// out of sight (docs/VM.md, "Browser mode").
     public var browserMode: Bool
+    /// The machine's display goes to sleep while its window has been out of sight for a while, and
+    /// wakes when the window is seen again (`VMScreenSleep`, guest tools 14): it spares this Mac's
+    /// processor and graphics, and a site in the machine sees its page hidden meanwhile — as on a
+    /// Mac whose display slept. The person's choice, off unless made (docs/VM.md, "How smooth a
+    /// machine is").
+    public var sleepsScreenWhenHidden: Bool
 
     public init(id: UUID = UUID(), name: String, createdAt: Date = Date(), lastLaunchedAt: Date? = nil,
                 proxy: ProxySettings? = nil, timeZoneIdentifier: String? = nil, language: String? = nil,
@@ -117,7 +123,8 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
                 regionCode: String? = nil, hourCycle: String? = nil, firstWeekday: Int? = nil, dockPosition: String? = nil,
                 dockAutohide: Bool? = nil, dockSize: String? = nil, scrollBars: String? = nil, moreStartURLs: [String] = [],
                 blockedHosts: [String] = [], startsFullScreen: Bool = false, localeFollowsConnection: Bool = false,
-                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false) {
+                keyboard: String? = nil, instantWake: Bool = false, browserMode: Bool = false,
+                sleepsScreenWhenHidden: Bool = false) {
         self.id = id
         self.name = name
         self.createdAt = createdAt
@@ -154,6 +161,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         self.keyboard = keyboard
         self.instantWake = instantWake
         self.browserMode = browserMode
+        self.sleepsScreenWhenHidden = sleepsScreenWhenHidden
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -161,7 +169,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
              displayID, memoryGB, macAddress, startURL, notes, cores, soundEnabled, appearance, accent, computerName,
              opensSafari, colorIndex, lumenWallpaper, regionCode, hourCycle, firstWeekday, dockPosition, dockAutohide, dockSize,
              scrollBars, moreStartURLs, blockedHosts, startsFullScreen, localeFollowsConnection, keyboard,
-             instantWake, browserMode
+             instantWake, browserMode, sleepsScreenWhenHidden
     }
 
     /// Tolerant of what a later version adds or an earlier one lacked: defaults for what is absent.
@@ -204,6 +212,7 @@ public struct VMProfile: Codable, Equatable, Identifiable, Sendable {
         keyboard = try c.decodeIfPresent(String.self, forKey: .keyboard)
         instantWake = try c.decodeIfPresent(Bool.self, forKey: .instantWake) ?? false
         browserMode = try c.decodeIfPresent(Bool.self, forKey: .browserMode) ?? false
+        sleepsScreenWhenHidden = try c.decodeIfPresent(Bool.self, forKey: .sleepsScreenWhenHidden) ?? false
     }
 
     /// How many pages Safari may be told to open at start beside the first.
@@ -602,6 +611,26 @@ public struct VMProfiles: Codable, Equatable, Sendable {
     public mutating func remove(_ id: UUID) -> VMProfile? {
         guard let index = profiles.firstIndex(where: { $0.id == id }) else { return nil }
         return profiles.remove(at: index)
+    }
+
+    /// The machines whose proxy is `previous` — the same connection (`ProxyList.sameConnection`) —
+    /// given `proxy` instead: an entry of the Proxies section edited there (a password the
+    /// provider changed, a new port) reaches the machines that use it, as it reaches the Safari
+    /// profiles (`ProxyAssignment.follow`). A machine keeps a copy of its proxy, and the copy used
+    /// to stay as it was: its start then failed on the old password however often the person
+    /// corrected it in the Proxies section. A proxy a machine cannot use (TLS to the proxy) is not
+    /// given; the machine keeps its own. Returns the ids of the machines changed.
+    public mutating func follow(_ proxy: ProxySettings, previous: ProxySettings) -> [UUID] {
+        var changed: [UUID] = []
+        for index in profiles.indices {
+            guard let current = profiles[index].proxy, ProxyList.sameConnection(current, previous) else { continue }
+            var followed = profiles[index]
+            followed.proxy = current.withConnection(of: proxy)
+            guard followed != profiles[index], (try? followed.validate()) != nil else { continue }
+            profiles[index] = followed
+            changed.append(followed.id)
+        }
+        return changed
     }
 
     public mutating func markLaunched(_ id: UUID, at date: Date = Date()) {

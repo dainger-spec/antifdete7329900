@@ -96,19 +96,25 @@ captions), `lumenMono` (addresses, IPs, User-Agents).
   sheets that open them from the Profiles window show the same rows (`embedded`).
 - Launch screen (`WelcomeSplash.swift`, `WelcomeGlass.swift`; when: `App/WelcomeLaunch.swift`,
   BrowserCore's `WelcomeSplashPolicy`): before the first screen or the lock screen, in the same
-  window, at the first launch and at each start after a full quit — never for a profile's process,
-  the self-test, the snapshots, CI's runs or the app's own restarts (Settings › Language, an
-  update's installer), nor for a window opened again; off with Settings → Appearance → Greeting at
-  launch. The greeting is Pacifico's own outline (`design/fonts/Pacifico`, SIL OFL 1.1; the licence
+  window, once: at the first start a person makes of the app (it remembers it was shown, so a
+  person who quits before making a vault goes straight to the setup next time) — and at every start
+  with Settings → Appearance → "Greet with the welcome window at every start" on (off by default;
+  the owner, 16 November: "only at the first start after all, and a setting for whoever wants it").
+  Never for a profile's process, the self-test, the snapshots, CI's runs or the app's own restarts
+  (Settings › Language, an update's installer), nor for a window opened again. The greeting is Pacifico's own outline (`design/fonts/Pacifico`, SIL OFL 1.1; the licence
   ships in `Resources/ThirdPartyNotices.txt`), revealed by a pen moving along its letters in
   1.8–2.4 s, in clear glass lit by the eclipse's horizon (`LumenHorizon`, the virtual machines'
   desktop's): a Metal shader compiled from source as the app starts, Core Graphics masks blurred by
   Metal Performance Shaders, four samples a pixel; where Metal is missing, the outline drawn in
   SwiftUI. Then one light along the greeting, "LUMEN"; the first launch's "Get started", or a
   0.9 s hold; then the opening (0.6 s: the screen eases up 30 pt and fades, the window's content
-  scales in from 98 % over it). Any click or key goes on at once. It is shown at every start a
-  person makes of the app, after a full quit too, and always writes the English "welcome" (the
-  owner, 16 November); the other languages' outlines stay in the file and are not shown.
+  scales in from 98 % over it). Any click or key goes on at once. On a start with a vault the lock
+  screen is under it from the start, its password's field holding the keyboard: the launch screen
+  takes no focus, fades off the lock screen (its backdrop too) as that scales in, and a key opens
+  it and goes on to the field — a password typed at once is typed whole (the launch screen had
+  swallowed its first key); Touch ID is asked once the launch screen has gone. It always writes the English
+  "welcome" (the owner, 16 November); the other languages' outlines stay in the file and are not
+  shown.
   `design/tools/welcome_lettering.py` makes the outlines, the pen's way (from the outline's skeleton)
   and its pace for the app (`WelcomeLettering.swift`) and the prototype the owner approved
   (`design/prototypes/welcome.html`, the same shader in WebGL; `design/tools/record_welcome.mjs`
@@ -160,7 +166,7 @@ Each of these stays, in the design's own style (the owner, 1 November):
 - Deleted profiles whose folders are kept (R3): a banner above the list with Bring back, Remove for
   good, Remove the old folder, Show in Finder.
 - "Simplified mode" in a profile's own window when it is not Safari's: the chip in its toolbar, and
-  why on a click. Not in an iPhone or iPad view's window, ours by design (the owner, 9 November).
+  why on a click.
 - Files set aside as unreadable (`*.unreadable`): named in every confirmation of a deletion.
 
 ## Checked by

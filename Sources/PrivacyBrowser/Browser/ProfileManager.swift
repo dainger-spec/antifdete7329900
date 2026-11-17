@@ -126,6 +126,9 @@ final class ProfileManager: ObservableObject {
     /// Why a running profile that wants WebRTC runs without it (`WebRTCGate`), for its row and
     /// inspector; said once when it is decided. Gone when the profile stops.
     @Published private(set) var webRTCRefusals: [UUID: WebRTCRefusal] = [:]
+    /// The running profiles whose WebRTC must not connect and stays in their pages, connecting
+    /// nowhere, the network guard holding their process (`decideWebRTC`; the self-test reads it).
+    private(set) var webRTCSilenced: Set<UUID> = []
     private var sessions: [UUID: BrowserSession] = [:]
     /// Profiles running in their own process (`ProfileProcess`, off unless asked for). A profile is
     /// in this or in `sessions`, never both.
@@ -450,7 +453,9 @@ final class ProfileManager: ObservableObject {
         }
         if let lookup { proxyLookupFinished(lookup, for: id, name: summary.name, stored: stored) }
         var configuration = stored.applying(location)
-        configuration.webRTCRelay = await webRTCRelay(for: id, configuration)
+        let webRTC = await webRTCLaunch(for: id, configuration)
+        configuration.webRTCRelay = webRTC.relay
+        configuration.webRTCSilent = webRTC.silent
         // Lock or Quit began while the manager's word on WebRTC was awaited (`shutDown` ends that
         // wait): as above, nothing is opened, and what was decrypted is sealed again.
         if isShuttingDown {
@@ -618,7 +623,6 @@ final class ProfileManager: ObservableObject {
             proxyLocationFound: proxyLocationFound,
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
-            processorCores: stored.deviceGeneration.processorCores,
             cameraAllowed: cameraAllowed(),
             systemCameraActive: systemCameraActive)
         // The process object is held by `children` and, until its exit has been handled, by its own
@@ -745,11 +749,11 @@ final class ProfileManager: ObservableObject {
         try? repository.markLaunched(id)
         // The app's settings for browsing, before anything else is asked of it.
         child.send(.preferences(BrowsingPreferences.current.forProfileProcess))
-        // A profile with a SOCKS5 proxy that wants WebRTC waits for this before it builds anything.
-        if let proxy = stored.proxy, WebRTCGate.wantsRelay(policy: stored.webRTCPolicy, proxy: proxy) {
+        // A profile with a proxy waits for this before it builds anything (`WebRTCGate.managerDecides`).
+        if let proxy = stored.proxy, WebRTCGate.managerDecides(proxy: proxy) {
             let userAgent = stored.userAgent(hostSafariVersion: HostSafari.version)
-            Task { await self.decideWebRTC(for: id, name: summary.name, child: child, proxy: proxy, policy: stored.webRTCPolicy,
-                                           userAgent: userAgent) }
+            Task { await self.decideWebRTC(for: id, name: summary.name, child: child, proxy: proxy, policy: stored.webRTCLaunchPolicy,
+                                           automatic: stored.webRTCAutomatic, userAgent: userAgent) }
         }
     }
 
@@ -757,16 +761,20 @@ final class ProfileManager: ObservableObject {
 
     /// Decides a launch's WebRTC for a profile in its own process (`WebRTCGate`), and says the
     /// decision to the process. The relay only when the network guard holds that process to its
-    /// proxy and the proxy relays UDP from the address its TCP leaves from; anything else is WebRTC
-    /// off in the engine, said once.
+    /// proxy and the proxy relays UDP from the address its TCP leaves from. Anything else is WebRTC
+    /// that must not connect: kept in the pages, connecting nowhere, once the guard holds the process
+    /// to its proxy (`WebRTCGate.silence`), and otherwise off in the engine — said once, where there
+    /// is something to say (`WebRTCGate.tells`).
     private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy,
-                              userAgent: String) async {
+                              automatic: Bool = false, userAgent: String) async {
         // Once asking macOS is over (the app just started, the guard was just installed).
         let guardState = await NetworkGuard.shared.settledState()
         // The proxy is asked about UDP only when nothing else rules the relay out.
         var udp = ProxyUDPSupport.unknown
         var exit: IPAddr?
-        if guardState == .ready { (udp, exit) = await Self.proxyUDP(proxy, userAgent: userAgent) }
+        if guardState == .ready, WebRTCGate.wantsRelay(policy: policy, proxy: proxy) {
+            (udp, exit) = await Self.proxyUDP(proxy, userAgent: userAgent)
+        }
         var decision = WebRTCGate.decide(policy: policy, proxy: proxy, ownProcess: true, guardState: guardState, udp: udp)
         var relay: WebRTCRelay?
         if decision == .relay {
@@ -789,11 +797,23 @@ final class ProfileManager: ObservableObject {
                 decision = .off(.notRegistered)
             }
         }
+        // WebRTC that must not connect stays in the pages, connecting nowhere, only while the guard
+        // holds the process to its proxy: a page that got past the script could then reach nothing
+        // but the proxy. The hold is taken first, and a hold refused leaves WebRTC off in the engine.
+        var silent = false
+        if case .off = decision, children[id] === child,
+           WebRTCGate.silence(proxy: proxy, ownProcess: true, guardState: NetworkGuard.shared.state) == .afterHold {
+            // Its TCP port only: a process whose WebRTC connects nowhere needs nothing else of the proxy.
+            silent = await NetworkGuard.shared.hold(pid: child.processIdentifier, proxy: proxy, relaysUDP: false)
+            if !silent { log.notice("WebRTC of \(id.uuidString, privacy: .public) is off: the guard did not take its process") }
+        }
         // Stopped meanwhile: nothing to say, and nothing this decision made is kept (a relaunch's
         // own relay, made since, is not this one's to stop).
         guard children[id] === child else {
             if let relay {
                 WebRTCRelays.shared.stop(profile: id, onlyIf: relay)
+                NetworkGuard.shared.release(pid: child.processIdentifier)
+            } else if silent {
                 NetworkGuard.shared.release(pid: child.processIdentifier)
             }
             return
@@ -808,10 +828,15 @@ final class ProfileManager: ObservableObject {
         case .off(let reason):
             if let reason {
                 webRTCRefusals[id] = reason
-                log.notice("WebRTC of \(id.uuidString, privacy: .public) is off: \(reason.rawValue, privacy: .public)")
-                noteWebRTCOff(id, name: name, reason: reason)
+                if silent {
+                    log.notice("WebRTC of \(id.uuidString, privacy: .public) cannot connect, present and connecting nowhere: \(reason.rawValue, privacy: .public)")
+                } else {
+                    log.notice("WebRTC of \(id.uuidString, privacy: .public) is off: \(reason.rawValue, privacy: .public)")
+                }
+                if WebRTCGate.tells(reason, automatic: automatic) { noteWebRTCOff(id, name: name, reason: reason) }
             }
-            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: reason)))
+            if silent { webRTCSilenced.insert(id) } else { webRTCSilenced.remove(id) }
+            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: reason, silent: silent)))
         case .native:
             // Not for a proxied profile; said as off, so that the process does not wait.
             child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: nil)))
@@ -845,6 +870,7 @@ final class ProfileManager: ObservableObject {
         WebRTCRelays.shared.stop(profile: id)
         NetworkGuard.shared.release(pid: pid)
         webRTCRefusals[id] = nil
+        webRTCSilenced.remove(id)
     }
 
     /// Why WebRTC is off for this run, said once per run of the profile.
@@ -1200,7 +1226,7 @@ final class ProfileManager: ObservableObject {
     private func webDriverExecutor(for id: UUID, _ session: BrowserSession) async throws -> WebDriverExecutor {
         if let executor = webDriverExecutors[id], executor.driver.webView.window != nil { return executor }
         webDriverExecutors.removeValue(forKey: id)?.close()
-        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration),
+        if SafariChromeHost.isHosting,
            let page = await SafariChromeHost.openScenarioPage(session: session, forWebDriver: true) {
             let window = page.webView.window
             let executor = WebDriverExecutor(driver: PageDriver(webView: page.webView, navigate: page.navigate), windowKind: "Safari's") {
@@ -1338,31 +1364,37 @@ final class ProfileManager: ObservableObject {
         sessions[id]?.showLibrary(section)
     }
 
-    /// The relay a launch's pages are given for WebRTC through the profile's proxy, or nil: the
-    /// profile then runs with WebRTC off. In a profile's own process the manager decided it
-    /// (`decideWebRTC`) and holds the relay; this process waits for its word, and without one runs
-    /// with WebRTC off. A profile launched here, in the manager, never gets one: the network guard
-    /// tells profiles apart by their processes (`WebRTCRefusal.notOwnProcess`).
-    private func webRTCRelay(for id: UUID, _ configuration: ProfileConfiguration) async -> WebRTCRelay? {
-        guard let proxy = configuration.proxy, configuration.webRTCPolicy != .disabled else { return nil }
-        guard WebRTCGate.wantsRelay(policy: configuration.webRTCPolicy, proxy: proxy) else {
-            noteWebRTCOff(id, name: "", reason: .httpProxy)
-            return nil
-        }
-        if runsInProfileProcess {
+    /// The relay a launch's pages are given for WebRTC through the profile's proxy, and whether WebRTC
+    /// that must not connect stays in its pages, connecting nowhere (`WebRTCGate.silence`). Without a
+    /// proxy there is no relay, and a WebRTC that is off stays in the pages: it would go out as this
+    /// Mac, as the pages do. In a profile's own process the manager decided (`decideWebRTC`) and holds
+    /// the relay or the guard's hold; this process waits for its word, and without one runs with
+    /// WebRTC off in the engine. A proxied profile launched here, in the manager, never gets either:
+    /// the network guard tells profiles apart by their processes (`WebRTCRefusal.notOwnProcess`).
+    private func webRTCLaunch(for id: UUID, _ configuration: ProfileConfiguration) async -> (relay: WebRTCRelay?, silent: Bool) {
+        let policy = configuration.webRTCLaunchPolicy
+        // Without a proxy a WebRTC that is off is present, connecting nowhere, by itself (`webRTCRouting`).
+        guard let proxy = configuration.proxy else { return (nil, false) }
+        if runsInProfileProcess, WebRTCGate.managerDecides(proxy: proxy) {
             // The manager answers within the time its proxy check takes (`ProxyUDPCheck`).
             guard let message = await Self.webRTCDecision(within: 40) else {
                 if !isShuttingDown { log.error("No word from the manager on this launch's WebRTC: it stays off") }
-                return nil
+                return (nil, false)
             }
-            return message.relay.map { WebRTCRelay(urls: $0.urls, username: $0.username, credential: $0.credential) }
+            let relay = message.relay.map { WebRTCRelay(urls: $0.urls, username: $0.username, credential: $0.credential) }
+            return (relay, relay == nil && message.silent == true)
         }
-        if case let .off(reason?) = WebRTCGate.decide(policy: configuration.webRTCPolicy, proxy: proxy, ownProcess: false,
+        guard policy != .disabled else { return (nil, false) }
+        guard WebRTCGate.wantsRelay(policy: policy, proxy: proxy) else {
+            if WebRTCGate.tells(.httpProxy, automatic: configuration.webRTCAutomatic) { noteWebRTCOff(id, name: "", reason: .httpProxy) }
+            return (nil, false)
+        }
+        if case let .off(reason?) = WebRTCGate.decide(policy: policy, proxy: proxy, ownProcess: false,
                                                       guardState: NetworkGuard.shared.state, udp: .unknown) {
             webRTCRefusals[id] = reason
             noteWebRTCOff(id, name: "", reason: reason)
         }
-        return nil
+        return (nil, false)
     }
 
     /// Profiles already told, once per run, that their WebRTC is off.
@@ -1430,7 +1462,7 @@ final class ProfileManager: ObservableObject {
         }
         session.shutDown()
         rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
-                         emptyForgets: SafariChromeHost.isHosting && SafariChromeHost.canHost(session.configuration))
+                         emptyForgets: SafariChromeHost.isHosting)
         // `session` is now the last reference; it is released when this scope ends, but its
         // data store reference was already dropped in shutDown().
         if !ephemeral, let key {
@@ -1641,9 +1673,9 @@ final class ProfileManager: ObservableObject {
         guard let session = sessions[id] else { return false }
         // Where the run acts. In a profile's own process that hosts Safari's chrome: a window of
         // Safari's, opened for the run — the profile's real window, as a person has it (the owner,
-        // 10 November: a run in a window of ours is not Safari). Everywhere else — an iPhone or
-        // iPad view, the sandboxed build, a macOS where the chrome is not hosted — a window of ours.
-        if SafariChromeHost.isHosting, SafariChromeHost.canHost(session.configuration) {
+        // 10 November: a run in a window of ours is not Safari). Everywhere else — the sandboxed
+        // build, a macOS where the chrome is not hosted — a window of ours.
+        if SafariChromeHost.isHosting {
             scenarioRuns[id] = ScenarioRunState(runID: runID, name: name, startedAt: Date(), lines: [], outcome: nil)
             objectWillChange.send()
             Task { @MainActor [weak self] in

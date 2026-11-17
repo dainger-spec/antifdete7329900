@@ -17,11 +17,10 @@ those run:
 - **a window of Safari's** — the released macOS case. A profile's process hosts Safari's chrome
   (`SafariChromeHost`); `ProfileNetworkGuard` injects the profile's scripts into every web view
   Safari builds (`BrowserSession.applyContent` / `restoreContent`). The camera shim rides that exact
-  path — the same one the time-zone, geolocation, WebRTC and iPhone shims ride — so it needs no
+  path — the same one the time-zone, geolocation and WebRTC shims ride — so it needs no
   window code of its own. There is nothing in `BrowserTab` or `BrowserWindowController` for it;
   those are the app's own fallback window only (`SafariChromeHost.reasonForOwnWindow`).
-- **the app's own window** — the fallback (an iPhone/iPad view, the sandboxed build, a chrome that
-  would not come up). The same injected scripts, so the same behaviour.
+- **the app's own window** — the fallback (the sandboxed build, a chrome that would not come up). The same injected scripts, so the same behaviour.
 
 Only in a **secure context**. `navigator.mediaDevices` does not exist over plain http on a public
 origin — in any browser — so there is nothing to substitute there. https and loopback origins have

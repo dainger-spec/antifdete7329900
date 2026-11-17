@@ -254,6 +254,28 @@ public enum UpdateSigner {
         return item
     }
 
+    /// Why a release of `version` with `build` cannot join the releases `published` (the appcast
+    /// published now's), or nil when it can: its build is greater than
+    /// every build listed (docs/UPDATES.md §6). The appcast lists a build once, so a build listed
+    /// already would put the new release in that one's place; and the app is offered the highest
+    /// build, so a lower one is never offered to a Mac on the newer build, while a Mac with it is
+    /// offered the older release — a downgrade (R3).
+    public static func refusalToAdd(version: String, build: String, to published: [AppcastItem]) -> String? {
+        guard let new = BuildVersion(build) else { return "\(build) is not a build number" }
+        if let same = published.first(where: { BuildVersion($0.build) == new }) {
+            return "build \(build) is published already, as version \(same.version): "
+                + (same.version == version ? "a published release is never replaced" : "version \(version) needs a build of its own, greater than every published one")
+        }
+        let builds: [(item: AppcastItem, build: BuildVersion)] = published.compactMap { item in
+            BuildVersion(item.build).map { (item: item, build: $0) }
+        }
+        if let newest = builds.max(by: { $0.build < $1.build }), new < newest.build {
+            return "build \(build) is lower than \(newest.item.build), version \(newest.item.version)'s, the newest published: "
+                + "a Mac on \(newest.item.version) would never be offered \(version), and one with \(version) would be offered \(newest.item.version)"
+        }
+        return nil
+    }
+
     /// The signed envelope of `appcast`, as the file to publish.
     public static func envelope(of appcast: Appcast, privateKey: Data) throws -> Data {
         let key = try Curve25519.Signing.PrivateKey(rawRepresentation: privateKey)

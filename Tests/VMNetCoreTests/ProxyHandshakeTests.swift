@@ -189,6 +189,27 @@ final class ProxyHandshakeTests: XCTestCase {
         XCTAssertTrue(ProxyFailure.refused(407).reason.contains("407"))
     }
 
+    /// Which refusals are the proxy's own trouble (a machine's row then says its proxy is down or
+    /// refuses its sign-in) and which only the site's.
+    func testWhatAProxysRefusalSaysOfTheProxyItself() {
+        XCTAssertEqual(ProxyFailure.authenticationRejected.proxyTrouble, .login)
+        XCTAssertEqual(ProxyFailure.noAcceptableMethod.proxyTrouble, .login)
+        XCTAssertEqual(ProxyFailure.credentialsTooLong.proxyTrouble, .login)
+        XCTAssertEqual(ProxyFailure.refused(407).proxyTrouble, .login)
+        XCTAssertEqual(ProxyFailure.malformedReply.proxyTrouble, .notUnderstood)
+        // A site the proxy cannot reach, by SOCKS5's codes and HTTP's statuses: not the proxy's.
+        for code in [1, 2, 3, 4, 5, 6, 7, 8, 403, 502, 503, 504] {
+            XCTAssertNil(ProxyFailure.refused(code).proxyTrouble, "\(code)")
+        }
+        XCTAssertNil(ProxyFailure.nameTooLong.proxyTrouble)
+    }
+
+    /// The words the helper hands the app for these (`VMNetworkTrouble.ofMachineProxy`, BrowserCore,
+    /// which reads them by these very strings).
+    func testTheProxysTroubleIsNamedAsTheAppReadsIt() {
+        XCTAssertEqual(VMNetProxyTrouble.allCases.map(\.rawValue), ["unreachable", "login", "notUnderstood"])
+    }
+
     func testUpstreamChoosesItsHandshake() {
         let socks = VMNetUpstream.socks5(host: "proxy.example", port: 1080, username: "u", password: "p")
         XCTAssertTrue(socks.handshake(for: host) is SOCKS5Handshake)

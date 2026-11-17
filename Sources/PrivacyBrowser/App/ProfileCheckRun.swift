@@ -84,8 +84,7 @@ final class ProfileCheckRun: ObservableObject {
             return
         }
         var facts = ProfileCheck.Facts(configuration: configuration, hostSafariVersion: HostSafari.version,
-                                       webRTC: Self.webRTC(configuration, guardReady: NetworkGuard.shared.state == .ready))
-        facts.isMobileView = configuration.deviceGeneration.platform != .macOS
+                                       webRTC: Self.webRTC(configuration, guardState: NetworkGuard.shared.state))
         facts.page = ProfileCheck.Page(snapshot: values)
 
         step = .exit
@@ -145,11 +144,16 @@ final class ProfileCheckRun: ObservableObject {
         await run()
     }
 
-    /// How a launch of `configuration` does WebRTC, as the inspector says it: off; through the
-    /// proxy (SOCKS5, the network guard holding the profile's process); or, with no proxy, direct.
-    static func webRTC(_ configuration: ProfileConfiguration, guardReady: Bool) -> ProfileCheck.WebRTC {
-        guard configuration.webRTCPolicy != .disabled else { return .off }
-        guard let proxy = configuration.proxy else { return .direct }
-        return proxy.kind == .socks5 && guardReady ? .throughProxy : .off
+    /// How a launch of `configuration` does WebRTC, as the editor and the inspector say it
+    /// (`WebRTCGate.outlook`): through the proxy (SOCKS5, the network guard holding the profile's
+    /// process); present and connecting nowhere; removed; or, with no proxy, direct.
+    static func webRTC(_ configuration: ProfileConfiguration, guardState: NetworkGuardState) -> ProfileCheck.WebRTC {
+        switch WebRTCGate.outlook(mode: configuration.webRTCMode, proxy: configuration.proxy,
+                                  ownProcess: ProfileProcess.isEnabled, guardState: guardState) {
+        case .native: return .direct
+        case .throughProxy: return .throughProxy
+        case .silentByChoice, .silentHTTPProxy: return .silent
+        case .removed, .removedBypass: return .off
+        }
     }
 }

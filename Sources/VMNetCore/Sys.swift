@@ -136,6 +136,31 @@ enum Sys {
         return descriptor
     }
 
+    /// A datagram socket of `family` that never waits, for a proxy's UDP relay; its receive
+    /// buffer made room for a burst (a QUIC download comes in bursts of datagrams).
+    static func datagramSocket(family: Int32) -> Int32 {
+        let descriptor = socket(family, datagramType, 0)
+        guard descriptor >= 0 else { return -1 }
+        setNonBlocking(descriptor)
+        setNoSigPipe(descriptor)
+        raiseBuffer(descriptor, receiveBufferOption, to: 1 << 20)
+        raiseBuffer(descriptor, sendBufferOption, to: 256 << 10)
+        return descriptor
+    }
+
+    /// The address a connected socket reached; nil when the system does not say.
+    static func peer(of descriptor: Int32) -> SocketEndpoint? {
+        var storage = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let status = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { getpeername(descriptor, $0, &length) }
+        }
+        guard status == 0 else { return nil }
+        let family = Int32(storage.ss_family)
+        guard family == AF_INET || family == AF_INET6 else { return nil }
+        return SocketEndpoint(storage: storage, length: length, family: family)
+    }
+
     /// Starts a connection. 0: connected already; EINPROGRESS: on its way; anything else: failed.
     static func connect(_ descriptor: Int32, to address: SocketEndpoint) -> Int32 {
         var storage = address.storage
@@ -199,6 +224,97 @@ struct SocketEndpoint: Sendable {
     var storage: sockaddr_storage
     var length: socklen_t
     var family: Int32
+
+    /// An IPv4 address (host byte order) and port.
+    static func ipv4(_ value: UInt32, port: UInt16) -> SocketEndpoint {
+        var address = sockaddr_in()
+        #if canImport(Darwin)
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        #endif
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = port.bigEndian
+        address.sin_addr.s_addr = value.bigEndian
+        var storage = sockaddr_storage()
+        withUnsafeMutableBytes(of: &storage) { target in
+            withUnsafeBytes(of: &address) { target.copyMemory(from: $0) }
+        }
+        return SocketEndpoint(storage: storage, length: socklen_t(MemoryLayout<sockaddr_in>.size), family: AF_INET)
+    }
+
+    /// An IPv6 address (16 bytes) and port.
+    static func ipv6(_ bytes: [UInt8], port: UInt16) -> SocketEndpoint {
+        var address = sockaddr_in6()
+        #if canImport(Darwin)
+        address.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+        #endif
+        address.sin6_family = sa_family_t(AF_INET6)
+        address.sin6_port = port.bigEndian
+        withUnsafeMutableBytes(of: &address.sin6_addr) { target in
+            for index in 0..<min(16, bytes.count, target.count) { target[index] = bytes[index] }
+        }
+        var storage = sockaddr_storage()
+        withUnsafeMutableBytes(of: &storage) { target in
+            withUnsafeBytes(of: &address) { target.copyMemory(from: $0) }
+        }
+        return SocketEndpoint(storage: storage, length: socklen_t(MemoryLayout<sockaddr_in6>.size), family: AF_INET6)
+    }
+
+    /// The address, as SOCKS5 writes one (an IPv4 address in IPv6's clothes as IPv4); nil for
+    /// another family.
+    var address: SOCKSAddress? {
+        var storage = self.storage
+        switch family {
+        case AF_INET:
+            let value = withUnsafePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt32(bigEndian: $0.pointee.sin_addr.s_addr) }
+            }
+            return .ipv4(value)
+        case AF_INET6:
+            let bytes = withUnsafePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { inner -> [UInt8] in
+                    var address = inner.pointee.sin6_addr
+                    return withUnsafeBytes(of: &address) { Array($0) }
+                }
+            }
+            return SOCKSAddress(type: SOCKSAddress.typeIPv6, bytes: bytes)
+        default:
+            return nil
+        }
+    }
+
+    var port: UInt16 {
+        var storage = self.storage
+        switch family {
+        case AF_INET:
+            return withUnsafePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { UInt16(bigEndian: $0.pointee.sin_port) }
+            }
+        case AF_INET6:
+            return withUnsafePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { UInt16(bigEndian: $0.pointee.sin6_port) }
+            }
+        default:
+            return 0
+        }
+    }
+
+    /// The same address with another port.
+    func withPort(_ port: UInt16) -> SocketEndpoint {
+        var copy = self
+        switch family {
+        case AF_INET:
+            withUnsafeMutablePointer(to: &copy.storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in.self, capacity: 1) { $0.pointee.sin_port = port.bigEndian }
+            }
+        case AF_INET6:
+            withUnsafeMutablePointer(to: &copy.storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr_in6.self, capacity: 1) { $0.pointee.sin6_port = port.bigEndian }
+            }
+        default:
+            break
+        }
+        return copy
+    }
 }
 
 /// Finds the proxy's addresses without making the network loop wait: an IP address written out

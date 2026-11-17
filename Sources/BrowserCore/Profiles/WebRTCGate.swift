@@ -147,6 +147,102 @@ public enum WebRTCGate {
     public static func wantsRelay(policy: WebRTCPolicy, proxy: ProxySettings?) -> Bool {
         policy != .disabled && proxy?.kind == .socks5
     }
+
+    /// Whether WebRTC that must not connect (`decide` said `.off`) can stay in the pages, as Safari
+    /// has it, connecting nowhere (`WebRTCRouting.silent`) — rather than be removed, which no Safari
+    /// shows. The page's script gives the engine relay-only with no ICE server, so it gathers and
+    /// sends nothing; but a script is not a wall, so this is allowed only where a page that got
+    /// past it still could not show another address than the profile's pages show:
+    ///   * without a proxy: the engine's own WebRTC goes out as this Mac, as the pages do;
+    ///   * with a proxy, only once the network guard holds the profile's own process to its proxy,
+    ///     dropping every other flow — and only for a proxy that every site goes through (with sites
+    ///     that bypass it, holding the process would cut them off).
+    /// Anything else keeps WebRTC out of the pages, as before. Fail closed: `.afterHold` is a
+    /// promise only once the hold was taken; a hold refused leaves WebRTC removed.
+    public static func silence(proxy: ProxySettings?, ownProcess: Bool, guardState: NetworkGuardState) -> WebRTCSilence {
+        guard let proxy else { return .withoutHold }
+        guard proxy.excludedDomains.isEmpty, ownProcess, guardState == .ready else { return .no }
+        return .afterHold
+    }
+
+    /// Whether the manager decides a launch's WebRTC for a profile in its own process, which then
+    /// waits for its word (`WebRTCLaunchMessage`): every profile with a proxy, since with one the
+    /// manager alone can have the network guard hold the process — for the relay, or to keep a
+    /// WebRTC that must not connect in the pages (`silence`).
+    public static func managerDecides(proxy: ProxySettings?) -> Bool { proxy != nil }
+
+    /// Whether the person is told, at a launch, why WebRTC is off. Not when it was their choice
+    /// (no reason), and not for Automatic with an HTTP proxy: Automatic means "the way the
+    /// connection goes", and an HTTP proxy's way carries no UDP — nothing to do about it.
+    public static func tells(_ reason: WebRTCRefusal?, automatic: Bool) -> Bool {
+        guard let reason else { return false }
+        return !(automatic && reason == .httpProxy)
+    }
+
+    /// The reason a proxied profile's WebRTC waits for the guard in `state`; nil when it is ready.
+    public static func guardRefusal(_ state: NetworkGuardState) -> WebRTCRefusal? {
+        switch state {
+        case .notInBuild: return .guardNotInBuild
+        case .notInstalled: return .guardNotInstalled
+        case .awaitingApproval: return .guardAwaitingApproval
+        case .off: return .guardOff
+        case .notAnswering: return .guardNotAnswering
+        case .restartNeeded: return .guardRestartNeeded
+        case .unproven: return .guardUnproven
+        case .ready: return nil
+        }
+    }
+
+    /// What a profile's WebRTC comes to at its next launch, as far as can be said before it: the
+    /// editor and the inspector say it in words (`WebRTCOutlook`). A SOCKS5 proxy is taken to carry
+    /// UDP from its pages' address; the launch checks that, and keeps WebRTC present and connecting
+    /// nowhere where it does not (`.throughProxy` says so).
+    public static func outlook(mode: WebRTCMode, proxy: ProxySettings?, ownProcess: Bool,
+                               guardState: NetworkGuardState) -> WebRTCOutlook {
+        let policy = mode == .automatic ? WebRTCPolicy.unrestricted : (mode.policy ?? .disabled)
+        guard let proxy else { return policy == .disabled ? .silentByChoice : .native(policy) }
+        let decision = decide(policy: policy, proxy: proxy, ownProcess: ownProcess, guardState: guardState, udp: .supported)
+        if decision == .relay { return .throughProxy }
+        if silence(proxy: proxy, ownProcess: ownProcess, guardState: guardState) == .afterHold {
+            return policy == .disabled ? .silentByChoice : .silentHTTPProxy
+        }
+        // Why it cannot stay in the pages: the guard first, which the person can do something about.
+        if !proxy.excludedDomains.isEmpty, guardState == .ready, ownProcess { return .removedBypass }
+        if let refusal = guardRefusal(guardState) { return .removed(refusal) }
+        if !ownProcess { return .removed(.notOwnProcess) }
+        return .removed(nil)
+    }
+}
+
+/// Whether WebRTC that must not connect can stay in a profile's pages (`WebRTCGate.silence`).
+public enum WebRTCSilence: Equatable, Sendable {
+    /// Without a proxy: nothing a page could get past the script would show another address than
+    /// its pages show.
+    case withoutHold
+    /// With a proxy: once the network guard holds the profile's process to it, and only then.
+    case afterHold
+    /// Removed from the pages, as before.
+    case no
+}
+
+/// What a profile's WebRTC comes to at its next launch (`WebRTCGate.outlook`), said by the editor
+/// and the inspector under the choice.
+public enum WebRTCOutlook: Equatable, Sendable {
+    /// No proxy: the engine's own — Unrestricted as Safari's, over this Mac's connection (the address
+    /// the pages show); Relay only, through a site's own TURN server only.
+    case native(WebRTCPolicy)
+    /// Through the SOCKS5 proxy's relay, from the proxy's address, held there by the network guard;
+    /// present and connecting nowhere if the proxy's UDP does not hold at the launch.
+    case throughProxy
+    /// Disabled: present as in Safari, connecting nowhere.
+    case silentByChoice
+    /// An HTTP proxy carries no UDP: present as in Safari, connecting nowhere.
+    case silentHTTPProxy
+    /// Removed from the pages, as before: the reason (the guard not ready, profiles inside the app);
+    /// nil for none to name.
+    case removed(WebRTCRefusal?)
+    /// Removed: the proxy has sites that bypass it, so the guard cannot hold the process to it.
+    case removedBypass
 }
 
 /// What macOS's answers about the guard come to, where they need reading together.

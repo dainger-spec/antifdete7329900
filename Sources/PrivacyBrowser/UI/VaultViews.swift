@@ -692,8 +692,13 @@ struct UnlockView: View {
             guard !model.touchIDAskedAtStart else { return }
             model.touchIDAskedAtStart = true
             guard model.touchID.unlocksNow else { return }
+            // The lock screen is under the launch screen from the start (RootView): Touch ID is
+            // asked once that has gone, as the lock screen shows.
+            while model.welcome != nil, !model.welcomeFinished, !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
             try? await Task.sleep(nanoseconds: 700_000_000)
-            guard NSApp.isActive, model.phase == .locked else { return }
+            guard !Task.isCancelled, NSApp.isActive, model.phase == .locked else { return }
             await model.unlockWithTouchID()
         }
         .confirmationDialog(L("unlock.reset.title"), isPresented: $confirmingReset, titleVisibility: .visible) {

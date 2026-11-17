@@ -12,14 +12,24 @@
 # sends every host name it is asked for to a test origin on 127.0.0.1. Both are small Python
 # programs written out by this script. Nothing here reaches the internet.
 #
+# UDP (--relay-udp, VMNetConfiguration.relaysUDP): the SOCKS5 double also does UDP ASSOCIATE
+# (RFC 1928 §7) and relays every datagram to a service on 127.0.0.1 at the same port — an echo
+# (7), a STUN server (3478) and, where aioquic is installed, an HTTP/3 server (443) — answering
+# for a name from a public address, as a proxy that resolved it would. The guest sends by name
+# and by address, gets its answers from where it sent, learns the relay's own address by STUN,
+# downloads a file over QUIC, and is refused what must not leave: private addresses, DNS and the
+# time (answered by the stack), a proxy that refuses UDP, an HTTP proxy.
+#
 # One line per check, PASS or FAIL, the throughput of the large download in MB/s, and a non-zero
 # exit when anything failed. TAP is used (IFF_TAP | IFF_NO_PI): the script stops with a FAIL line
 # when /dev/net/tun cannot be opened.
 #
 # It needs: ip (iproute2), ping, dig, curl, python3, sha256sum; udhcpc if DHCP is to be checked
-# against a real client (without it the namespace is configured by hand and the check is skipped).
-# In a fresh swift:6.0-noble container:
-#     apt-get install -y python3 curl iproute2 iputils-ping dnsutils udhcpc
+# against a real client (without it the namespace is configured by hand and the check is skipped);
+# aioquic for the QUIC check (skipped without it; VMNET_INTEROP_QUIC_PYTHON names a python that
+# has it, a virtual environment of the test's own). In a fresh swift:6.0-noble container:
+#     apt-get install -y python3 python3-venv curl iproute2 iputils-ping dnsutils udhcpc
+#     python3 -m venv /opt/quic && /opt/quic/bin/pip install aioquic   # for the QUIC check
 # and the program itself: swift build -c release --product vmnet-interop (the script builds it
 # when it is not there).
 set -u
@@ -36,11 +46,15 @@ ORIGIN_PORT=18080
 HALF_PORT=18081
 SOCKS_PORT=11080
 SOCKS_AUTH_PORT=11081
+SOCKS_NOUDP_PORT=11082
 HTTP_PORT=13128
+# The python that has aioquic, for the QUIC check (skipped without it): the test's own, never the app's.
+QUIC_PY="${VMNET_INTEROP_QUIC_PYTHON:-python3}"
 G="ip netns exec $NS"
 FAILED=0
 STACK_PID=""
 DOUBLES_PID=""
+QUIC_PID=""
 
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; FAILED=$((FAILED + 1)); }
@@ -54,6 +68,7 @@ check() {
 cleanup() {
     [ -n "$STACK_PID" ] && kill "$STACK_PID" 2>/dev/null
     [ -n "$DOUBLES_PID" ] && kill "$DOUBLES_PID" 2>/dev/null
+    [ -n "$QUIC_PID" ] && kill "$QUIC_PID" 2>/dev/null
     wait 2>/dev/null
     ip netns del "$NS" 2>/dev/null
     rm -rf /etc/netns/"$NS"
@@ -79,9 +94,13 @@ unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY all_proxy ALL_PROXY no_proxy
 # The test doubles: an origin, a server for half-closed connections, two proxies.
 # ---------------------------------------------------------------------------------------------
 cat >"$WORK/doubles.py" <<'PYTHON'
-import hashlib, http.server, os, socket, socketserver, sys, threading, time, base64
+import hashlib, http.server, os, select, socket, socketserver, struct, sys, threading, time, base64
 
-work, origin_port, half_port, socks_port, socks_auth_port, http_port = sys.argv[1], *map(int, sys.argv[2:7])
+work, origin_port, half_port, socks_port, socks_auth_port, http_port, socks_noudp_port = sys.argv[1], *map(int, sys.argv[2:8])
+# What the UDP relay says a name it was asked for resolved to: a public address, as a real
+# proxy's relay answers from the address it sent to. Every UDP destination is a service on
+# 127.0.0.1 at the same port (echo 7, STUN 3478, QUIC 443).
+RESOLVED = "203.0.113.80"
 log_lock = threading.Lock()
 
 def log(name, line):
@@ -196,7 +215,49 @@ def relay(connection, port, ready):
     back.join()
     target.close()
 
-def socks(credentials, name):
+# UDP ASSOCIATE (RFC 1928 §7): a relay socket for the client, an egress socket for the
+# destinations; the association ends with the control connection.
+def associate(connection, name):
+    relay = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    relay.bind(("127.0.0.1", 0))
+    egress = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    egress.bind(("127.0.0.1", 0))
+    log(name, "udp associate egress 127.0.0.1:%d" % egress.getsockname()[1])
+    connection.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("127.0.0.1") + relay.getsockname()[1].to_bytes(2, "big"))
+    client, reported, seen = None, {}, set()
+    try:
+        while True:
+            ready, _, _ = select.select([connection, relay, egress], [], [], 1.0)
+            if connection in ready:
+                if not connection.recv(4096): break
+            if relay in ready:
+                data, source = relay.recvfrom(65536)
+                if client is None: client = source
+                if source != client: continue
+                if len(data) < 10 or data[0:3] != b"\0\0\0":
+                    log(name, "udp malformed"); continue
+                if data[3] == 1:
+                    host, port, payload, what = socket.inet_ntoa(data[4:8]), int.from_bytes(data[8:10], "big"), data[10:], "addr"
+                    source_header = data[3:10]
+                elif data[3] == 3:
+                    n = data[4]
+                    host, port, payload, what = data[5:5 + n].decode(), int.from_bytes(data[5 + n:7 + n], "big"), data[7 + n:], "name"
+                    source_header = b"\x01" + socket.inet_aton(RESOLVED) + port.to_bytes(2, "big")
+                else:
+                    log(name, "udp malformed"); continue
+                if (what, host, port) not in seen:
+                    seen.add((what, host, port))
+                    log(name, "udp %s %s:%d" % (what, host, port))
+                reported[port] = source_header
+                egress.sendto(payload, ("127.0.0.1", port))
+            if egress in ready:
+                data, source = egress.recvfrom(65536)
+                if client is not None and source[1] in reported:
+                    relay.sendto(b"\0\0\0" + reported[source[1]] + data, client)
+    finally:
+        relay.close(); egress.close()
+
+def socks(credentials, name, udp=True):
     def handler(connection):
         version, count = exactly(connection, 2)
         methods = exactly(connection, count)
@@ -215,6 +276,13 @@ def socks(credentials, name):
         else:
             connection.sendall(b"\x05\x00")
         version, command, _, kind = exactly(connection, 4)
+        if command == 3:
+            exactly(connection, {1: 4, 4: 16}.get(kind, 0) or exactly(connection, 1)[0])
+            exactly(connection, 2)
+            if not udp:
+                log(name, "udp associate refused")
+                connection.sendall(b"\x05\x07\x00\x01" + bytes(6)); return
+            associate(connection, name); return
         if kind == 3:
             host = exactly(connection, exactly(connection, 1)[0]).decode()
             what = "name"
@@ -255,8 +323,30 @@ def http_connect(credentials, name):
         relay(connection, int(port), b"HTTP/1.1 200 Connection established\r\n\r\n")
     return handler
 
+# UDP services: an echo, and a STUN server that answers a Binding request with the address it
+# came from (XOR-MAPPED-ADDRESS, RFC 5389) — for a request through the relay, the relay's egress.
+def udp_service(port, answer):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.bind(("127.0.0.1", port))
+    def loop():
+        while True:
+            data, source = s.recvfrom(65536)
+            reply = answer(data, source)
+            if reply is not None: s.sendto(reply, source)
+    threading.Thread(target=loop, daemon=True).start()
+
+def stun(data, source):
+    if len(data) < 20 or data[0:2] != b"\x00\x01" or data[4:8] != b"\x21\x12\xa4\x42": return None
+    port = source[1] ^ 0x2112
+    address = struct.unpack("!I", socket.inet_aton(source[0]))[0] ^ 0x2112A442
+    attribute = struct.pack("!HHBBHI", 0x0020, 8, 0, 1, port, address)
+    return struct.pack("!HH", 0x0101, len(attribute)) + data[4:20] + attribute
+
+udp_service(7, lambda data, source: data)
+udp_service(3478, stun)
 serve(half_port, half_close)
 serve(socks_port, socks(None, "socks.log"))
+serve(socks_noudp_port, socks(None, "socks-noudp.log", udp=False))
 serve(socks_auth_port, socks(("user", "secret"), "socks-auth.log"))
 serve(http_port, http_connect(("user", "secret"), "http.log"))
 origin = Threaded(("127.0.0.1", origin_port), Origin)
@@ -266,7 +356,7 @@ PYTHON
 
 # What a guest's programs do that curl cannot: half-close, a slow reader, UDP.
 cat >"$WORK/guest.py" <<'PYTHON'
-import hashlib, socket, sys, time
+import hashlib, os, socket, struct, sys, time
 
 def half_close(host, port, path):
     data = open(path, "rb").read()
@@ -338,11 +428,176 @@ def stay(host, seconds):
     time.sleep(seconds)
     s.close()
 
+# A datagram to a name or an address and its echo: where the answer came from must be where it
+# was sent (for a name, the address the guest's resolver gave), and its bytes the same.
+def udp_echo(host, port, size):
+    address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    payload = os.urandom(size)
+    for attempt in range(3):
+        s.sendto(payload, address)
+        try:
+            data, source = s.recvfrom(65536)
+        except socket.timeout:
+            continue
+        print("echo %s from %s:%d to %s" % ("same" if data == payload else "DIFFERENT", source[0], source[1],
+                                          "%s:%d" % address))
+        return
+    print("no answer")
+
+# A STUN Binding request (RFC 5389); prints the XOR-MAPPED-ADDRESS of the answer.
+def stun(host, port):
+    address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_DGRAM)[0][4]
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    transaction = os.urandom(12)
+    request = struct.pack("!HHI", 0x0001, 0, 0x2112A442) + transaction
+    for attempt in range(3):
+        s.sendto(request, address)
+        try:
+            data, source = s.recvfrom(2048)
+        except socket.timeout:
+            continue
+        if data[0:2] != b"\x01\x01" or data[8:20] != transaction: continue
+        at = 20
+        while at + 4 <= len(data):
+            kind, length = struct.unpack("!HH", data[at:at + 4])
+            if kind == 0x0020:
+                port = struct.unpack("!H", data[at + 6:at + 8])[0] ^ 0x2112
+                ip = struct.unpack("!I", data[at + 8:at + 12])[0] ^ 0x2112A442
+                print("mapped %s:%d from %s:%d" % (socket.inet_ntoa(struct.pack("!I", ip)), port, source[0], source[1]))
+                return
+            at += 4 + length + (-length % 4)
+    print("no answer")
+
+# A question for the time (NTP, mode 3): whether an answer to it came, from whom.
+def ntp(host):
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(3)
+    request = b"\x23" + bytes(39) + os.urandom(8)
+    s.sendto(request, (host, 123))
+    try:
+        data, source = s.recvfrom(512)
+        print("time from %s" % source[0] if len(data) >= 48 and data[24:32] == request[40:48] else "not an answer")
+    except socket.timeout:
+        print("no answer")
+
 if sys.argv[1] == "half": half_close(sys.argv[2], int(sys.argv[3]), sys.argv[4])
 elif sys.argv[1] == "stay": stay(sys.argv[2], float(sys.argv[3]))
 elif sys.argv[1] == "connect": connect(sys.argv[2], int(sys.argv[3]))
 elif sys.argv[1] == "slow": slow_reader(sys.argv[2], sys.argv[3])
 elif sys.argv[1] == "udp": udp(sys.argv[2], int(sys.argv[3]))
+elif sys.argv[1] == "echo": udp_echo(sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+elif sys.argv[1] == "stun": stun(sys.argv[2], int(sys.argv[3]))
+elif sys.argv[1] == "ntp": ntp(sys.argv[2])
+PYTHON
+
+# HTTP/3 over QUIC (aioquic, the test's own): a server on 127.0.0.1:443 (UDP), where the relay
+# double sends every datagram for port 443, with a certificate of its own making for quic.test;
+# and a client the guest runs, which resolves quic.test with the guest's resolver (a fake
+# address) and downloads a file through the stack and the relay.
+cat >"$WORK/quic_server.py" <<'PYTHON'
+import asyncio, datetime, os, sys
+from aioquic.asyncio import QuicConnectionProtocol, serve
+from aioquic.h3.connection import H3_ALPN, H3Connection
+from aioquic.h3.events import HeadersReceived
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.events import ProtocolNegotiated
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509.oid import NameOID
+
+work, port = sys.argv[1], int(sys.argv[2])
+key = ec.generate_private_key(ec.SECP256R1())
+name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "quic.test")])
+now = datetime.datetime.now(datetime.timezone.utc)
+certificate = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+               .serial_number(x509.random_serial_number())
+               .not_valid_before(now - datetime.timedelta(days=1)).not_valid_after(now + datetime.timedelta(days=2))
+               .add_extension(x509.SubjectAlternativeName([x509.DNSName("quic.test")]), critical=False)
+               .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+               .sign(key, hashes.SHA256()))
+with open(os.path.join(work, "quic.pem"), "wb") as f:
+    f.write(certificate.public_bytes(serialization.Encoding.PEM))
+with open(os.path.join(work, "quic.key"), "wb") as f:
+    f.write(key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+
+class Server(QuicConnectionProtocol):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.h3 = None
+    def quic_event_received(self, event):
+        if isinstance(event, ProtocolNegotiated) and event.alpn_protocol in H3_ALPN:
+            self.h3 = H3Connection(self._quic)
+        if self.h3 is None: return
+        for h3event in self.h3.handle_event(event):
+            if isinstance(h3event, HeadersReceived):
+                path = dict(h3event.headers).get(b":path", b"/").decode()
+                body = open(os.path.join(work, "quic.bin"), "rb").read() if path == "/quic" else b"hello over HTTP/3\n"
+                self.h3.send_headers(h3event.stream_id, [(b":status", b"200"), (b"content-length", str(len(body)).encode())])
+                self.h3.send_data(h3event.stream_id, body, end_stream=True)
+                self.transmit()
+
+async def main():
+    configuration = QuicConfiguration(is_client=False, alpn_protocols=H3_ALPN)
+    configuration.load_cert_chain(os.path.join(work, "quic.pem"), os.path.join(work, "quic.key"))
+    await serve("127.0.0.1", port, configuration=configuration, create_protocol=Server)
+    open(os.path.join(work, "quic.ready"), "w").close()
+    await asyncio.Future()
+
+asyncio.run(main())
+PYTHON
+
+cat >"$WORK/quic_client.py" <<'PYTHON'
+import asyncio, hashlib, socket, sys
+from aioquic.asyncio import QuicConnectionProtocol
+from aioquic.h3.connection import H3_ALPN, H3Connection
+from aioquic.h3.events import DataReceived, HeadersReceived
+from aioquic.quic.configuration import QuicConfiguration
+from aioquic.quic.connection import QuicConnection
+
+host, port, path, cafile = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+
+class Client(QuicConnectionProtocol):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.h3 = H3Connection(self._quic)
+        self.done = asyncio.get_running_loop().create_future()
+        self.status, self.body = b"?", bytearray()
+    def quic_event_received(self, event):
+        for h3event in self.h3.handle_event(event):
+            if isinstance(h3event, HeadersReceived):
+                self.status = dict(h3event.headers).get(b":status", b"?")
+            elif isinstance(h3event, DataReceived):
+                self.body += h3event.data
+            if getattr(h3event, "stream_ended", False) and not self.done.done():
+                self.done.set_result(True)
+
+# An IPv4 socket of its own (aioquic's connect() opens an IPv6 one, which a kernel without IPv6
+# refuses); the name resolved by the guest's resolver.
+async def main():
+    configuration = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN, server_name=host)
+    configuration.load_verify_locations(cafile)
+    loop = asyncio.get_running_loop()
+    address = (await loop.getaddrinfo(host, port, family=socket.AF_INET, type=socket.SOCK_DGRAM))[0][4]
+    transport, client = await loop.create_datagram_endpoint(lambda: Client(QuicConnection(configuration=configuration)),
+                                                            local_addr=("0.0.0.0", 0), family=socket.AF_INET)
+    try:
+        client.connect(address)
+        await asyncio.wait_for(client.wait_connected(), 20)
+        stream = client._quic.get_next_available_stream_id()
+        client.h3.send_headers(stream, [(b":method", b"GET"), (b":scheme", b"https"), (b":authority", host.encode()),
+                                        (b":path", path.encode())], end_stream=True)
+        client.transmit()
+        await asyncio.wait_for(client.done, 150)
+        print(client.status.decode(), hashlib.sha256(client.body).hexdigest(), len(client.body))
+    finally:
+        client.close()
+        transport.close()
+
+asyncio.run(main())
 PYTHON
 
 # udhcpc's script: note what the lease says, and configure the interface from it.
@@ -360,15 +615,23 @@ head -c $((64 * 1024 * 1024)) /dev/urandom >"$WORK/big.bin"
 head -c $((8 * 1024 * 1024)) /dev/urandom >"$WORK/mid.bin"
 head -c $((32 * 1024 * 1024)) /dev/urandom >"$WORK/up.bin"
 head -c $((1024 * 1024)) /dev/urandom >"$WORK/half.bin"
+head -c $((4 * 1024 * 1024)) /dev/urandom >"$WORK/quic.bin"
+QUIC_SHA=$(sha256sum <"$WORK/quic.bin" | cut -d' ' -f1)
 BIG_SHA=$(sha256sum <"$WORK/big.bin" | cut -d' ' -f1)
 MID_SHA=$(sha256sum <"$WORK/mid.bin" | cut -d' ' -f1)
 UP_SHA=$(sha256sum <"$WORK/up.bin" | cut -d' ' -f1)
 HALF_SHA=$(sha256sum <"$WORK/half.bin" | cut -d' ' -f1)
 
-python3 "$WORK/doubles.py" "$WORK" $ORIGIN_PORT $HALF_PORT $SOCKS_PORT $SOCKS_AUTH_PORT $HTTP_PORT >"$WORK/doubles.out" 2>&1 &
+python3 "$WORK/doubles.py" "$WORK" $ORIGIN_PORT $HALF_PORT $SOCKS_PORT $SOCKS_AUTH_PORT $HTTP_PORT $SOCKS_NOUDP_PORT >"$WORK/doubles.out" 2>&1 &
 DOUBLES_PID=$!
 for _ in $(seq 100); do [ -e "$WORK/doubles.ready" ] && break; sleep 0.1; done
 [ -e "$WORK/doubles.ready" ] || { cat "$WORK/doubles.out"; echo "FAIL  the test doubles did not start"; exit 2; }
+if "$QUIC_PY" -c 'import aioquic' 2>/dev/null; then
+    "$QUIC_PY" "$WORK/quic_server.py" "$WORK" 443 >"$WORK/quic.out" 2>&1 &
+    QUIC_PID=$!
+    for _ in $(seq 100); do [ -e "$WORK/quic.ready" ] && break; sleep 0.1; done
+    [ -e "$WORK/quic.ready" ] || { cat "$WORK/quic.out"; echo "FAIL  the QUIC server did not start"; exit 2; }
+fi
 
 ip netns del "$NS" 2>/dev/null
 ip netns add "$NS"
@@ -561,9 +824,81 @@ note "both took $(python3 -c "import time; print('%.1f' % (time.time() - $STARTE
 stop_stack
 
 # ---------------------------------------------------------------------------------------------
+echo "== UDP through the SOCKS5 proxy's relay (UDP ASSOCIATE) =="
+touch "$WORK/socks.log"
+UDP_LINES_BEFORE=$(wc -l <"$WORK/socks.log")
+start_stack "socks5://127.0.0.1:$SOCKS_PORT" --relay-udp
+
+ECHO_FAKE=$($G dig +short +time=2 +tries=1 A echo.test @"$GATEWAY")
+ECHO="$($G python3 "$WORK/guest.py" echo echo.test 7 600)"
+check "UDP by name: the echo's bytes, from the address the guest sent to ($ECHO)" \
+    test "$ECHO" = "echo same from $ECHO_FAKE:7 to $ECHO_FAKE:7"
+check "…and the relay was asked for the NAME (address type 3)" grep -qx "udp name echo.test:7" "$WORK/socks.log"
+ECHO="$($G python3 "$WORK/guest.py" echo 93.184.216.34 7 1400)"
+check "UDP by address, 1400 bytes: the echo from 93.184.216.34:7 ($ECHO)" \
+    test "$ECHO" = "echo same from 93.184.216.34:7 to 93.184.216.34:7"
+check "…and the relay was asked for the address" grep -qx "udp addr 93.184.216.34:7" "$WORK/socks.log"
+
+DNS_FAKE=$($G dig +short +time=2 +tries=1 A dns.test @8.8.8.8)
+check "DNS to 8.8.8.8 is still answered by the stack ($DNS_FAKE)" bash -c "echo '$DNS_FAKE' | grep -qE '^198\.1[89]\.'"
+NTP="$($G python3 "$WORK/guest.py" ntp 17.253.52.125)"
+check "the time is still answered by the stack ($NTP)" test "$NTP" = "time from 17.253.52.125"
+check "…neither DNS nor the time reached the relay" bash -c "! tail -n +$((UDP_LINES_BEFORE + 1)) '$WORK/socks.log' | grep -qE '^udp .*:(53|123)\$'"
+
+# (Not 127.0.0.1: the guest's own loopback answers that itself.)
+for target in 10.1.2.3 172.16.5.5 169.254.169.254 192.168.1.1 198.19.200.200 100.64.0.1 240.0.0.1; do
+    UDPR="$($G python3 "$WORK/guest.py" udp $target 7)"
+    check "UDP to $target: port unreachable, and not relayed ($UDPR)" bash -c "echo '$UDPR' | grep -q '^refused'"
+done
+check "…none of those addresses reached the relay" \
+    bash -c "! tail -n +$((UDP_LINES_BEFORE + 1)) '$WORK/socks.log' | grep -qE '10\.1\.2\.3|172\.16|169\.254|192\.168\.1\.1|198\.19\.200|100\.64|240\.0'"
+
+STUN_FAKE=$($G dig +short +time=2 +tries=1 A stun.test @"$GATEWAY")
+STUN="$($G python3 "$WORK/guest.py" stun stun.test 3478)"
+STUN_EGRESS=$(tail -n +$((UDP_LINES_BEFORE + 1)) "$WORK/socks.log" | awk '/^udp associate egress/ { e = $4 } /^udp name stun.test:3478$/ { print e; exit }')
+check "STUN by name through the relay: the mapped address is the relay's own egress ($STUN; the relay's: $STUN_EGRESS)" \
+    test "$STUN" = "mapped $STUN_EGRESS from $STUN_FAKE:3478"
+
+if [ -n "$QUIC_PID" ]; then
+    STARTED_AT=$(date +%s.%N)
+    QUIC="$($G timeout 200 "$QUIC_PY" "$WORK/quic_client.py" quic.test 443 /quic "$WORK/quic.pem" 2>"$WORK/quic_client.err")"
+    check "HTTP/3 over QUIC by name through the relay: 4 MB, status 200, SHA-256 matches" test "$QUIC" = "200 $QUIC_SHA 4194304"
+    [ "$QUIC" = "200 $QUIC_SHA 4194304" ] || sed 's/^/      | /' "$WORK/quic_client.err" | tail -5
+    note "the QUIC download took $(python3 -c "import time; print('%.1f' % (time.time() - $STARTED_AT))") s"
+    check "…the relay was asked for quic.test:443 by name" grep -qx "udp name quic.test:443" "$WORK/socks.log"
+else
+    echo "SKIP  HTTP/3 over QUIC: no aioquic for $QUIC_PY (pip install aioquic; VMNET_INTEROP_QUIC_PYTHON names another python)"
+fi
+check "TCP alongside: a page through the same proxy" bash -c "$G curl -sS --max-time 20 http://udpside.test/ | grep -q 'hello from the origin'"
+check "the stack is still running" kill -0 "$STACK_PID"
+stop_stack
+note "$COUNTERS"
+check "counters: datagrams relayed and delivered, associations opened, none failed" \
+    bash -c "[ '$(counter datagramsRelayed)' -ge 3 ] && [ '$(counter datagramsToGuest)' -ge 3 ] && [ '$(counter udpAssociationsOpened)' -ge 3 ] && [ '$(counter udpAssociationsFailed)' = 0 ]"
+check "counters: the refused datagrams counted, the time and DNS answered here" \
+    bash -c "[ '$(counter datagramsDropped)' -ge 6 ] && [ '$(counter timeQueries)' -ge 1 ]"
+check "the log names no host and no address (UDP included)" \
+    bash -c "! grep '^LOG' '$WORK/stack.out' | grep -qE 'echo\.test|stun\.test|quic\.test|198\.1[89]\.|93\.184|10\.1\.2\.3|127\.0\.0\.1'"
+check "the log says UDP went through the relay" grep -q "UDP: through the proxy's relay" "$WORK/stack.out"
+
+echo "== a SOCKS5 proxy that refuses UDP ASSOCIATE =="
+start_stack "socks5://127.0.0.1:$SOCKS_NOUDP_PORT" --relay-udp
+UDPR="$($G python3 "$WORK/guest.py" udp 93.184.216.34 7)"
+check "UDP: port unreachable, fast ($UDPR)" bash -c "echo '$UDPR' | grep -qE '^refused after (0|1)\.'"
+UDPR="$($G python3 "$WORK/guest.py" udp echo.test 7)"
+check "UDP by name, again: port unreachable ($UDPR)" bash -c "echo '$UDPR' | grep -q '^refused'"
+check "…the proxy was asked once for the run, not again" test "$(grep -c 'udp associate refused' "$WORK/socks-noudp.log")" = 1
+check "TCP through the same proxy still works" bash -c "$G curl -sS --max-time 20 http://noudp.test/ | grep -q 'hello from the origin'"
+stop_stack
+check "counters: one association failed, nothing relayed" bash -c "[ '$(counter udpAssociationsFailed)' = 1 ] && [ '$(counter datagramsRelayed)' = 0 ]"
+check "the log says the proxy does not carry UDP" grep -q "the proxy does not carry UDP" "$WORK/stack.out"
+
+# ---------------------------------------------------------------------------------------------
 echo "== SOCKS5 proxy with a user name and password =="
-start_stack "socks5://user:secret@127.0.0.1:$SOCKS_AUTH_PORT"
+start_stack "socks5://user:secret@127.0.0.1:$SOCKS_AUTH_PORT" --relay-udp
 check "a page through a proxy that asks for a sign-in" bash -c "$G curl -sS --max-time 20 http://auth.test/ | grep -q 'hello from the origin' && grep -qx 'auth ok' '$WORK/socks-auth.log'"
+ECHO="$($G python3 "$WORK/guest.py" echo 93.184.216.34 7 100)"
+check "UDP through a proxy that asks for a sign-in ($ECHO)" test "$ECHO" = "echo same from 93.184.216.34:7 to 93.184.216.34:7"
 stop_stack
 check "the log does not hold the user name or the password" bash -c "! grep -qE 'secret|user:' '$WORK/stack.out'"
 start_stack "socks5://user:wrong@127.0.0.1:$SOCKS_AUTH_PORT"
@@ -572,7 +907,8 @@ stop_stack
 
 # ---------------------------------------------------------------------------------------------
 echo "== HTTP CONNECT proxy (with a user name and password) =="
-start_stack "http://user:secret@127.0.0.1:$HTTP_PORT"
+# The relay asked for: an HTTP proxy carries no UDP, so UDP stays unreachable — never a direct path.
+start_stack "http://user:secret@127.0.0.1:$HTTP_PORT" --relay-udp
 SPEED=$($G curl -sS --max-time 300 -o "$WORK/big.out" -w '%{speed_download}' http://big.test/big 2>"$WORK/curl.err")
 check "download 64 MB through HTTP CONNECT: SHA-256 matches" test "$(sha_of "$WORK/big.out")" = "$BIG_SHA"
 echo "      throughput (64 MB download through the HTTP CONNECT double): $(python3 -c "print('%.1f' % (float('${SPEED:-0}') / 1e6))") MB/s"
@@ -581,7 +917,10 @@ check "the proxy saw CONNECT with the name, a Host header and the sign-in" bash 
 check "upload 32 MB through HTTP CONNECT: SHA-256 matches" \
     test "$($G curl -sS --max-time 300 -H 'Expect:' --data-binary @"$WORK/up.bin" http://up.test/upload)" = "$UP_SHA"
 check "a name the proxy refuses (403): refused fast" refused_fast 3 refused.test
+UDPR="$($G python3 "$WORK/guest.py" udp 93.184.216.34 7)"
+check "UDP with an HTTP proxy, the relay asked for: port unreachable ($UDPR)" bash -c "echo '$UDPR' | grep -q '^refused'"
 stop_stack
+check "…and nothing of it was relayed" test "$(counter datagramsRelayed)" = 0
 
 # ---------------------------------------------------------------------------------------------
 echo "== no proxy: nothing connects =="

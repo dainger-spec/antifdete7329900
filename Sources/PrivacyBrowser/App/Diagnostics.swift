@@ -128,7 +128,8 @@ enum Diagnostics {
             entry["windowSize"] = describe(c.windowSize)
             entry["localRequests"] = c.localRequests.rawValue
             entry["timeZoneAndLanguage"] = c.effectiveLocaleSource.rawValue
-            entry["webRTC"] = c.effectiveWebRTCPolicy.rawValue
+            entry["webRTC"] = c.webRTCRouting == .silent ? "silent" : c.effectiveWebRTCPolicy.rawValue
+            entry["webRTCChoice"] = c.webRTCMode.rawValue
             entry["searchEngine"] = (c.searchEngine ?? .standard).rawValue
             entry["history"] = c.historyEnabled
             entry["syncCookies"] = c.syncsCookies
@@ -239,7 +240,8 @@ enum Diagnostics {
             "newProfiles": ["fromTheConnection": settings.newProfileMatchesConnection,
                             "searchEngine": settings.newProfileSearchEngine.rawValue,
                             "randomWindowSize": settings.newProfileRandomWindowSize,
-                            "blockLocalRequests": settings.newProfileBlocksLocalRequests],
+                            "blockLocalRequests": settings.newProfileBlocksLocalRequests,
+                            "webRTCAutomatic": settings.newProfileWebRTCAutomatic],
             "proxyFailure": settings.proxyFailure.rawValue,
             "browsing": ["passwordAutoFill": settings.browsing.passwordAutoFill,
                          "newTabsNextToCurrent": settings.browsing.newTabsNextToCurrent,

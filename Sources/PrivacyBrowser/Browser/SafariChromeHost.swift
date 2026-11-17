@@ -30,8 +30,6 @@ enum SafariChromeHost {
     /// without Safari's frameworks hosting the window, the profile is plain WebKit to a site. The
     /// window says so, with this (`SimplifiedModeNotice`), never only the log.
     enum OwnWindowReason: Equatable {
-        /// An iPhone or iPad profile: our window presents the device; Safari's is a Mac's.
-        case deviceProfile
         /// A build with the App Sandbox: Safari's chrome cannot be hosted in it.
         case sandboxed
         /// `PB_SAFARI_CHROME=0`.
@@ -53,11 +51,9 @@ enum SafariChromeHost {
     /// reason a profile's window here is ours. Nil while nothing has.
     private(set) static var failure: OwnWindowReason?
 
-    /// Why `configuration`'s window, opened in this process, is ours: a profile that presents a
-    /// device, then what failed here, then what this process is (a sandboxed build, the chrome
-    /// turned off, a profile not in a process of its own).
-    static func reasonForOwnWindow(_ configuration: ProfileConfiguration) -> OwnWindowReason {
-        if !canHost(configuration) { return .deviceProfile }
+    /// Why a profile's window, opened in this process, is ours: what failed here, then what this
+    /// process is (a sandboxed build, the chrome turned off, a profile not in a process of its own).
+    static func reasonForOwnWindow() -> OwnWindowReason {
         if let failure { return failure }
         if AppEnvironment.isSandboxed { return .sandboxed }
         if isTurnedOff { return .turnedOff }
@@ -76,12 +72,11 @@ enum SafariChromeHost {
             failure = .turnedOff
             return false
         }
-        guard canHost(configuration) else {
-            log.notice("An iPhone or iPad profile: our own window, which presents that device, rather than Safari's desktop chrome")
-            return false
-        }
         // Before the frameworks load: some of what they read, they read as they load.
         SafariChrome.configureSafarisOwnServices(for: configuration)
+        // Safari's stores in the profile's home — every folder they go in, writable, and none Safari
+        // could not open — before any of Safari's code looks for them (`SafariStores`).
+        SafariStores.prepare()
         guard SafariChrome.load() else {
             failure = .frameworksDidNotLoad
             return false
@@ -159,12 +154,6 @@ enum SafariChromeHost {
 
     /// Opens Safari's window for `session` and lets Safari build the profile's web view in its
     /// tab. False when the chrome is not hosted here, and the caller opens our own window as before.
-    /// Safari's chrome is the Mac's: a profile that presents an iPhone or an iPad would show its
-    /// device's navigator and screen next to a Mac's window and User-Agent, which no real device
-    /// does. Those profiles run in our own window, which presents their device.
-    static func canHost(_ configuration: ProfileConfiguration) -> Bool {
-        configuration.deviceGeneration.platform == .macOS
-    }
 
     /// `restoring`: the tabs the profile left open at its last stop (Settings → Startup → Restore
     /// tabs), which a start opens again instead of the start page — this window on the first of
@@ -229,7 +218,7 @@ enum SafariChromeHost {
     /// the same profile never act on the same page, and the session's end closes no run's window.
     static func openScenarioPage(session: BrowserSession, inBackground: Bool = false,
                                  forWebDriver: Bool = false) async -> (webView: WKWebView, navigate: (URL) -> Void)? {
-        guard isPrepared, canHost(session.configuration), let blank = URL(string: "about:blank") else { return nil }
+        guard isPrepared, let blank = URL(string: "about:blank") else { return nil }
         // The window of the run before, while it is open: a window for each run left as many
         // windows — and web processes — as there were runs (a script calling the API in a loop).
         // Whatever tab a person chose in it since, its page is the one acted on, and addresses go

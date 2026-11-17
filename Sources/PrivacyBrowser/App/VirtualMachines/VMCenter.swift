@@ -24,16 +24,25 @@ final class VMCenter: ObservableObject {
         case notInThisBuild
         /// A sandboxed build's helper could not reach the library.
         case sandboxed
+        /// This Mac is itself a virtual machine (`VMHostSupport`): macOS runs no virtual machine
+        /// inside another, and the helper would only say so after the person asked Apple for
+        /// gigabytes. Said at once instead.
+        case insideVirtualMachine
     }
 
     static var availability: Availability {
         #if arch(arm64)
         if AppEnvironment.isSandboxed { return .sandboxed }
-        return VMHelperProcess.executableURL == nil ? .notInThisBuild : .available
+        guard VMHelperProcess.executableURL != nil else { return .notInThisBuild }
+        return isInsideVirtualMachine ? .insideVirtualMachine : .available
         #else
         return VMHelperProcess.executableURL == nil ? .notInThisBuild : .notAppleSilicon
         #endif
     }
+
+    /// Asked of the system once: a Mac does not stop or start being a virtual machine while the
+    /// app runs.
+    private static let isInsideVirtualMachine = VMHostSupport.thisMacIsAVirtualMachine
 
     /// The Profiles window has the section at all: the build carries the machines' helper.
     static var isOffered: Bool { availability != .notInThisBuild }
@@ -68,6 +77,8 @@ final class VMCenter: ObservableObject {
         var woke = false
         /// Its macOS is being shut down (`shutDown`), not put to sleep.
         var shuttingDown = false
+        /// Where its UDP (HTTP/3, WebRTC) goes in this run, as the check before the start found it.
+        var udp: VMUDPRoute?
     }
 
     @Published private(set) var list: VMProfiles
@@ -161,6 +172,28 @@ final class VMCenter: ObservableObject {
     }
 
     var hasRunning: Bool { !helpers.isEmpty || setupHelper != nil }
+
+    /// The memory (GB) of every machine that holds some now: the profiles' that run or start, and
+    /// the base while it is installed or set up.
+    var runningMemoryGB: [Int] {
+        var memory = running.keys.compactMap { list.profile($0)?.memoryGB }
+        switch activity {
+        case .installing?: memory.append(VMRequirements.standardMemoryGB)
+        case .guestSetup?: memory.append(Self.setupMemoryGB)
+        default: break
+        }
+        return memory
+    }
+
+    /// What the machines running at once take, when that leaves this Mac less than macOS needs
+    /// (`VMRequirements.isMemoryTight`) — two machines on a Mac with 8 GB; nil otherwise, and
+    /// for one machine alone (the editor already says when one machine's memory is too much).
+    var memoryTakenIfTight: Int64? {
+        let host = Int64(clamping: ProcessInfo.processInfo.physicalMemory)
+        let memory = runningMemoryGB
+        guard memory.count >= 2, VMRequirements.isMemoryTight(hostMemory: host, runningGB: memory) else { return nil }
+        return host - VMRequirements.memoryLeft(hostMemory: host, runningGB: memory)
+    }
     var isReady: Bool { if case .ready = setup { return true } else { return false } }
 
     /// What the machines take on disk in all: the base, what was fetched for it, every machine.
@@ -190,8 +223,9 @@ final class VMCenter: ObservableObject {
         case .none: break
         }
         if case .downloading(let progress)? = activity, let total = progress.total { download = max(0, total - progress.have) }
+        // Where the system says nothing of the room, nothing is refused on a guess.
         var problems = VMRequirements.problems(appleSilicon: Self.availability != .notAppleSilicon, helperAvailable: true,
-                                               freeDisk: freeDisk, downloadBytes: download,
+                                               freeDisk: startRoom.free ?? .max, downloadBytes: download,
                                                hostMemory: Int64(clamping: ProcessInfo.processInfo.physicalMemory))
         // Once macOS is installed, the room it needed is taken already.
         if case .needsGuestSetup = setup { problems.removeAll { if case .notEnoughDisk = $0 { return true } else { return false } } }
@@ -199,13 +233,10 @@ final class VMCenter: ObservableObject {
         return problems
     }
 
-    /// Free room on the volume the library is on.
-    var freeDisk: Int64 {
-        var url = library.root
-        while !FileManager.default.fileExists(atPath: url.path), url.path != "/" { url.deleteLastPathComponent() }
-        let values = try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-        return values?.volumeAvailableCapacityForImportantUsage ?? 0
-    }
+    /// Free room on the volume the library is on, as the setup and a start go by it (`startRoom`):
+    /// the figure "for important usage" alone was zero on a disk that is not APFS, and the setup
+    /// refused a disk with hundreds of gigabytes free.
+    var freeDisk: Int64 { startRoom.free ?? 0 }
 
     /// The room on the library's volume as a machine's start goes by it (`VMStartRoom`), and
     /// whether that volume clones files (APFS does). The room is the larger of the system's two
@@ -219,8 +250,9 @@ final class VMCenter: ObservableObject {
                                                               .volumeAvailableCapacityKey, .volumeSupportsFileCloningKey]) else {
             return (nil, nil)
         }
-        let figures: [Int64?] = [values.volumeAvailableCapacityForImportantUsage, values.volumeAvailableCapacity.map { Int64($0) }]
-        return (figures.compactMap { $0 }.max(), values.volumeSupportsFileCloning)
+        return (VMStartRoom.free(importantUsage: values.volumeAvailableCapacityForImportantUsage,
+                                 available: values.volumeAvailableCapacity.map { Int64($0) }),
+                values.volumeSupportsFileCloning)
     }
 
     // MARK: The setup
@@ -424,7 +456,10 @@ final class VMCenter: ObservableObject {
         }, onEnd: { [weak self] failure in
             guard let self, self.setupRun == run else { return }
             self.setupHelper = nil
-            guard failure == nil else { return self.setupFailed(failure ?? L("vm.error.unknown")) }
+            guard failure == nil else {
+                self.removeUnfinishedInstallation()
+                return self.setupFailed(failure ?? L("vm.error.unknown"))
+            }
             do {
                 try self.library.saveBaseInfo(VMBaseInfo(stage: .installed, version: installed?.version ?? "",
                                                          build: installed?.build ?? ""))
@@ -453,7 +488,23 @@ final class VMCenter: ObservableObject {
         setupHelper = nil
         activity = nil
         holdAwake(false)
+        removeUnfinishedInstallation()
         setup = library.setupState()
+        measureDisk()
+    }
+
+    /// What an installation that did not finish wrote into the base's folder — a disk of up to
+    /// twenty gigabytes, its firmware variables — is no system (the next installation starts over
+    /// and removes it first), but it took the room a full disk needed: removed now, not left until
+    /// then. Only while no base is recorded (`base.json`, written once an installation is whole);
+    /// the share and its tools stay. The downloaded image stays too: Continue installs again.
+    private func removeUnfinishedInstallation() {
+        guard library.baseInfo() == nil else { return }
+        let base = library.base
+        for url in [base.disk, base.auxiliaryStorage, base.hardwareModel, base.machineIdentifier] {
+            try? FileManager.default.removeItem(at: url)
+        }
+        measureDisk()
     }
 
     /// The memory the base gets while it is set up: macOS's first run is the heaviest thing a
@@ -686,6 +737,21 @@ final class VMCenter: ObservableObject {
         list = updated
     }
 
+    /// An entry of the Proxies section was edited (`AppModel.followProxyEntry`): the machines
+    /// whose proxy it was take it from their next start (`VMProfiles.follow`) — a corrected
+    /// password, a new port — as the Safari profiles do.
+    func followProxyEntry(_ proxy: ProxySettings, previous: ProxySettings) {
+        guard loadError == nil else { return }
+        var updated = list
+        guard !updated.follow(proxy, previous: previous).isEmpty else { return }
+        do {
+            try updated.save(to: vault)
+            list = updated
+        } catch {
+            log.error("The machines' list was not saved after a proxy was edited: \(error.logKind, privacy: .public)")
+        }
+    }
+
     /// Deletes a profile's machine — its disk, with everything in its macOS — and the profile.
     /// Only from the person's Delete, confirmed (scripts/check_deletion_paths.py); never while the
     /// machine runs.
@@ -714,6 +780,10 @@ final class VMCenter: ObservableObject {
         // A machine that has its disk starts without the base (the base may have been removed to
         // free the disk); one not made yet needs it, to be cloned from.
         guard running[id] == nil, helpers[id] == nil, let profile = list.profile(id) else { return }
+        guard Self.availability == .available else {
+            problems[id] = Self.availability == .insideVirtualMachine ? L("vm.unavailable.insideVM") : L("vm.unavailable.build")
+            return
+        }
         guard isReady || library.machine(for: id).isComplete else {
             problems[id] = L("vm.error.noBase")
             return
@@ -745,15 +815,17 @@ final class VMCenter: ObservableObject {
         problems[id] = nil
         wakeNotes[id] = nil
         guard let proxy = profile.proxy else {
+            // Without a proxy the machine's UDP goes out as this Mac's own, as its TCP does — not
+            // while the Mac's settings name a proxy, which the helper's connector then refuses.
             guard profile.asksWhereTheConnectionComesOut else {
-                running[id] = Running(phase: .starting)
-                return launch(profile)
+                running[id] = Running(phase: .starting, udp: .direct)
+                return launch(profile, udp: .direct)
             }
             // The person's choice for this machine: its time zone and language are those of the
             // place this Mac's own connection comes out at (its VPN, when one is on) — asked now,
             // by this Mac, as a profile without a proxy asks. No answer does not keep the machine
             // from starting: it keeps the time zone and language it had, and the row says so.
-            running[id] = Running(phase: .checkingProxy)
+            running[id] = Running(phase: .checkingProxy, udp: .direct)
             Task { [weak self] in
                 let userAgent = ProfileConfiguration().userAgent(hostSafariVersion: HostSafari.version)
                 let exit = ProxyChecker.result(of: await ProxyGeoLookup.lookUp(proxy: nil, userAgent: userAgent,
@@ -780,7 +852,7 @@ final class VMCenter: ObservableObject {
                     return
                 }
                 self.running[id]?.phase = .starting
-                self.launch(profile)
+                self.launch(profile, udp: .direct)
             }
             return
         }
@@ -799,6 +871,10 @@ final class VMCenter: ObservableObject {
                 profile = followed
                 try? self.save(profile)
             }
+            // UDP (HTTP/3, WebRTC) for this run only where the check found the proxy carries it,
+            // from where its pages leave; what could not be told keeps it off.
+            let udp = VMUDPRoute.forProxy(proxy, check: check)
+            self.running[id]?.udp = udp
             // The limit again: another machine may have started while the proxy was asked.
             guard self.runningCount < VMRequirements.runningLimit else {
                 self.running[id] = nil
@@ -813,18 +889,21 @@ final class VMCenter: ObservableObject {
                 return
             }
             self.running[id]?.phase = .starting
-            self.launch(profile)
+            self.launch(profile, udp: udp)
         }
     }
 
-    /// The check of a machine's proxy before its start: does it work, where does it come out, and
-    /// its time zone — and nothing a machine does not use. The Proxies section's check also sets
-    /// up two more tunnels for a steady latency, which the machines' list does not show, and waits
-    /// for a SOCKS5 proxy's UDP (up to nine seconds where the proxy takes the association and
-    /// carries nothing, then a request for where it leaves from) — and UDP never leaves a machine
-    /// (docs/VM.md). A start, and a wake above all, is shorter by those.
+    /// The check of a machine's proxy before its start: does it work, where does it come out, its
+    /// time zone — and, for a SOCKS5 proxy, whether it carries UDP: a UDP association and a STUN
+    /// request through it to a STUN server named so that the proxy resolves it, then where its
+    /// UDP leaves from against where its pages do (`ProxyChecker.udp`; only the proxy is talked
+    /// to, never anything from this Mac directly). A machine's UDP (HTTP/3, WebRTC) goes through
+    /// the proxy in that run only when it does (`VMUDPRoute`). The UDP check runs beside the
+    /// lookup of where the proxy comes out: a proxy that answers costs a second or two more, one
+    /// that takes the association and carries nothing up to nine. The Proxies section's two more
+    /// tunnels for a steady latency, which the machines' list does not show, are not made.
     static func checkProxy(_ proxy: ProxySettings) async -> ProxyCheckResult {
-        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: false)
+        await ProxyChecker.check(proxy, latencySamples: 1, triesUDP: true)
     }
 
     /// Why a machine whose proxy did not pass its check was not started: what the check found, in
@@ -836,7 +915,8 @@ final class VMCenter: ObservableObject {
         return ([L("vm.error.proxyFailed"), explanation] + [report.advice].compactMap { $0 }).joined(separator: " ")
     }
 
-    private func launch(_ profile: VMProfile) {
+    /// `udp`: where the machine's UDP goes in this run (`VMUDPRoute`); nil keeps it off.
+    private func launch(_ profile: VMProfile, udp: VMUDPRoute? = nil) {
         let id = profile.id
         let files = library.machine(for: id)
         do {
@@ -866,7 +946,8 @@ final class VMCenter: ObservableObject {
             let helper = VMHelperProcess(onEvent: { [weak self] event in self?.take(event, of: id) },
                                          onEnd: { [weak self] failure in self?.ended(id, failure: failure) })
             var request = VMHelperRequest.run(profile: profile, library: library,
-                                              hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts)
+                                              hostCores: ProcessInfo.processInfo.activeProcessorCount, texts: Self.helperTexts,
+                                              udp: udp)
             // The app's own "animations off": the start's cover moves nothing, as under Reduce Motion.
             if !AppearancePreferences.animationsEnabled { request.reducesMotion = true }
             try helper.start(request)
@@ -907,12 +988,16 @@ final class VMCenter: ObservableObject {
                 }
             }
         case .traffic:
-            running[id]?.bytesUp = event.bytesUp ?? 0
-            running[id]?.bytesDown = event.bytesDown ?? 0
-            running[id]?.connections = event.connections ?? 0
-            running[id]?.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
-            running[id]?.troubleDetail = event.troubleDetail
-            running[id]?.viaSystemProxy = event.viaSystemProxy ?? false
+            // Said every two seconds while the machine's network carries anything: the rows that
+            // show it are told once, and only of a change — not once for each of six fields.
+            guard var state = running[id] else { break }
+            state.bytesUp = event.bytesUp ?? 0
+            state.bytesDown = event.bytesDown ?? 0
+            state.connections = event.connections ?? 0
+            state.trouble = event.trouble.flatMap(VMNetworkTrouble.init(rawValue:))
+            state.troubleDetail = event.troubleDetail
+            state.viaSystemProxy = event.viaSystemProxy ?? false
+            if state != running[id] { running[id] = state }
         case .hosts:
             // Only while the panel asks: an answer that comes after it was closed is dropped.
             if hosts[id] != nil { hosts[id] = event.hosts ?? [] }
@@ -1006,9 +1091,11 @@ final class VMCenter: ObservableObject {
         helpers[id]?.stop()
     }
 
-    /// Ends the machine now, as pulling a Mac's plug would: for one that does not shut down.
+    /// Ends the machine now, as pulling a Mac's plug would: for one that does not shut down. One
+    /// whose proxy is still being checked has no machine yet: its start is called off.
     func forceStop(_ id: UUID) {
-        helpers[id]?.kill()
+        guard let helper = helpers[id] else { return stop(id) }
+        helper.kill()
     }
 
     /// Lock and Quit: every machine is shut down, the setup paused, and this waits until the
@@ -1118,7 +1205,12 @@ final class VMCenter: ObservableObject {
     /// they always were.
     static func failureText(kind: VMFailureKind?, message: String?) -> String {
         let detail = message?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard let kind else { return detail.isEmpty ? L("vm.error.unknown") : detail }
+        // A failure of no kind the app has words for still gets a sentence in the person's
+        // language: the system's (or the helper's) words alone were English in a Russian
+        // interface, with a domain and a number for all they said.
+        guard let kind else {
+            return detail.isEmpty ? L("vm.error.unknown") : L("vm.failure.other") + "\n" + String(format: L("vm.row.trouble.detail"), detail)
+        }
         let words = L("vm.failure.\(kind.rawValue)")
         return detail.isEmpty ? words : words + "\n" + String(format: L("vm.row.trouble.detail"), detail)
     }

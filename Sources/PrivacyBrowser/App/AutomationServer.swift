@@ -315,10 +315,11 @@ final class AutomationHandler {
     /// A saved scenario by its exact name (one), for `{"scenario": "…"}`.
     var savedScenario: (String) -> Scenario? = { _ in nil }
     /// The parameters of a saved scenario's run on a profile: the profile's own values for
-    /// scenarios under what the request gave (`ScenarioValues.parametersJSON`). A text sent with
-    /// the request (`source`) gets the request's own and no more: what the person keeps for a
-    /// profile — a password — is read by the scenarios they wrote, not by whatever holds the token.
-    var profileParameters: (UUID, String) -> String = { _, given in given }
+    /// scenarios that the scenario's text names, under what the request gave
+    /// (`ScenarioValues.parametersJSON`). A text sent with the request (`source`) gets the
+    /// request's own and no more: what the person keeps for a profile — a password — is read by
+    /// the scenarios they wrote, not by whatever holds the token.
+    var profileParameters: (UUID, Scenario, String) -> String = { _, _, given in given }
     /// Whether a WebDriver session drives the profile now (`WebDriverService.hasSession`): a run
     /// is refused beside it, as beside another run.
     var hasWebDriverSession: (UUID) -> Bool = { _ in false }
@@ -422,7 +423,7 @@ final class AutomationHandler {
                     (name, source) = ("API", text)
                 } else if let wanted = spec.scenario, let saved = savedScenario(wanted) {
                     (name, source) = (saved.name, saved.source)
-                    parametersJSON = profileParameters(summary.id, spec.parametersJSON)
+                    parametersJSON = profileParameters(summary.id, saved, spec.parametersJSON)
                 } else {
                     return .error(404, "no_scenario", "No saved scenario is named \(spec.scenario ?? "") (exactly, one).")
                 }
