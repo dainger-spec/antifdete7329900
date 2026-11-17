@@ -24,8 +24,14 @@ public struct GuardRegistration: Codable, Equatable, Sendable {
     public var proxyPort: UInt16
     /// Every address the app found for the proxy's name (and the literal itself), canonical.
     public var proxyAddresses: [String]
+    /// The process's WebRTC goes through the proxy's UDP relay (the app's TURN relay → UDP ASSOCIATE):
+    /// UDP to the proxy's addresses, and any port there, is let through. False for a process held
+    /// only so that a WebRTC that must not connect can stay in its pages (`WebRTCGate.silence`): it
+    /// needs nothing of the proxy but its TCP port, so nothing else of the proxy's host is let
+    /// through — not even a STUN or TURN server that host might also run.
+    public var relaysUDP: Bool
 
-    public init(pid: Int32, proxyHost: String, proxyPort: UInt16, proxyAddresses: [String]) {
+    public init(pid: Int32, proxyHost: String, proxyPort: UInt16, proxyAddresses: [String], relaysUDP: Bool = true) {
         format = Self.currentFormat
         self.pid = pid
         self.proxyHost = GuardPolicy.normalizedName(proxyHost)
@@ -34,6 +40,22 @@ public struct GuardRegistration: Codable, Equatable, Sendable {
         if let literal = GuardPolicy.canonicalAddress(proxyHost), !self.proxyAddresses.contains(literal) {
             self.proxyAddresses.append(literal)
         }
+        self.relaysUDP = relaysUDP
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case format, pid, proxyHost, proxyPort, proxyAddresses, relaysUDP
+    }
+
+    /// A registration written before `relaysUDP` relays UDP, as every one did then.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        format = try c.decode(Int.self, forKey: .format)
+        pid = try c.decode(Int32.self, forKey: .pid)
+        proxyHost = try c.decode(String.self, forKey: .proxyHost)
+        proxyPort = try c.decode(UInt16.self, forKey: .proxyPort)
+        proxyAddresses = try c.decode([String].self, forKey: .proxyAddresses)
+        relaysUDP = try c.decodeIfPresent(Bool.self, forKey: .relaysUDP) ?? true
     }
 }
 
@@ -70,7 +92,8 @@ public enum GuardPolicy {
     ///   * loopback — the WebRTC relay (on 127.0.0.1, in the app's own process), the profile's own
     ///     local services;
     ///   * its proxy — by the name the flow was opened by and the proxy's port, or by an address the
-    ///     app found for the proxy (any port: the proxy's UDP relay port is its own);
+    ///     app found for the proxy (any port: the proxy's UDP relay port is its own); for a process
+    ///     whose WebRTC does not go through the relay (`relaysUDP` false), TCP to the proxy's port only;
     ///   * DNS over UDP — only a question for the proxy's own name (`inspectDNS`); DNS over TCP and
     ///     any other name are dropped: through the proxy every other name is resolved by the proxy.
     /// A flow whose remote end is not known is dropped.
@@ -83,10 +106,11 @@ public enum GuardPolicy {
         if flow.remotePort == 53 { return flow.transport == .udp ? .inspectDNS : .drop }
         if let name = flow.remoteHostname.map(normalizedName), !name.isEmpty,
            name == registration.proxyHost, flow.remotePort == registration.proxyPort {
-            return .allow
+            return registration.relaysUDP || flow.transport == .tcp ? .allow : .drop
         }
         if let canonical = flow.remoteAddress.flatMap(canonicalAddress), registration.proxyAddresses.contains(canonical) {
-            return .allow
+            if registration.relaysUDP { return .allow }
+            return flow.transport == .tcp && flow.remotePort == registration.proxyPort ? .allow : .drop
         }
         return .drop
     }

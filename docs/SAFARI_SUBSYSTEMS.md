@@ -58,7 +58,7 @@ the row says what would show it.
 | Start page onboarding | traps on a new tab | stubbed | menu walk (⌘T) |
 | Web-extension store migration (`WBSWebExtensionSQLiteStoreMigrator`) | extensions of the real Safari have no place in a profile | stubbed; Safari Extensions… disabled | menu walk |
 | Tab-group sync (`WBTabGroupSyncAgentProxy` sync and observers) | its agent is refused; observers crashed a profile | stubbed (3 methods) | scale check |
-| Completion list's remote view (`SPSafariPlatformSupport`) | a view of a refused service; asked again in a loop | stubbed in every profile's process (bd9628e) | self-test (iPhone view idle 0 %, control 99 %) |
+| Completion list's remote view (`SPSafariPlatformSupport`) | a view of a refused service; asked again in a loop | stubbed in every profile's process (bd9628e) | self-test (a profile in our window, in its own process, idle 0 %, control 99 %) |
 | Default-browser question, Settings (⌘,), restorable state | not a profile's business | stubbed / our Settings | self-test, menu walk |
 | Safari's XPC services (`com.apple.Safari*`: SafariPlatformSupport helper, SearchHelper, CredentialExtractionHelper, extension helpers, configuration subscriber) | they reach the real Safari's data, the keychain and the network outside the proxy | refused by the kernel | XPC service watch (self-test) |
 | Add to Dock, browsing-data import/export, Shared with You | outside the profile (owner's decisions) | removed from the menu | menu walk |
@@ -90,3 +90,56 @@ _filePath]`, `-[NSFileManager safari_containerSettingsDirectory]` (extensions in
 sandbox-extension store), `-[WebBookmarkGroup davHomeURL]`, and the bookmarks database "(null)".
 Only the tracker's is known to reach a throw; the others are what the next measurement walks for —
 every file URL asked for with no path, over the whole menu walk and pages, with who asked.
+
+## Safari's stores in a profile's home
+
+Another browser hosting Safari's chrome gives each profile a complete Safari data tree in Safari's
+own formats (docs/SAFARI_PROCESS.md, "Profile state in Safari's own file formats"). In a profile's
+process Safari's container state (`NSHomeDirectory()/Library/Safari`) and its `~/Library/Safari`
+(moved by `SafariPaths`) both come to the home's `Library/Safari`, so the tree is kept there:
+`SafariStoreLayout.stores` (BrowserCore) lists it — `Bookmarks.plist`, `History.db`, `Embeddings.db`,
+`PerSitePreferences.db`, `IgnoredSiriSuggestedSites.db`, `CloudAutoFillCorrections.db`,
+`NotifyMeWhen.db`, `UserDefinedContentBlockers.db`, `BlockedBannerHighlights.db`,
+`ContentBlockerStatistics.db`, `Metadata Cache/LPLinkMetadata.db`, `Favicon Cache/favicons.db` and
+`favicons/`, `TopSites.plist`, `Template Icons/CacheSettings.plist`, `Link Presentation Icons/`,
+`LocalStorage/`, `Databases/___IndexedDB/`; `TabSnapshots/Metadata.db` in
+`Library/Caches/com.apple.Safari`; and Safari's container settings folder,
+`Library/Containers/com.apple.Safari/Data/Library/Safari` (`CloudTabs.db`, `SafariTabs.db`,
+`Profiles/`). Safari's getters of that last folder — `safari_containerSettingsDirectory`,
+`safari_productionSafariContainerSettingsDirectory`, `safari_profilesDirectoryURL` — answered nil in
+a profile's process (they ask for Safari's own container); they now answer the folder in the home
+(`SafariPaths.nilAnswers`), and Safari makes its tab collection there (`SafariTabs.db`, which
+"failed to instantiate" before). The extensions' folder stays nil. The resource-load statistics
+another browser keeps in its tree are its web views' data store's; a profile's are in its own WebKit
+data store.
+
+Before Safari's frameworks load, a profile's process (`SafariStores.prepare`, from
+`SafariChromeHost.prepareForChildProcess`; every check's too) makes the home's Library folders an
+account always has, `Library/Safari` and every store's folder; makes each folder and store writable
+by its owner; and sets aside (`<name>.unreadable`, with its `-wal`, `-shm`, `-journal`) a store that
+is not one — a database without SQLite's header or whose schema SQLite cannot read, a property list
+that does not parse, a file where a folder belongs. No store's content is written: Safari's own code
+makes its stores, with its own schemas, in those folders. A profile made before this gets what it
+lacks at its next launch. Nothing outside the home is looked at.
+
+The address bar check (scripts/address_bar_check.sh) reports, in each profile's own process, before
+the typing and after Return: each store of the list (present, size, writable, what SQLite says on
+opening it read-only), what the launch made, every file under the home's Library and what each of
+Safari's path getters answered there (`SafariPaths.answers`); with `FS_TRACE=1` an fs_usage trace of
+the profiles' processes says where they looked and found nothing (ENOENT) and what they were refused
+(EPERM: the real Safari's places, closed by the sandbox) — scripts/safari_stores_trace.py.
+
+Measured (CI, address bar check with `FS_TRACE=1`, macOS 26.7.2 / Safari 26.6.2 and 27.0.1 / Safari
+27.0.1, runs 43999547636 and 44003739529): in a new profile Safari's code makes `PerSitePreferences.db`,
+`IgnoredSiriSuggestedSites.db`, `UserDefinedContentBlockers.db`, `BlockedBannerHighlights.db` (held with
+an exclusive lock), `ContentBlockerStatistics.db`, `LPLinkMetadata.db`, `favicons.db`, `TopSites.plist`,
+`CacheSettings.plist`, `CloudAutoFillCorrections.db` (after typing) and `TabSnapshots/Metadata.db`, all
+opening; it never makes `Bookmarks.plist` (looked for about a hundred times a run), `History.db` (the
+History service's, refused to a profile), `Embeddings.db` (none in the runner's real Safari 27.0.1
+either), `NotifyMeWhen.db` (only its existence is asked) or `CloudTabs.db` (iCloud's). What a profile's
+process is refused is `~/Library/Containers/com.apple.Safari/Data/Library/Preferences` (EPERM, the
+sandbox); it also asks the account's `~/Library/Safari/RemoteNotifications/Permissions.plist` (ENOENT on
+a runner, where nothing made it; where it exists the sandbox refuses it) and looks for Trial's
+`NamespaceDescriptor.SAFARI_SEARCH_RANKING.plist` in the profile's home. With the runner's real Safari
+used first (pages, a search, a bookmark), nothing changed in a profile: no exception, at typing or at
+Return.

@@ -63,6 +63,9 @@ public struct VMLibrary: Equatable, Sendable {
         public var share: URL { directory.appendingPathComponent("share", isDirectory: true) }
         public var settings: URL { share.appendingPathComponent(VMGuestSettings.fileName) }
         public var status: URL { share.appendingPathComponent(VMGuestSettings.statusFileName) }
+        /// The helper's word to the guest that its display may sleep (`VMScreenSleep`), there only
+        /// while the machine's window is out of sight.
+        public var screenSleep: URL { share.appendingPathComponent(VMGuestSettings.screenSleepFileName) }
         /// The folder the machine is given read-only (`VMGuestSettings.toolsShareTag`): the boot
         /// script a machine takes a newer copy of itself from. The guest cannot write it, as it
         /// can the share — and what is taken from it runs as root in the guest.
@@ -269,8 +272,13 @@ public enum VMSetupState: Equatable, Sendable {
 /// once this start's settings are in — before Safari is opened —, which settings those were
 /// (`LUMEN_READY_REVISION`): the machine's window keeps its screen behind a cover until then
 /// (`VMStartCover`).
+///
+/// 14: the machine's display is put to sleep while the helper's word for it is in the shared
+/// folder (`VMGuestSettings.screenSleepFileName`, for a machine whose window has been out of
+/// sight a while, `VMScreenSleep`), and woken when the word is gone — only where the person's
+/// screen lock is off; what came of it is said in the status (`LUMEN_SCREEN_SLEEP`).
 public enum VMGuestTools {
-    public static let version = 13
+    public static let version = 14
     /// The first tools whose script says which step it is at and when the settings are in.
     public static let saysWhenReady = 13
     /// From this version on an installed boot script takes a newer copy of itself at a machine's

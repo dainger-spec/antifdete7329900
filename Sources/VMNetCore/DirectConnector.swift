@@ -397,11 +397,27 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         case address(VMNetIPv4)
     }
 
+    /// What the machine's network asked for.
+    private enum Request {
+        case connect(Target, UInt16)
+        /// UDP ASSOCIATE: the guest's datagrams from one of its ports (`carryUDP`).
+        case associate
+    }
+
     private func serve(_ client: Int32) {
         // The network at the other end is this process: a request that does not come at once is
         // not coming.
         Self.setTimeout(client, seconds: 15)
-        guard let (target, port) = request(from: client) else { return }
+        guard let request = request(from: client) else { return }
+        let target: Target, port: UInt16
+        switch request {
+        case .associate:
+            associate(client)
+            return
+        case .connect(let asked, let askedPort):
+            target = asked
+            port = askedPort
+        }
         let remote: Int32
         let leftover: [UInt8]
         switch tunnel(to: target, port: port) {
@@ -437,10 +453,10 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         back.wait()
     }
 
-    /// Reads SOCKS5's greeting, the sign-in and its one request; nil for anything but a CONNECT
-    /// from a client that has this connector's user name and password. Without a sign-in (method
-    /// 0) nothing is taken: any process on this Mac reaches a port on loopback.
-    private func request(from client: Int32) -> (Target, UInt16)? {
+    /// Reads SOCKS5's greeting, the sign-in and its one request; nil for anything but a CONNECT or
+    /// a UDP ASSOCIATE from a client that has this connector's user name and password. Without a
+    /// sign-in (method 0) nothing is taken: any process on this Mac reaches a port on loopback.
+    private func request(from client: Int32) -> Request? {
         guard let greeting = Self.read(client, exactly: 2), greeting[0] == 5,
               let methods = Self.read(client, exactly: Int(greeting[1])) else { return nil }
         guard methods.contains(2) else {
@@ -478,12 +494,15 @@ public final class VMNetDirectConnector: @unchecked Sendable {
         }
         guard let portBytes = Self.read(client, exactly: 2) else { return nil }
         let port = UInt16(portBytes[0]) << 8 | UInt16(portBytes[1])
+        // UDP ASSOCIATE names where the datagrams will come from: the machine's network does not
+        // know yet (all zeros); the first datagram says.
+        if head[1] == 3 { return .associate }
         guard head[1] == 1, port != 0 else {
             // 7: command not supported.
             _ = Self.sendAll(client, [5, 7, 0, 1, 0, 0, 0, 0, 0, 0])
             return nil
         }
-        return (target, port)
+        return .connect(target, port)
     }
 
     /// Whether two byte strings are the same, in a time that does not depend on where they differ.
@@ -1054,5 +1073,245 @@ public final class VMNetDirectConnector: @unchecked Sendable {
                 return
             }
         }
+    }
+}
+
+// MARK: - UDP
+
+/// A machine without a proxy sends its UDP — QUIC (HTTP/3), WebRTC — as this Mac's own, as it
+/// makes its connections: from this process's sockets, by this Mac's routes, through its VPN. A
+/// site sees the address it sees for the machine's TCP, which is this Mac's (or its VPN's) anyway.
+///
+/// The machine's network asks for it by UDP ASSOCIATE (RFC 1928 §7), as it asks a proxy: a socket
+/// on loopback takes the network's datagrams with their SOCKS5 header, and each goes out from one
+/// socket per address family — the same port for every destination, as a home router's NAT
+/// keeps it. The rules are a connection's: a name that is local by the way it is written is not
+/// looked up; a name's addresses are taken when public, or private ones this Mac sends into a
+/// tunnel (a VPN's own); an address the guest wrote itself only when public; never the Mac's own
+/// or a network it is on. An answer is taken only from where a datagram went.
+///
+/// Not while this Mac's network settings name a proxy (a VPN or proxy tool in "system proxy"
+/// mode, or a configuration file): that proxy is not asked for UDP, and UDP around it would leave
+/// from where the Mac's apps do not. The association is refused (2, not allowed), and the
+/// machine's network asks no more in that run.
+extension VMNetDirectConnector {
+    /// An association whose datagrams have not moved for this long ends (the machine's network
+    /// closes its quiet ones sooner: this is for a network that went away without a word).
+    static let udpIdleLimit = 180.0
+    /// Names resolved, and destinations answers are taken from, per association at most.
+    static let udpNamesRemembered = 64
+    static let udpDestinationsRemembered = 256
+
+    private func associate(_ client: Int32) {
+        if systemProxy?() != nil {
+            noteUDP("UDP refused: this Mac's network settings name a proxy, which is not asked for UDP")
+            _ = Self.sendAll(client, [5, 2, 0, 1, 0, 0, 0, 0, 0, 0])
+            return
+        }
+        // Where the network's datagrams come in: loopback, a port of the system's choosing.
+        let relay = Sys.datagramSocket(family: AF_INET)
+        guard relay >= 0 else {
+            _ = Self.sendAll(client, [5, 1, 0, 1, 0, 0, 0, 0, 0, 0])
+            return
+        }
+        var local = SocketEndpoint.ipv4(0x7F00_0001, port: 0)
+        let bound = withUnsafeMutablePointer(to: &local.storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { Self.systemBind(relay, $0, local.length) }
+        }
+        guard bound == 0, let port = Self.localPort(of: relay), register(relay, countsAsConnection: false) else {
+            Sys.close(relay)
+            _ = Self.sendAll(client, [5, 1, 0, 1, 0, 0, 0, 0, 0, 0])
+            return
+        }
+        defer { release(relay) }
+        guard Self.sendAll(client, [5, 0, 0, 1, 127, 0, 0, 1, UInt8(port >> 8), UInt8(port & 0xFF)]) else { return }
+        Self.setTimeout(client, seconds: 0)
+        noteUDP("UDP association")
+        carryUDP(control: client, relay: relay)
+    }
+
+    /// Carries one association's datagrams both ways until its connection ends, the connector
+    /// stops, or nothing has moved for `udpIdleLimit`.
+    private func carryUDP(control: Int32, relay: Int32) {
+        var outgoing: [Int32: Int32] = [:]
+        defer { for descriptor in outgoing.values { release(descriptor) } }
+        // The network's own socket: the first datagram's source, on loopback; no other is heard.
+        var network: SocketEndpoint?
+        var chosen: [String: Address] = [:]
+        var answering: Set<[UInt8]> = []
+        var lastMoved = Sys.now
+        let buffer = UnsafeMutableRawBufferPointer.allocate(byteCount: 65_536 + 512, alignment: 8)
+        defer { buffer.deallocate() }
+        while !isStopped && Sys.now - lastMoved < Self.udpIdleLimit {
+            var entries = [pollfd(fd: control, events: Sys.readable, revents: 0), pollfd(fd: relay, events: Sys.readable, revents: 0)]
+            let families = Array(outgoing.keys)
+            for family in families { entries.append(pollfd(fd: outgoing[family]!, events: Sys.readable, revents: 0)) }
+            let ready = Sys.wait(&entries, milliseconds: 250)
+            guard ready > 0 else { continue }
+            if entries[0].revents != 0 {
+                let got = recv(control, buffer.baseAddress, 4096, Int32(MSG_DONTWAIT))
+                if got == 0 { return }
+                if got < 0 && errno != EINTR && !Sys.wouldBlock(errno) { return }
+            }
+            if entries[1].revents & Sys.readable != 0 {
+                for _ in 0..<64 {
+                    guard let (count, source) = Self.receive(relay, into: buffer) else { break }
+                    guard source.family == AF_INET, source.address == .ipv4(0x7F00_0001) else { continue }
+                    if network == nil { network = source }
+                    guard let network, network.port == source.port else { continue }
+                    let datagram = UnsafeRawBufferPointer(rebasing: buffer[0..<count])
+                    guard let destination = destination(of: datagram, chosen: &chosen) else { continue }
+                    let family = destination.address.family
+                    if outgoing[family] == nil {
+                        let made = Sys.datagramSocket(family: family)
+                        guard made >= 0 else { continue }
+                        guard register(made, countsAsConnection: false) else {
+                            Sys.close(made)
+                            return
+                        }
+                        outgoing[family] = made
+                    }
+                    let payload = UnsafeRawBufferPointer(rebasing: datagram[destination.payloadOffset...])
+                    if Self.send(outgoing[family]!, payload, to: destination.address) {
+                        lastMoved = Sys.now
+                        if answering.count >= Self.udpDestinationsRemembered { answering.removeAll() }
+                        answering.insert(Self.key(of: destination.address))
+                    }
+                }
+            }
+            for (index, family) in families.enumerated() where entries[index + 2].revents & Sys.readable != 0 {
+                guard let descriptor = outgoing[family] else { continue }
+                for _ in 0..<64 {
+                    guard let (count, source) = Self.receive(descriptor, into: buffer) else { break }
+                    // An answer from where nothing was sent is nobody's.
+                    guard let network, answering.contains(Self.key(of: source)), let header = Self.header(of: source) else { continue }
+                    var reply = header
+                    reply += UnsafeRawBufferPointer(rebasing: buffer[0..<count])
+                    _ = reply.withUnsafeBytes { Self.send(relay, $0, to: network) }
+                    lastMoved = Sys.now
+                }
+            }
+        }
+    }
+
+    /// Where a datagram from the machine's network goes: the header read, the destination's
+    /// address chosen by the connection's rules (remembered per name), and where its payload
+    /// starts. Nil for a fragment, a header not understood, or a destination not allowed.
+    private func destination(of datagram: UnsafeRawBufferPointer, chosen: inout [String: Address])
+        -> (address: Address, payloadOffset: Int)? {
+        guard let header = SOCKSDatagram.unwrap(datagram) else { return nil }
+        let host: String, rule: Rule
+        switch header.source {
+        case .ipv4(let value):
+            host = VMNetIPv4(value).string
+            rule = allowsLocalDestinations ? .any : .publicOnly
+        case .name(let name):
+            // A name as names are written, and not one that is this machine's or the local network's.
+            guard name.utf8.allSatisfy({ $0 > 0x20 && $0 < 0x7F }) else { return nil }
+            if !allowsLocalDestinations, Self.isLocalName(name) {
+                noteUDP("UDP refused: a name of this machine or the local network")
+                return nil
+            }
+            host = name
+            rule = allowsLocalDestinations ? .any : .publicOrIntoATunnel
+        case .ipv6:
+            // The machine's network sends none.
+            return nil
+        }
+        let key = "\(host) \(header.port)"
+        if let known = chosen[key] { return (known, header.payloadOffset) }
+        var hosts = [host]
+        if case .name(let name) = header.source, let resolve, let given = resolve(name) { hosts = given }
+        for candidate in hosts {
+            let (found, _) = Self.addresses(of: candidate, port: header.port)
+            guard let address = found.first(where: { allows($0, by: rule) }) else { continue }
+            if chosen.count >= Self.udpNamesRemembered { chosen.removeAll() }
+            chosen[key] = address
+            return (address, header.payloadOffset)
+        }
+        noteUDP("UDP refused: no public address for the destination")
+        return nil
+    }
+
+    private func noteUDP(_ line: String) {
+        lock.lock()
+        notes[line, default: 0] += 1
+        lock.unlock()
+    }
+
+    /// The destination's address and port as compared with an answer's source.
+    private static func key(of address: Address) -> [UInt8] {
+        var storage = address.storage
+        let bytes = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { addressBytes($0, family: address.family) }
+        }
+        let endpoint = SocketEndpoint(storage: address.storage, length: address.length, family: address.family)
+        return bytes + [UInt8(endpoint.port >> 8), UInt8(endpoint.port & 0xFF)]
+    }
+
+    private static func key(of endpoint: SocketEndpoint) -> [UInt8] {
+        key(of: Address(family: endpoint.family, storage: endpoint.storage, length: endpoint.length))
+    }
+
+    /// The SOCKS5 header of an answer from `source` (RFC 1928 §7).
+    private static func header(of source: SocketEndpoint) -> [UInt8]? {
+        let port = [UInt8(source.port >> 8), UInt8(source.port & 0xFF)]
+        switch source.address {
+        case .ipv4(let value)?: return [0, 0, 0, 1, UInt8(value >> 24), UInt8(value >> 16 & 0xFF), UInt8(value >> 8 & 0xFF), UInt8(value & 0xFF)] + port
+        case .ipv6(let bytes)?: return [0, 0, 0, 4] + bytes + port
+        default: return nil
+        }
+    }
+
+    /// One datagram and where it came from, without waiting; nil when none waits.
+    private static func receive(_ descriptor: Int32, into buffer: UnsafeMutableRawBufferPointer) -> (Int, SocketEndpoint)? {
+        while true {
+            var storage = sockaddr_storage()
+            var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+            let got = withUnsafeMutablePointer(to: &storage) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    recvfrom(descriptor, buffer.baseAddress, buffer.count, Int32(MSG_DONTWAIT), $0, &length)
+                }
+            }
+            if got < 0 && errno == EINTR { continue }
+            guard got >= 0 else { return nil }
+            let family = Int32(storage.ss_family)
+            guard family == AF_INET || family == AF_INET6 else { continue }
+            return (got, SocketEndpoint(storage: storage, length: length, family: family))
+        }
+    }
+
+    private static func send(_ descriptor: Int32, _ bytes: UnsafeRawBufferPointer, to address: Address) -> Bool {
+        send(descriptor, bytes, to: SocketEndpoint(storage: address.storage, length: address.length, family: address.family))
+    }
+
+    /// Sends one datagram without waiting; false when the socket did not take it (it is then lost,
+    /// as on any full path).
+    private static func send(_ descriptor: Int32, _ bytes: UnsafeRawBufferPointer, to endpoint: SocketEndpoint) -> Bool {
+        var storage = endpoint.storage
+        let sent = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                sendto(descriptor, bytes.baseAddress, bytes.count, Int32(MSG_DONTWAIT), $0, endpoint.length)
+            }
+        }
+        return sent >= 0
+    }
+
+    private static func systemBind(_ descriptor: Int32, _ address: UnsafePointer<sockaddr>, _ length: socklen_t) -> Int32 {
+        #if canImport(Darwin)
+        return Darwin.bind(descriptor, address, length)
+        #else
+        return Glibc.bind(descriptor, address, length)
+        #endif
+    }
+
+    private static func localPort(of descriptor: Int32) -> UInt16? {
+        var storage = sockaddr_storage()
+        var length = socklen_t(MemoryLayout<sockaddr_storage>.size)
+        let status = withUnsafeMutablePointer(to: &storage) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(descriptor, $0, &length) }
+        }
+        guard status == 0 else { return nil }
+        return SocketEndpoint(storage: storage, length: length, family: Int32(storage.ss_family)).port
     }
 }

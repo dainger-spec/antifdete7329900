@@ -45,6 +45,8 @@ extension AppModel {
         let known = profileDetails(of: listed)
         let candidates = listed.map(\.id).filter { id in known[id].map { $0.proxyIdentity == identity } ?? true }
         let outcome = repository.follow(entry, previous: previous, among: candidates)
+        // The virtual machines that use it follow it too (each keeps a copy of its proxy).
+        if let proxy = entry.usableProxy { virtualMachines?.followProxyEntry(proxy, previous: previous) }
         for (id, reason) in outcome.failed {
             let name = profiles.first { $0.id == id }?.name ?? id.uuidString
             showError(String(format: L("proxies.follow.failed"), name, reason))

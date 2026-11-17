@@ -12,14 +12,13 @@ import WebKit
 /// add a builder here and point new `DeviceGeneration`s at it via `behaviorSetID`. The profile
 /// format and the rest of the app don't change. This deliberately does NOT inject per-version
 /// spoofing of engine signals (canvas, WebGL, audio, feature presence): that is unreliable and
-/// detectable — see docs/ISOLATION_AND_LIMITATIONS.md §2. Mobile platforms only get their device
-/// class's navigator and screen values (see `PrivacyScripts`).
+/// detectable — see docs/ISOLATION_AND_LIMITATIONS.md §2.
 @MainActor
 enum BehaviorSets {
     static func makeUserContentController(for configuration: ProfileConfiguration,
                                          systemCameraActive: Bool = false) -> WKUserContentController {
         switch configuration.deviceGeneration.behaviorSetID {
-        case DeviceGenerations.desktopBehavior, DeviceGenerations.mobileBehavior:
+        case DeviceGenerations.desktopBehavior:
             return PrivacyScripts.makeUserContentController(for: configuration, systemCameraActive: systemCameraActive)
         default:
             // Unknown behaviour set (e.g. a profile from a newer build): fall back to the shims.

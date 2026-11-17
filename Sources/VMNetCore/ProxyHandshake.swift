@@ -38,6 +38,18 @@ enum ProxyFailure: Equatable, Error {
         case .nameTooLong: return "the host name is too long for SOCKS5"
         }
     }
+
+    /// Whether this says something of the proxy itself — its sign-in refused, an answer that is
+    /// not its protocol — or only of the site it was asked for (nil): a SOCKS5 refusal ("host
+    /// unreachable", "connection refused") or an HTTP status other than 407 is the site's.
+    var proxyTrouble: VMNetProxyTrouble? {
+        switch self {
+        case .authenticationRejected, .noAcceptableMethod, .credentialsTooLong: return .login
+        case .refused(let code): return code == 407 ? .login : nil
+        case .malformedReply: return .notUnderstood
+        case .nameTooLong: return nil
+        }
+    }
 }
 
 /// What to do after the proxy's bytes so far.
@@ -62,17 +74,42 @@ protocol ProxyHandshake {
 
 /// SOCKS5 (RFC 1928) CONNECT, with user name and password (RFC 1929) when the profile has them.
 /// A host name is sent as a name (address type 3), so the proxy resolves it.
+///
+/// Or UDP ASSOCIATE (RFC 1928 §7, `udpAssociate`): the same greeting and sign-in on a TCP
+/// connection that then stays open for as long as the association lives; the proxy's answer
+/// names its relay (`bound`), where the datagrams go.
 struct SOCKS5Handshake: ProxyHandshake {
     private enum Stage { case method, authentication, reply, done }
 
+    static let connectCommand: UInt8 = 1
+    static let udpAssociateCommand: UInt8 = 3
+
     private let target: ProxyTarget
     private let credentials: ProxyCredentials?
+    private let command: UInt8
     private var stage = Stage.method
     private var buffer: [UInt8] = []
+    /// The address and port of the proxy's answer (BND.ADDR, BND.PORT): for UDP ASSOCIATE, its
+    /// relay. Set once the tunnel or the association is up.
+    private(set) var bound: (address: SOCKSAddress, port: UInt16)?
 
     init(target: ProxyTarget, credentials: ProxyCredentials?) {
         self.target = target
         self.credentials = credentials
+        command = Self.connectCommand
+    }
+
+    /// UDP ASSOCIATE. The address the datagrams will come from is not known before the relay's
+    /// socket exists, so it is all zeros, as the RFC says a client then sends: the proxy takes
+    /// datagrams from the address of this connection.
+    static func udpAssociate(credentials: ProxyCredentials?) -> SOCKS5Handshake {
+        SOCKS5Handshake(target: .address(.unspecified, port: 0), credentials: credentials, command: udpAssociateCommand)
+    }
+
+    private init(target: ProxyTarget, credentials: ProxyCredentials?, command: UInt8) {
+        self.target = target
+        self.credentials = credentials
+        self.command = command
     }
 
     mutating func begin() -> ProxyHandshakeStep {
@@ -132,6 +169,8 @@ struct SOCKS5Handshake: ProxyHandshake {
             }
             let total = 4 + addressLength + 2
             guard buffer.count >= total else { return .needMore }
+            guard let address = SOCKSAddress(type: buffer[3], bytes: buffer[4..<(4 + addressLength)]) else { return fail(.malformedReply) }
+            bound = (address, UInt16(buffer[total - 2]) << 8 | UInt16(buffer[total - 1]))
             stage = .done
             return .established(leftover: Array(buffer[total...]))
         case .done:
@@ -144,9 +183,9 @@ struct SOCKS5Handshake: ProxyHandshake {
         return .failed(failure)
     }
 
-    /// VER 5, CMD 1 (CONNECT), RSV, then the destination and its port.
+    /// VER 5, CMD (1, CONNECT, or 3, UDP ASSOCIATE), RSV, then the destination and its port.
     private func request() -> [UInt8] {
-        var bytes: [UInt8] = [5, 1, 0]
+        var bytes: [UInt8] = [5, command, 0]
         switch target {
         case .name(let name, _):
             let text = Array(name.utf8)
@@ -234,6 +273,13 @@ extension VMNetUpstream {
         case .socks5(let host, let port, _, _), .httpConnect(let host, let port, _, _): return (host, port)
         case .none: return nil
         }
+    }
+
+    /// Whether this kind of proxy can carry UDP at all: SOCKS5 (UDP ASSOCIATE). HTTP CONNECT
+    /// carries TCP only.
+    var carriesUDP: Bool {
+        if case .socks5 = self { return true }
+        return false
     }
 
     /// The handshake that asks this proxy for `target`, or nil when there is no proxy.

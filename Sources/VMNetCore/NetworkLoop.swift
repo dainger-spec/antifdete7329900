@@ -210,6 +210,20 @@ final class NetworkLoop: @unchecked Sendable {
         var dnsPoolCapacity = 60_000
         var lossToGuest = 0.0
         var lossFromGuest = 0.0
+        /// How long a UDP association has to come up; past it, the datagrams that waited for it
+        /// are answered "port unreachable".
+        var udpSetupTimeout = 10.0
+        /// A UDP association on which nothing moved either way for this long is closed (a NAT
+        /// keeps a mapping two minutes and more, RFC 4787; WebRTC and QUIC send something every
+        /// few seconds while they live).
+        var udpIdleTimeout = 120.0
+        /// UDP associations at once — each holds two descriptors, its TCP connection to the proxy
+        /// and its socket to the relay. Fewer when the process may not open that many (`udpLimit`).
+        var maximumUDPAssociations = 128
+        /// New associations a second, and at once: a page whose every host is tried over QUIC,
+        /// not a flood of connections to the proxy.
+        var udpAssociationsPerSecond = 32.0
+        var udpAssociationBurst = 64.0
     }
 
     // Shared with other threads, under `lock`.
@@ -217,6 +231,8 @@ final class NetworkLoop: @unchecked Sendable {
     private var published: VMNetCounters
     private var publishedHosts: [String: HostRecord] = [:]
     private var pendingBlocks: [String] = []
+    /// Another thread asked for every UDP association to be ended (`restartUDP`).
+    private var udpRestartRequested = false
     private var finalNames: [VMNetKnownName] = []
     private var stopRequested = false
     private let ended = NSCondition()
@@ -235,6 +251,17 @@ final class NetworkLoop: @unchecked Sendable {
     private var seenAnswers = 0
     private var flows: [FlowKey: Flow] = [:]
     private var dirty: [Flow] = []
+    /// The guest's UDP associations with the proxy, one per address and port it sends from.
+    private var associations: [UDPKey: UDPAssociation] = [:]
+    /// The proxy refused UDP ASSOCIATE outright (not supported, not allowed): for the rest of the
+    /// run UDP is answered "port unreachable", as without a relay.
+    private var udpRefusedByProxy = false
+    /// Associations that failed one after another, and until when no new one is tried.
+    private var udpFailureStreak = 0
+    private var udpPausedUntil = -Double.infinity
+    private var udpTokens = 0.0
+    private var udpTokensRefilled = -Double.infinity
+    private let udpLimit: Int
     private var counters: VMNetCounters
     /// What went to and from each host the guest asked for (`VMNetHost`): in memory only.
     private var hosts: [String: HostRecord] = [:]
@@ -261,6 +288,12 @@ final class NetworkLoop: @unchecked Sendable {
     }
 
     private let connectionLimit: Int
+
+    /// How many UDP associations a network may hold at once: what was asked for, but no more
+    /// than an eighth of its connections (each holds two descriptors), and at least four.
+    static func udpLimit(wanted: Int, connectionLimit: Int) -> Int {
+        min(wanted, max(connectionLimit / 8, 4))
+    }
 
     /// One host's counts; `seen` is when it was last asked for or carried anything (`Sys.now`).
     struct HostRecord {
@@ -294,7 +327,13 @@ final class NetworkLoop: @unchecked Sendable {
         published = counters
         connectionLimit = Self.connectionLimit(wanted: options.maximumConnections, descriptorLimit: Sys.descriptorLimit,
                                                descriptorsPerConnection: options.descriptorsPerConnection)
-        responder = LinkResponder(configuration: configuration, dnsPoolCapacity: options.dnsPoolCapacity)
+        udpLimit = Self.udpLimit(wanted: options.maximumUDPAssociations, connectionLimit: connectionLimit)
+        udpTokens = options.udpAssociationBurst
+        // UDP is handed to the loop only where the proxy can carry it: SOCKS5. An HTTP CONNECT
+        // proxy, or none, keeps "port unreachable".
+        var linkConfiguration = configuration
+        linkConfiguration.relaysUDP = configuration.relaysUDP && configuration.upstream.carriesUDP
+        responder = LinkResponder(configuration: linkConfiguration, dnsPoolCapacity: options.dnsPoolCapacity)
         channel = FrameChannel(descriptor: frameDescriptor)
         channel.lossToGuest = options.lossToGuest
         if let endpoint = configuration.upstream.endpoint {
@@ -345,6 +384,19 @@ final class NetworkLoop: @unchecked Sendable {
         wake.signal()
     }
 
+    /// Ends every UDP association, so that the guest's next datagram from each port makes a new
+    /// one: after this Mac slept, an association whose proxy side is gone (the proxy closed it, a
+    /// router forgot the connection) would otherwise go on taking the guest's datagrams into
+    /// nothing for as long as the guest keeps sending — a WebRTC call's port, kept alive by its
+    /// own checks every few seconds, never again. TCP is left alone: a connection that died says
+    /// so at its next write, and one that lived through a short sleep goes on.
+    func restartUDP() {
+        lock.lock()
+        udpRestartRequested = true
+        lock.unlock()
+        wake.signal()
+    }
+
     /// Every name the guest was given a fake address for, as the loop left them when it ended.
     var namesAtEnd: [VMNetKnownName] {
         lock.lock()
@@ -367,13 +419,14 @@ final class NetworkLoop: @unchecked Sendable {
     // MARK: - The loop
 
     func run() {
-        say("network started: \(describeUpstream()); blocked host suffixes: \(configuration.blockedHostSuffixes.count); "
+        say("network started: \(describeUpstream()); \(describeUDP()); blocked host suffixes: \(configuration.blockedHostSuffixes.count); "
             + "connections at once: \(connectionLimit)"
             + (connectionLimit < options.maximumConnections ? " (the process may open only \(Sys.descriptorLimit) descriptors)" : ""))
         let wakeUp: @Sendable () -> Void = { [wake] in wake.signal() }
         resolver?.resolveIfNeeded(now: Sys.now, done: wakeUp)
         var entries: [pollfd] = []
         var polled: [Flow] = []
+        var polledUDP: [(association: UDPAssociation, isRelay: Bool)] = []
         while !shouldStop {
             var now = Sys.now
             channel.now = now
@@ -386,6 +439,7 @@ final class NetworkLoop: @unchecked Sendable {
 
             entries.removeAll(keepingCapacity: true)
             polled.removeAll(keepingCapacity: true)
+            polledUDP.removeAll(keepingCapacity: true)
             entries.append(pollfd(fd: wake.descriptor, events: Sys.readable, revents: 0))
             let wireWaits = wireOpen && now >= wireHoldUntil
             entries.append(pollfd(fd: wireWaits ? channel.descriptor : -1, events: Sys.readable, revents: 0))
@@ -403,6 +457,25 @@ final class NetworkLoop: @unchecked Sendable {
                 entries.append(pollfd(fd: flow.descriptor, events: events, revents: 0))
                 polled.append(flow)
             }
+            for association in associations.values {
+                if association.control >= 0 {
+                    if association.holdUntil > now {
+                        wakeAt = min(wakeAt, association.holdUntil)
+                    } else {
+                        let events = controlInterest(of: association)
+                        if events != 0 {
+                            entries.append(pollfd(fd: association.control, events: events, revents: 0))
+                            polledUDP.append((association, false))
+                        }
+                    }
+                }
+                // The relay's datagrams wait in its socket while the guest's wire is full: what does
+                // not fit there is lost, as on any congested path, and QUIC slows down.
+                if association.relay >= 0 && association.phase == .open && !channel.isCongested {
+                    entries.append(pollfd(fd: association.relay, events: Sys.readable, revents: 0))
+                    polledUDP.append((association, true))
+                }
+            }
             let timeout: Int32 = wakeAt == .infinity ? -1 : Int32(min(max((wakeAt - now) * 1000, 0).rounded(.up), 60_000))
             let ready = Sys.wait(&entries, milliseconds: timeout)
             if ready < 0 && errno != EINTR {
@@ -415,6 +488,7 @@ final class NetworkLoop: @unchecked Sendable {
             if entries[0].revents != 0 { wake.drain() }
             if shouldStop { break }
             applyBlocks(now)
+            applyUDPRestart(now)
             resolverAnswered(now)
             if channel.isCongested && now >= channel.retryAt && channel.retry() {
                 // The wire has room again: every connection with something to send may go on.
@@ -425,6 +499,15 @@ final class NetworkLoop: @unchecked Sendable {
                 for (index, flow) in polled.enumerated() {
                     let entry = entries[index + 2]
                     if entry.revents != 0 && flow.descriptor == entry.fd { upstreamEvent(flow, entry.revents, now) }
+                }
+                for (index, item) in polledUDP.enumerated() {
+                    let entry = entries[index + 2 + polled.count]
+                    guard entry.revents != 0 else { continue }
+                    if item.isRelay {
+                        if item.association.relay == entry.fd { relayEvent(item.association, entry.revents, now) }
+                    } else if item.association.control == entry.fd {
+                        controlEvent(item.association, entry.revents, now)
+                    }
                 }
             }
         }
@@ -438,6 +521,7 @@ final class NetworkLoop: @unchecked Sendable {
         }
         flows.removeAll()
         counters.connectionsActive = 0
+        closeAllAssociations()
         for name in Array(hosts.keys) { hosts[name]?.open = 0 }
         hostsChanged = true
         hostsPublishedAt = -Double.infinity
@@ -451,6 +535,8 @@ final class NetworkLoop: @unchecked Sendable {
         say("network stopped: connections opened \(counters.connectionsOpened), failed \(counters.connectionsFailed); "
             + "bytes from the guest \(counters.bytesFromGuest), to the guest \(counters.bytesToGuest); "
             + "DNS queries \(counters.dnsQueries), blocked \(counters.dnsBlocked); datagrams dropped \(counters.datagramsDropped); "
+            + "datagrams relayed \(counters.datagramsRelayed), to the guest \(counters.datagramsToGuest); "
+            + "UDP associations opened \(counters.udpAssociationsOpened), failed \(counters.udpAssociationsFailed); "
             + "frames the wire did not take \(lost)")
         wake.close()
         ended.lock()
@@ -490,6 +576,19 @@ final class NetworkLoop: @unchecked Sendable {
         hostsChanged = true
     }
 
+    /// The UDP associations other threads asked to have ended (`restartUDP`).
+    private func applyUDPRestart(_ now: Double) {
+        lock.lock()
+        let wanted = udpRestartRequested
+        udpRestartRequested = false
+        lock.unlock()
+        guard wanted, !associations.isEmpty else { return }
+        // Those being set up now are new ones, and go on.
+        for association in Array(associations.values) where association.phase == .open {
+            endAssociation(association, "UDP association ended, made anew at the next datagram (this Mac woke)", now)
+        }
+    }
+
     /// The names other threads asked to have blocked: from now on, and what is open to them ends.
     private func applyBlocks(_ now: Double) {
         lock.lock()
@@ -501,6 +600,10 @@ final class NetworkLoop: @unchecked Sendable {
         for flow in flows.values where flow.tcp.state != .closed && responder.isBlocked(flow.host) {
             flow.tcp.upstreamBroke(now: now)
             markDirty(flow)
+        }
+        // What a blocked name answers over UDP is not shown any more; what the guest sends it is refused.
+        for association in associations.values {
+            association.forgetDestinations { responder.isBlocked($0) }
         }
     }
 
@@ -567,6 +670,8 @@ final class NetworkLoop: @unchecked Sendable {
                     frame.withUnsafeBytes { channel.send($0) }
                 case .tcp(let source, let packet, let segment):
                     handleSegment(segment, in: packet, from: source, now)
+                case .udp(let source, let packet, let datagram):
+                    handleDatagram(datagram, in: packet, from: source, now)
                 }
             }
         }
@@ -590,6 +695,7 @@ final class NetworkLoop: @unchecked Sendable {
         }
         flows.removeAll()
         dirty.removeAll()
+        closeAllAssociations()
     }
 
     private func handleSegment(_ segment: TCPSegment, in packet: IPv4Packet, from source: VMNetMAC, _ now: Double) {
@@ -679,7 +785,7 @@ final class NetworkLoop: @unchecked Sendable {
                 if snapshot.isResolving {
                     flow.phase = .waiting
                 } else {
-                    fail(flow, "the proxy's address was not found", proxyUnreachable: false, now)
+                    fail(flow, "the proxy's address was not found", proxyUnreachable: false, trouble: .unreachable, now)
                 }
                 return
             }
@@ -700,9 +806,16 @@ final class NetworkLoop: @unchecked Sendable {
         }
         for flow in Array(flows.values) where flow.phase == .waiting {
             if snapshot.addresses.isEmpty {
-                fail(flow, "the proxy's address was not found", proxyUnreachable: false, now)
+                fail(flow, "the proxy's address was not found", proxyUnreachable: false, trouble: .unreachable, now)
             } else {
                 connectNext(flow, now)
+            }
+        }
+        for association in Array(associations.values) where association.phase == .waiting {
+            if snapshot.addresses.isEmpty {
+                failAssociation(association, "the proxy's address was not found", proxyUnreachable: false, now)
+            } else {
+                connectAssociation(association, now)
             }
         }
     }
@@ -738,7 +851,7 @@ final class NetworkLoop: @unchecked Sendable {
             flow.lastError = Sys.describe(status)
             Sys.close(descriptor)
         }
-        fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, now)
+        fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, trouble: .unreachable, now)
     }
 
     private func connected(_ flow: Flow, _ now: Double) {
@@ -760,12 +873,15 @@ final class NetworkLoop: @unchecked Sendable {
             flow.outgoing = []
             counters.connectionsOpened += 1
             counters.connectionsActive += 1
+            // The proxy carries connections again.
+            counters.proxyFailuresInARow = 0
+            counters.proxyTrouble = nil
             withHost(flow.host, now) { $0.open += 1 }
             flow.tcp.tunnelEstablished(now: now)
             if !leftover.isEmpty { leftover.withUnsafeBytes { flow.tcp.upstreamData($0, now: now) } }
             markDirty(flow)
         case .failed(let failure):
-            fail(flow, failure.reason, proxyUnreachable: false, now)
+            fail(flow, failure.reason, proxyUnreachable: false, trouble: failure.proxyTrouble, now)
         }
     }
 
@@ -787,7 +903,7 @@ final class NetworkLoop: @unchecked Sendable {
             } else if Sys.wouldBlock(sent.1) {
                 return progressed
             } else {
-                fail(flow, "the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, now)
+                fail(flow, "the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, trouble: .unreachable, now)
                 return true
             }
         }
@@ -804,23 +920,33 @@ final class NetworkLoop: @unchecked Sendable {
             return true
         }
         if count == 0 {
-            fail(flow, "the proxy closed the connection", proxyUnreachable: false, now)
+            fail(flow, "the proxy closed the connection", proxyUnreachable: false, trouble: .unreachable, now)
             return true
         }
         let code = errno
         if code == EINTR || Sys.wouldBlock(code) { return false }
-        fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, now)
+        fail(flow, "the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, trouble: .unreachable, now)
         return true
     }
 
     /// The proxy gave no tunnel: the guest's SYN is answered with a reset and the connection forgotten.
-    private func fail(_ flow: Flow, _ reason: String, proxyUnreachable: Bool, _ now: Double) {
+    ///
+    /// `trouble`: the failure is the proxy's own (not reached, not answering, the sign-in refused,
+    /// an answer not understood) — counted one after another until a tunnel comes up
+    /// (`VMNetCounters.proxyFailuresInARow`), so that a proxy that goes down while the machine runs
+    /// is said, not left to be guessed. Nil: the proxy answered and said it cannot reach the site
+    /// (a site that is down, a tracker that is gone) — that says nothing of the proxy.
+    private func fail(_ flow: Flow, _ reason: String, proxyUnreachable: Bool, trouble: VMNetProxyTrouble?, _ now: Double) {
         if flow.descriptor >= 0 {
             Sys.close(flow.descriptor)
             flow.descriptor = -1
         }
         flow.phase = .done
         counters.connectionsFailed += 1
+        if let trouble {
+            counters.proxyFailuresInARow += 1
+            counters.proxyTrouble = trouble
+        }
         note(reason, now)
         if proxyUnreachable, let resolver {
             resolver.connectionFailed()
@@ -1003,20 +1129,26 @@ final class NetworkLoop: @unchecked Sendable {
             let deadline = flow.nextDeadline
             if deadline <= now { due.append(flow) } else if deadline < next { next = deadline }
         }
+        var dueAssociations: [UDPAssociation] = []
+        for association in associations.values {
+            let deadline = association.phase == .open ? association.lastActivity + options.udpIdleTimeout : association.nextDeadline
+            if deadline <= now { dueAssociations.append(association) } else if deadline < next { next = deadline }
+        }
         nextTimerCheck = next
         timersRanAt = now
+        for association in dueAssociations { associationTimerFired(association, now) }
         for flow in due {
             switch flow.phase {
             case .waiting:
-                fail(flow, "the proxy's address was not found in time", proxyUnreachable: false, now)
+                fail(flow, "the proxy's address was not found in time", proxyUnreachable: false, trouble: .unreachable, now)
             case .handshaking:
-                fail(flow, "the proxy did not answer in time", proxyUnreachable: false, now)
+                fail(flow, "the proxy did not answer in time", proxyUnreachable: false, trouble: .unreachable, now)
             case .connecting:
                 Sys.close(flow.descriptor)
                 flow.descriptor = -1
                 flow.lastError = Sys.describe(ETIMEDOUT)
                 if now >= flow.deadline {
-                    fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, now)
+                    fail(flow, "the proxy was not reached (\(flow.lastError))", proxyUnreachable: true, trouble: .unreachable, now)
                 } else {
                     connectNext(flow, now)
                 }
@@ -1058,5 +1190,505 @@ final class NetworkLoop: @unchecked Sendable {
         case .httpConnect(_, _, let username, _): return "HTTP CONNECT proxy" + (username?.isEmpty == false ? " with a sign-in" : "")
         case .none: return "no proxy (every connection is refused)"
         }
+    }
+
+    /// Whether UDP goes anywhere in this run.
+    private func describeUDP() -> String {
+        guard configuration.relaysUDP else { return "UDP: not carried (answered unreachable)" }
+        guard configuration.upstream.carriesUDP else { return "UDP: not carried, the proxy is not SOCKS5" }
+        return "UDP: through the proxy's relay (at most \(udpLimit) associations)"
+    }
+}
+
+// MARK: - UDP through the proxy's relay
+
+/// The guest's UDP, where the run carries it (`VMNetConfiguration.relaysUDP`, a SOCKS5 proxy): one
+/// association (RFC 1928 §7) per address and port the guest sends from, made as a connection is —
+/// the proxy's address, a TCP connection to it, the greeting and sign-in, then UDP ASSOCIATE — and
+/// a socket to the relay the proxy named, connected to it, so that the system drops a datagram
+/// from anywhere else. Where a datagram may go is decided as for a connection
+/// (`DestinationPolicy`); a fake address goes to the proxy as its name.
+extension NetworkLoop {
+    private func handleDatagram(_ datagram: UDPDatagram, in packet: IPv4Packet, from source: VMNetMAC, _ now: Double) {
+        guard !udpRefusedByProxy else {
+            refuseDatagram(packet, from: source, now)
+            return
+        }
+        let decision = DestinationPolicy.decide(address: packet.destination, port: datagram.destinationPort,
+                                                gateway: configuration.gatewayAddress, prefixLength: configuration.prefixLength) { address in
+            responder.name(forFakeAddress: address)
+        }
+        let target: ProxyTarget
+        switch decision {
+        case .refuse(let refusal):
+            note("UDP refused, \(refusal.rawValue)", now)
+            refuseDatagram(packet, from: source, now)
+            return
+        case .connect(let chosen):
+            target = chosen
+        }
+        if case .name(let name, _) = target, responder.isBlocked(name) {
+            withHost(name, now) { $0.blocked += 1 }
+            note("UDP refused, a blocked name", now)
+            refuseDatagram(packet, from: source, now)
+            return
+        }
+        guard let wrapped = SOCKSDatagram.wrap(datagram.payload, to: target) else {
+            note("UDP refused, the host name is too long for SOCKS5", now)
+            refuseDatagram(packet, from: source, now)
+            return
+        }
+        let key = UDPKey(guestAddress: packet.source.value, guestPort: datagram.sourcePort)
+        let association: UDPAssociation
+        if let known = associations[key] {
+            association = known
+        } else {
+            guard let made = openAssociation(key, guestMAC: source, now) else {
+                refuseDatagram(packet, from: source, now)
+                return
+            }
+            association = made
+        }
+        let host = target.hostText
+        if association.noteDestination(packet.destination, port: datagram.destinationPort, target: target, host: host, now: now,
+                                       payload: datagram.payload) {
+            withHost(host, now) { $0.connections += 1 }
+        }
+        association.lastActivity = now
+        if association.phase == .open {
+            sendToRelay(association, wrapped, payloadLength: datagram.payload.count, host: host, now)
+            return
+        }
+        let waiting = UDPAssociation.Waiting(datagram: wrapped, payloadLength: datagram.payload.count, host: host,
+                                             quote: Array(packet.header) + Array(packet.payload.prefix(8)), destination: packet.destination)
+        if !association.hold(waiting) {
+            counters.datagramsDropped += 1
+            note("UDP dropped, too many datagrams waiting for an association", now)
+        }
+    }
+
+    /// "Port unreachable" for a datagram that goes nowhere (rate-limited, as every such answer).
+    private func refuseDatagram(_ packet: IPv4Packet, from source: VMNetMAC, _ now: Double) {
+        counters.datagramsDropped += 1
+        if let reply = responder.portUnreachable(to: source, packet: packet, now: now) {
+            reply.withUnsafeBytes { channel.send($0) }
+        }
+    }
+
+    /// A new association for the guest's `key`, on its way; nil when none may be made now.
+    private func openAssociation(_ key: UDPKey, guestMAC: VMNetMAC, _ now: Double) -> UDPAssociation? {
+        guard resolver != nil, case .socks5(_, _, let username, let password) = configuration.upstream else { return nil }
+        if now < udpPausedUntil {
+            note("UDP refused, the proxy's relay failed a moment ago", now)
+            return nil
+        }
+        if associations.count >= udpLimit, !dropIdleAssociation(now) {
+            note("UDP refused, too many associations at once", now)
+            return nil
+        }
+        guard takeUDPToken(now) else {
+            note("UDP refused, too many new associations at once", now)
+            return nil
+        }
+        let association = UDPAssociation(key: key, guestMAC: guestMAC, credentials: ProxyCredentials(username: username, password: password),
+                                         now: now, setupTimeout: options.udpSetupTimeout)
+        associations[key] = association
+        startAssociation(association, now)
+        return association.phase == .done ? nil : association
+    }
+
+    /// Makes room in a full table by closing the association that has been quiet the longest,
+    /// if it has been quiet for half a minute: one that is in use is not taken from the guest.
+    private func dropIdleAssociation(_ now: Double) -> Bool {
+        guard let quietest = associations.values.min(by: { $0.lastActivity < $1.lastActivity }),
+              now - quietest.lastActivity >= 30 else { return false }
+        endAssociation(quietest, "UDP association closed to make room", now)
+        return true
+    }
+
+    private func takeUDPToken(_ now: Double) -> Bool {
+        if udpTokensRefilled.isFinite {
+            udpTokens = min(options.udpAssociationBurst, udpTokens + max(now - udpTokensRefilled, 0) * options.udpAssociationsPerSecond)
+        }
+        udpTokensRefilled = now
+        guard udpTokens >= 1 else { return false }
+        udpTokens -= 1
+        return true
+    }
+
+    // MARK: Setting an association up
+
+    private func startAssociation(_ association: UDPAssociation, _ now: Double) {
+        guard let resolver else { return failAssociation(association, "the profile has no usable proxy", proxyUnreachable: false, now) }
+        noteDeadline(association.deadline)
+        if resolver.snapshot.addresses.isEmpty {
+            resolver.resolveIfNeeded(now: now, done: { [wake] in wake.signal() })
+            let snapshot = resolver.snapshot
+            if snapshot.addresses.isEmpty {
+                if snapshot.isResolving {
+                    association.phase = .waiting
+                } else {
+                    failAssociation(association, "the proxy's address was not found", proxyUnreachable: false, now)
+                }
+                return
+            }
+        }
+        connectAssociation(association, now)
+    }
+
+    /// Tries the proxy's next address, as a connection does: the one that worked last first.
+    private func connectAssociation(_ association: UDPAssociation, _ now: Double) {
+        guard let resolver else { return }
+        let snapshot = resolver.snapshot
+        let count = snapshot.addresses.count
+        while association.attempts < count {
+            let index = (snapshot.preferredIndex + association.attempts) % count
+            association.attempts += 1
+            let address = snapshot.addresses[index]
+            let descriptor = Sys.streamSocket(family: address.family)
+            guard descriptor >= 0 else {
+                association.lastError = Sys.describe(errno)
+                continue
+            }
+            let status = Sys.connect(descriptor, to: address)
+            association.addressIndex = index
+            if status == 0 {
+                association.control = descriptor
+                associationConnected(association, now)
+                return
+            }
+            if status == EINPROGRESS || status == EINTR {
+                association.control = descriptor
+                association.phase = .connecting
+                association.attemptDeadline = association.attempts < count
+                    ? min(association.deadline, now + options.attemptTimeout) : association.deadline
+                noteDeadline(association.attemptDeadline)
+                return
+            }
+            association.lastError = Sys.describe(status)
+            Sys.close(descriptor)
+        }
+        failAssociation(association, "the proxy was not reached (\(association.lastError))", proxyUnreachable: true, now)
+    }
+
+    private func associationConnected(_ association: UDPAssociation, _ now: Double) {
+        resolver?.connectionSucceeded(index: association.addressIndex)
+        association.phase = .handshaking
+        association.attemptDeadline = .infinity
+        applyAssociation(association.handshake.begin(), to: association, now)
+    }
+
+    private func applyAssociation(_ step: ProxyHandshakeStep, to association: UDPAssociation, _ now: Double) {
+        switch step {
+        case .needMore:
+            break
+        case .send(let bytes):
+            association.outgoing += bytes
+            writeAssociationHandshake(association, now)
+        case .established:
+            openRelay(association, now)
+        case .failed(let failure):
+            if case .refused(let code) = failure, code == 7 || code == 2 {
+                // "Command not supported", "not allowed by the rules": this proxy carries no UDP.
+                // Not asked again in this run: what waits, and what comes, is answered unreachable.
+                refuseUDPForTheRun(code, now)
+            }
+            failAssociation(association, "UDP " + failure.reason, proxyUnreachable: false, now)
+        }
+    }
+
+    private func refuseUDPForTheRun(_ code: Int, _ now: Double) {
+        guard !udpRefusedByProxy else { return }
+        udpRefusedByProxy = true
+        say("the proxy does not carry UDP (UDP ASSOCIATE refused, code \(code)): UDP is answered unreachable for the rest of the run")
+        for other in Array(associations.values) where other.phase != .open {
+            failAssociation(other, "UDP the proxy refused UDP", proxyUnreachable: false, now)
+        }
+    }
+
+    /// The proxy has said where its relay is: a socket to it, connected, and what waited goes.
+    private func openRelay(_ association: UDPAssociation, _ now: Double) {
+        guard let bound = association.handshake.bound, let proxy = Sys.peer(of: association.control),
+              let endpoint = UDPRelayRules.relayEndpoint(bound: bound.address, port: bound.port, proxy: proxy) else {
+            failAssociation(association, "UDP the proxy named a relay that is not an address", proxyUnreachable: false, now)
+            return
+        }
+        let descriptor = Sys.datagramSocket(family: endpoint.family)
+        guard descriptor >= 0 else {
+            failAssociation(association, "UDP no socket for the relay (\(Sys.describe(errno)))", proxyUnreachable: false, now)
+            return
+        }
+        let status = Sys.connect(descriptor, to: endpoint)
+        guard status == 0 else {
+            Sys.close(descriptor)
+            failAssociation(association, "UDP the relay was not reached (\(Sys.describe(status)))", proxyUnreachable: false, now)
+            return
+        }
+        association.relay = descriptor
+        association.phase = .open
+        association.outgoing = []
+        association.lastActivity = now
+        counters.udpAssociationsOpened += 1
+        counters.udpAssociationsActive += 1
+        udpFailureStreak = 0
+        noteDeadline(now + options.udpIdleTimeout)
+        for waiting in association.takeWaiting() {
+            sendToRelay(association, waiting.datagram, payloadLength: waiting.payloadLength, host: waiting.host, now)
+            guard association.phase == .open else { break }
+        }
+    }
+
+    @discardableResult
+    private func writeAssociationHandshake(_ association: UDPAssociation, _ now: Double) -> Bool {
+        var progressed = false
+        while association.outgoingSent < association.outgoing.count {
+            let sent = association.outgoing.withUnsafeBytes { bytes -> (Int, Int32) in
+                let count = Sys.send(association.control, UnsafeRawBufferPointer(rebasing: bytes[association.outgoingSent...]))
+                return (count, errno)
+            }
+            if sent.0 > 0 {
+                association.outgoingSent += sent.0
+                progressed = true
+            } else if sent.1 == EINTR {
+                continue
+            } else if Sys.wouldBlock(sent.1) {
+                return progressed
+            } else {
+                failAssociation(association, "UDP the proxy closed the connection (\(Sys.describe(sent.1)))", proxyUnreachable: false, now)
+                return true
+            }
+        }
+        association.outgoing = []
+        association.outgoingSent = 0
+        return progressed
+    }
+
+    private func readAssociationHandshake(_ association: UDPAssociation, _ now: Double) -> Bool {
+        let count = Sys.receive(association.control, UnsafeMutableRawBufferPointer(rebasing: streamBuffer[0..<4096]))
+        if count > 0 {
+            applyAssociation(association.handshake.receive(Array(UnsafeRawBufferPointer(rebasing: streamBuffer[0..<count]))),
+                             to: association, now)
+            return true
+        }
+        if count == 0 {
+            failAssociation(association, "UDP the proxy closed the connection", proxyUnreachable: false, now)
+            return true
+        }
+        let code = errno
+        if code == EINTR || Sys.wouldBlock(code) { return false }
+        failAssociation(association, "UDP the proxy closed the connection (\(Sys.describe(code)))", proxyUnreachable: false, now)
+        return true
+    }
+
+    // MARK: Events
+
+    private func controlInterest(of association: UDPAssociation) -> Int16 {
+        switch association.phase {
+        case .waiting, .done: return 0
+        case .connecting: return Sys.writable
+        case .handshaking:
+            return association.outgoingSent < association.outgoing.count ? Sys.readable | Sys.writable : Sys.readable
+        // Nothing more is said on it; it is watched for its end, which ends the association.
+        case .open: return Sys.readable
+        }
+    }
+
+    private func controlEvent(_ association: UDPAssociation, _ revents: Int16, _ now: Double) {
+        switch association.phase {
+        case .waiting, .done:
+            break
+        case .connecting:
+            let error = Sys.pendingError(association.control)
+            if error == 0 && revents & Sys.writable != 0 {
+                associationConnected(association, now)
+            } else {
+                association.lastError = Sys.describe(error == 0 ? ECONNREFUSED : error)
+                Sys.close(association.control)
+                association.control = -1
+                connectAssociation(association, now)
+            }
+        case .handshaking:
+            var progressed = false
+            if revents & Sys.writable != 0 { progressed = writeAssociationHandshake(association, now) }
+            if association.phase == .handshaking && revents & (Sys.readable | Sys.hungUp | Sys.failed) != 0 {
+                progressed = readAssociationHandshake(association, now) || progressed
+            }
+            if !progressed && association.phase == .handshaking && revents & (Sys.hungUp | Sys.failed) != 0 {
+                association.holdUntil = now + 0.02
+            }
+        case .open:
+            // The association lives as long as this connection (RFC 1928 §7). Whatever else the
+            // proxy says on it is read and let go.
+            var rounds = 0
+            while rounds < 4 {
+                rounds += 1
+                let count = Sys.receive(association.control, UnsafeMutableRawBufferPointer(rebasing: streamBuffer[0..<4096]))
+                if count > 0 { continue }
+                if count == 0 {
+                    endAssociation(association, "UDP association ended, the proxy closed it", now)
+                    return
+                }
+                let code = errno
+                if code == EINTR { continue }
+                if !Sys.wouldBlock(code) {
+                    endAssociation(association, "UDP association ended, its connection broke", now)
+                    return
+                }
+                break
+            }
+            if revents & (Sys.hungUp | Sys.failed) != 0 && Sys.pendingError(association.control) != 0 {
+                endAssociation(association, "UDP association ended, its connection broke", now)
+            }
+        }
+    }
+
+    /// Datagrams from the relay: each one shown to the guest "from" the destination it answers.
+    private func relayEvent(_ association: UDPAssociation, _ revents: Int16, _ now: Double) {
+        var rounds = 0
+        while rounds < 64 && association.phase == .open && !channel.isCongested {
+            let count = Sys.receive(association.relay, streamBuffer)
+            if count >= 0 {
+                rounds += 1
+                deliverFromRelay(association, UnsafeRawBufferPointer(rebasing: streamBuffer[0..<count]), now)
+                continue
+            }
+            let code = errno
+            if code == EINTR { continue }
+            if Sys.wouldBlock(code) { break }
+            // A connected datagram socket is told of an ICMP error from the relay: it is not there.
+            endAssociation(association, "UDP association ended, the relay is not there (\(Sys.describe(code)))", now)
+            break
+        }
+    }
+
+    private func deliverFromRelay(_ association: UDPAssociation, _ bytes: UnsafeRawBufferPointer, _ now: Double) {
+        guard let header = SOCKSDatagram.unwrap(bytes) else {
+            note("UDP dropped, a datagram from the relay was not understood (or was a fragment)", now)
+            return
+        }
+        let payload = UnsafeRawBufferPointer(rebasing: bytes[header.payloadOffset...])
+        guard let destination = association.destination(answering: header.source, port: header.port, now: now, payload: payload) else {
+            note("UDP dropped, an answer from where the guest sent nothing", now)
+            return
+        }
+        guard payload.count + IPv4Packet.minimumHeaderLength + UDPDatagram.headerLength <= configuration.effectiveMTU else {
+            note("UDP dropped, an answer larger than the guest's network takes", now)
+            return
+        }
+        let frame = responder.datagram(to: association.guestMAC, from: destination.guestAddress, port: destination.port,
+                                       to: VMNetIPv4(association.key.guestAddress), port: association.key.guestPort, payload: payload)
+        frame.withUnsafeBytes { channel.send($0) }
+        association.lastActivity = now
+        counters.datagramsToGuest += 1
+        counters.udpBytesToGuest += UInt64(payload.count)
+        withHost(destination.host, now) { $0.bytesToGuest += UInt64(payload.count) }
+    }
+
+    private func sendToRelay(_ association: UDPAssociation, _ datagram: [UInt8], payloadLength: Int, host: String, _ now: Double) {
+        while true {
+            let sent = datagram.withUnsafeBytes { Sys.send(association.relay, $0) }
+            if sent >= 0 {
+                counters.datagramsRelayed += 1
+                counters.udpBytesFromGuest += UInt64(payloadLength)
+                withHost(host, now) { $0.bytesFromGuest += UInt64(payloadLength) }
+                return
+            }
+            let code = errno
+            if code == EINTR { continue }
+            counters.datagramsDropped += 1
+            if Sys.wouldBlock(code) || code == ENOBUFS {
+                // A full socket: dropped, as a router drops what it has no room for.
+                note("UDP dropped, the relay's socket was full", now)
+            } else if code == ECONNREFUSED {
+                endAssociation(association, "UDP association ended, the relay is not there (\(Sys.describe(code)))", now)
+            } else {
+                note("UDP dropped, the relay did not take it (\(Sys.describe(code)))", now)
+            }
+            return
+        }
+    }
+
+    // MARK: Timers and endings
+
+    private func associationTimerFired(_ association: UDPAssociation, _ now: Double) {
+        switch association.phase {
+        case .waiting:
+            failAssociation(association, "UDP the proxy's address was not found in time", proxyUnreachable: false, now)
+        case .handshaking:
+            failAssociation(association, "UDP the proxy did not answer in time", proxyUnreachable: false, now)
+        case .connecting:
+            Sys.close(association.control)
+            association.control = -1
+            association.lastError = Sys.describe(ETIMEDOUT)
+            if now >= association.deadline {
+                failAssociation(association, "the proxy was not reached (\(association.lastError))", proxyUnreachable: true, now)
+            } else {
+                connectAssociation(association, now)
+            }
+        case .open:
+            endAssociation(association, "UDP association closed, nothing moved for too long", now)
+        case .done:
+            if associations[association.key] === association { associations[association.key] = nil }
+        }
+    }
+
+    /// An association that never came up: what waited for it is answered "port unreachable".
+    /// Associations that fail one after another make the next wait a little longer.
+    private func failAssociation(_ association: UDPAssociation, _ reason: String, proxyUnreachable: Bool, _ now: Double) {
+        guard association.phase != .done else { return }
+        closeDescriptors(of: association)
+        association.phase = .done
+        counters.udpAssociationsFailed += 1
+        note(reason.hasPrefix("UDP ") ? reason : "UDP " + reason, now)
+        if !udpRefusedByProxy {
+            udpFailureStreak += 1
+            udpPausedUntil = now + min(0.25 * Double(1 << min(udpFailureStreak - 1, 8)), 30)
+        }
+        if proxyUnreachable, let resolver {
+            resolver.connectionFailed()
+            resolver.resolveIfNeeded(now: now, done: { [wake] in wake.signal() })
+        }
+        let key = association.key
+        for waiting in association.takeWaiting() {
+            counters.datagramsDropped += 1
+            if let reply = responder.portUnreachable(to: association.guestMAC, quoting: waiting.quote, from: waiting.destination,
+                                                     to: VMNetIPv4(key.guestAddress), now: now) {
+                reply.withUnsafeBytes { channel.send($0) }
+            }
+        }
+        if associations[key] === association { associations[key] = nil }
+    }
+
+    /// An association that was up ends: its connection and its socket are closed. The guest's
+    /// next datagram from that port makes a new one.
+    private func endAssociation(_ association: UDPAssociation, _ reason: String, _ now: Double) {
+        guard association.phase != .done else { return }
+        let wasOpen = association.phase == .open
+        closeDescriptors(of: association)
+        association.phase = .done
+        if wasOpen { counters.udpAssociationsActive -= 1 }
+        note(reason, now)
+        _ = association.takeWaiting()
+        if associations[association.key] === association { associations[association.key] = nil }
+    }
+
+    private func closeDescriptors(of association: UDPAssociation) {
+        if association.control >= 0 {
+            Sys.close(association.control)
+            association.control = -1
+        }
+        if association.relay >= 0 {
+            Sys.close(association.relay)
+            association.relay = -1
+        }
+    }
+
+    private func closeAllAssociations() {
+        for association in associations.values {
+            closeDescriptors(of: association)
+            association.phase = .done
+        }
+        associations.removeAll()
+        counters.udpAssociationsActive = 0
     }
 }

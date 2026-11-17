@@ -3,8 +3,7 @@ import ObjCExceptions
 import WebKit
 
 /// What each action a person takes in a browser window does in this profile's window (the owner, 8
-/// November: in an iPhone view text would not paste — the view is our window, not Safari's, and its
-/// process had no menu bar). Each key goes as AppKit sends a key press: to the menu bar's key
+/// November: in our window, not Safari's, text would not paste — its process had no menu bar). Each key goes as AppKit sends a key press: to the menu bar's key
 /// equivalents first, then the window's views, then the first responder's keyDown; each line says
 /// which took it, what changed (the field's text, the page's field, the pasteboard, the zoom, a
 /// sheet) and ends "— WORKS" or "— DOES NOT WORK", which the self-test's "window actions" checks
@@ -260,15 +259,9 @@ enum WindowAudit {
             let there = item.map { $0.isEnabled } ?? false
             say("\(name): \(item.map { "menu item \"\($0.title)\"\($0.isEnabled ? "" : " (disabled)")" } ?? "no menu item") — \(there ? "WORKS" : "DOES NOT WORK")")
         }
-        // Full screen: an iPhone has none, so an iPhone view offers none; elsewhere it is there.
+        // Full screen.
         let fullScreen = menuItem("f", [.command, .control])
-        if controller?.isPhoneLayout == true {
-            say("full screen (⌃⌘F) in an iPhone view: \(fullScreen.map { "menu item \"\($0.title)\"\($0.isEnabled ? "" : " (disabled)")" } ?? "no menu item"), "
-                + "the window \(window.collectionBehavior.contains(.fullScreenNone) ? "cannot" : "CAN") go full screen — "
-                + "\((fullScreen?.isEnabled ?? false) || !window.collectionBehavior.contains(.fullScreenNone) ? "DOES NOT WORK" : "WORKS")")
-        } else {
-            say("full screen (⌃⌘F): \(fullScreen.map { "menu item \"\($0.title)\"\($0.isEnabled ? "" : " (disabled)")" } ?? "no menu item") — \((fullScreen?.isEnabled ?? false) ? "WORKS" : "DOES NOT WORK")")
-        }
+        say("full screen (⌃⌘F): \(fullScreen.map { "menu item \"\($0.title)\"\($0.isEnabled ? "" : " (disabled)")" } ?? "no menu item") — \((fullScreen?.isEnabled ?? false) ? "WORKS" : "DOES NOT WORK")")
         // Share › Copy Link: the page's address on this Mac's pasteboard.
         func item(withAction name: String, in menu: NSMenu?) -> NSMenuItem? {
             guard let menu else { return nil }

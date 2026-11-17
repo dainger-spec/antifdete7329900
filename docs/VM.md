@@ -49,7 +49,11 @@ licensing, and has the machines.
    at one address.
 
 A build has the section only when it was made with `VM=1` (below). On a Mac with an Intel processor
-the section says that macOS runs as a guest only on Apple silicon.
+the section says that macOS runs as a guest only on Apple silicon. On a Mac that is itself a virtual
+machine (UTM, Parallels, a cloud Mac — `VMHostSupport`: the system's `kern.hv_vmm_present`, or a
+`VirtualMac` model) it says at once that machines need the Mac itself: macOS runs no virtual machine
+inside another. (Before 17 November the setup was offered there, and the helper said "This Mac
+cannot run virtual machines." in English once the person had asked for it.)
 
 ## What a machine costs
 
@@ -58,7 +62,7 @@ the section says that macOS runs as a guest only on Apple silicon.
 | Download | about 25 GB, once, from Apple; removed after the installation |
 | Base system on disk | about 20–25 GB |
 | Each machine on disk | what its macOS changes after the clone: usually 3–6 GB, growing with use |
-| Memory | 3, 4, 6 or 8 GB per profile, only while it runs; a new machine gets 8 on a Mac with 24 GB or more, 6 with 16, 4 below |
+| Memory | 3, 4, 6 or 8 GB per profile, only while it runs; a new machine gets 8 on a Mac with 24 GB or more, 6 with 16, 4 below. Machines running at once that leave the Mac less than 4 GB (two on a Mac with 8 GB) are said to above the list — a warning, not a refusal |
 | At once | **two** machines — Apple's limit for macOS guests on one Mac, enforced by the framework |
 | Start | 20–40 seconds, as a Mac starts |
 
@@ -77,6 +81,7 @@ Sources/BrowserCore/VirtualMachines/   the model, platform-independent, unit-tes
   VMImageFetch.swift     the download: several connections, chunk by chunk (tested on Linux)
   VMGuestSettings.swift  what the guest is told, what it says back
   VMStartCover.swift     when a start's cover goes (the steps, the guest's word, the limits)
+  VMScreenSleep.swift    when a hidden machine's display is put to sleep, and woken
   VMFailure.swift        the kind of a failure, from the system's error; the room a start needs
   VMWindowPlacement.swift where a machine's window was left, and whether to go back there
   VMHelperProtocol.swift the app's conversation with the helper
@@ -136,7 +141,9 @@ What the helper does about the Mac and the app around it:
   (`NSWorkspace.didWakeNotification`) the helper leaves the word a wake from a saved state leaves
   (`lumen-woke`), and the boot script asks for the time at once (tools 11); the machine's network
   answers with this Mac's clock, and nothing leaves. A profile's machine only: the base's shared
-  folder is the person's to look into, and gets no such file.
+  folder is the person's to look into, and gets no such file. The machine's UDP associations
+  through the proxy are made anew at the same moment (docs/VM_NETWORK.md, "This Mac woke from
+  sleep"): one that died with the sleep would otherwise have held a call's port for good.
 - **Where the window was left.** A profile's machine opened in the middle of the main screen at
   every start — on the wrong display for whoever keeps it on a second one, and exactly over the
   other machine's window. Its window now opens where the person last put it, at the size they
@@ -150,7 +157,13 @@ What the helper does about the Mac and the app around it:
   not kept: its guide panel is part of it.
 - **Force Stop**: the helper is asked to end the machine; if it has not ended in eight seconds
   the app ends it with `SIGKILL` — the polite signal is one a running helper takes for another
-  request to shut down, and a helper whose main thread is stuck took neither.
+  request to shut down, and a helper whose main thread is stuck took neither. That end is not
+  reported as a failure. Force Stop while the proxy is still being checked calls the start off.
+- **What a stop part-way leaves.** An installation that failed or was called off (Cancel, Lock,
+  Quit) leaves no half-written base: while no `base.json` records a base, the app removes the
+  base's disk and firmware files at once — up to twenty gigabytes, often on a disk that was full —
+  and Continue installs again from the image, which stays. A machine's first copy of the base's
+  disk on a volume that cannot clone, stopped part-way, is removed by the helper before it says why.
 - **The base and a machine being made**: a machine not made yet is a copy of the base's disk,
   so it is not started while the base is open (checked again after its proxy was asked), and
   the base is not opened while such a machine is starting.
@@ -178,10 +191,17 @@ that the decision is tested on Linux too:
 | `image` | the restore image does not load | download it again, or another file |
 | `needsUpdate` | the installer wants this Mac's software updated first | Software Update, then Continue |
 | `installation` | the installation did not finish | Continue starts it over; nothing is downloaded again |
+| `noVirtualization` | the framework says this Mac runs no virtual machine at all — above all a Mac that is itself one | open Lumen on the Mac itself; otherwise restart the Mac |
 
-A failure of none of these kinds is said in the system's words alone, as before — among them the
-framework's "invalid configuration" and "not supported", each of which covers too many things for
-one piece of advice to be true of. The numbers are
+A failure of none of these kinds — among them the framework's "invalid configuration" and "not
+supported", each of which covers too many things for one piece of advice to be true of — leads with
+a sentence of the app's (something went wrong; try again, restart the Mac if it repeats, send the
+detail), and the system's words stay under it as the technical detail. (Until 17 November it was
+the system's words alone: English in a Russian interface, a domain and a number.) The question to
+Apple, the image's load and the installation fall back to `catalog`, `image` and `installation`
+where the framework's error is none of the kinds above. A helper that ended without a word is said
+as such, its exit status the detail — except after Force Stop, whose last resort (the system's kill
+after eight seconds) the person asked for. The numbers are
 Apple's as their headers have them; what a given failure on a Mac really carries is seen there —
 the detail line always shows the system's own words beside Lumen's.
 
@@ -189,9 +209,13 @@ the detail line always shows the system's own words beside Lumen's.
 Proxies section's words for each way of failing (a login the proxy rejects, a name that does not
 resolve, a port that refuses, one that takes the connection and says nothing) and its advice —
 not "does not answer" for all of them (`VMCenter.proxyProblem`). That check is the Proxies
-section's without what a machine does not use (`VMCenter.checkProxy`): one tunnel instead of
-three (the list shows no latency), and nothing asked of a SOCKS5 proxy's UDP, which never leaves
-a machine — a start no longer waits up to nine seconds for an association nobody uses.
+section's with one tunnel instead of three (`VMCenter.checkProxy`; the list shows no latency) — and,
+for a SOCKS5 proxy, its UDP, found as the Proxies section finds it: a UDP
+association and a STUN request through it, then where its UDP leaves from against where its pages
+do. The machine's UDP (HTTP/3, WebRTC) goes through the proxy in that run only where the two are
+the same (`VMUDPRoute`); the UDP check runs beside the lookup of where the proxy comes out, so a
+proxy that answers costs a second or two more, one that takes the association and carries nothing
+up to nine. (Before 16 November the start asked nothing of UDP, which then never left a machine.)
 
 **A disk that is nearly full** is said before the machine is started (`VMStartRoom`): with less
 than 2 GB free a machine is not started — its macOS writes from its first second, to a disk that
@@ -248,14 +272,29 @@ public name to an address of the local network takes a machine there as it takes
 in a guest is kept from the Mac's local network by this Mac's rules only so far as the tool keeps
 to them (docs/VM_NETWORK.md). A proxy set by a configuration file (PAC, WPAD) is not followed, and
 the machine then has no network, with its row saying why. A machine with a proxy of its own has
-no way to this Mac's network at all. **UDP does not leave a machine**, with a proxy or without: QUIC
-falls back to TCP, and WebRTC has no path that could show this Mac's address. Apple's software-update hosts are answered "no
-such name", so a machine does not fetch gigabytes of updates through a paid proxy. docs/VM_NETWORK.md
-has the details and the tests.
+no way to this Mac's network at all. **UDP (HTTP/3, WebRTC) goes through the proxy's own relay**
+(SOCKS5 UDP ASSOCIATE) where the check before the start found the proxy carries it from the
+address its pages leave from, and WebRTC then shows the proxy's address; with an HTTP proxy, a
+proxy that does not carry UDP, or one whose UDP leaves from elsewhere, it does not leave at all —
+QUIC falls back to TCP, WebRTC has no path — and the machine's row says so. Never around the
+proxy. Without a proxy a machine's UDP goes out as this Mac's own, as its TCP does — not while
+the Mac's network settings name a proxy. DNS and the time are answered by Lumen and never leave.
+Apple's software-update hosts are answered "no such name", so a machine does not fetch gigabytes of
+updates through a paid proxy. docs/VM_NETWORK.md has the details and the tests.
 
-Before each start the proxy is checked, as a profile's is: where it comes out, and its time zone.
-A machine whose proxy does not answer is not started. With "time zone and language follow the
+Before each start the proxy is checked, as a profile's is: where it comes out, its time zone, and
+whether it carries UDP. A machine whose proxy does not answer is not started. With "time zone and language follow the
 proxy" the profile takes them from that check.
+
+A proxy that goes down **while the machine runs**, or stops taking its user name and password,
+leaves the machine with no internet — nothing goes past it — and since 17 November its row and
+window say why (`VMNetworkTrouble.ownProxyUnreachable`, `ownProxyLogin`, `ownProxyNotUnderstood`):
+the network counts the connections the proxy failed by its own fault, one after another, and the
+helper names the trouble after four; a site the proxy says it cannot reach does not count. The first
+connection the proxy carries again clears it. A password (or port) corrected in the Proxies section
+is the machine's too — the machines whose proxy was that entry's take the edit, as the Safari
+profiles do (`VMProfiles.follow`; until 17 November a machine kept its old copy until its editor was
+saved again) — and takes at the machine's next start.
 
 A proxy reached over TLS (`https://`) is not supported for machines yet; the editor does not offer
 one, and `VMProfile.validate` refuses it. A proxy's "domains that go direct" are not applied in a
@@ -306,6 +345,13 @@ to 12 needs nothing done to it: the app puts this script into the tools' folder 
 and the older script there takes it and runs it before it reads the settings — so the first start
 with this Lumen already says its steps. (Tools 2 to 6 take it from the shared folder, once; tools 1
 must be installed again.)
+
+Afterwards it waits for Lumen's word (every two seconds): the request to shut down, and — for a
+machine with "Screen off while hidden" (tools 14) — `lumen-screen-sleep`, which the helper leaves
+while the machine's window has been out of sight for a while: the display is put to sleep while
+it is there and woken once it is gone, and `LUMEN_SCREEN_SLEEP` says what came of it ("How smooth
+a machine is" below). A machine with tools 13 or older takes tools 14 the same way at its next
+start; nobody has to run Install Lumen Tools again for it.
 
 Before all that — at the start, before the automatic sign-in — it marks macOS's panes for a new
 Mac as seen for the person who signs in by themselves (`com.apple.SetupAssistant`: `DidSee…`,
@@ -377,10 +423,12 @@ most, off the main thread; anything else is ignored and logged by its kind.
 | At start | Safari opened or not; its start page, and up to five more, each in a tab; the window full screen |
 | Instant wake | off unless chosen. Closing the machine keeps it as it is, and opening it brings it back in seconds ("Instant wake" below). Such a machine has no sound |
 | Browser mode | off unless chosen. The machine is shown as a browser: Safari over its whole screen, the menu bar and the Dock out of sight ("Browser mode" below) |
+| Screen off while hidden | off unless chosen. Once the machine's window has been out of sight for half a minute its display sleeps, and wakes when the window is seen again; pages in it are hidden meanwhile ("How smooth a machine is" below) |
 
 Those of the guest's own system are applied in it by the boot script and need **tools 2** (the
 wallpaper: tools 3; the region's clock and week, the scroll bars, the Dock and the pages after
-the first: tools 5; the keyboard: tools 10, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
+the first: tools 5; the keyboard: tools 10; the display's sleep while the window is hidden:
+tools 14, `VMGuestTools.version`); a base set up with tools 1 says so in the list and in the
 editor, and running Install Lumen Tools in the base again updates it. From tools 2 on, the boot
 script takes a newer copy of itself from the shared folder at a machine's start (the app puts its
 own there), so later versions — tools 3 among them — need no visit to the base
@@ -426,7 +474,8 @@ on a machine: none could be run here):
   compares them with what it asked for (`VMGuestStatus.differences(from:)` — only once the script
   says it applied these very settings): a difference is said in the machine's row.
 
-What was looked at and needs nothing: the network (no DNS query, UDP or IPv6 leaves, by
+What was looked at and needs nothing: the network (no DNS query or IPv6 leaves, UDP only through
+the proxy's relay, by
 `docs/VM_NETWORK.md`), where the time zone and language come from (the proxy's exit, looked up
 anew at every start, not the last check in the list), the clock (the host's; automatic time zone
 is switched off). The layouts' numbers and names are macOS's own, as known; that a machine takes
@@ -638,12 +687,105 @@ what was in this app's hands, and was found slowing a machine on a person's Mac 
   `synchronizationMode: .fsync` instead. What is given up: if the Mac loses power — not if the
   app or the machine ends — the guest's last seconds of writes may not be on the drive.
 - **App Nap.** macOS rests a process whose window is covered; the guest's processors are that
-  process's. The helper holds an activity (`userInitiatedAllowingIdleSystemSleep`,
-  `latencyCritical`) for as long as it runs; the Mac may still sleep when idle.
+  process's. The helper holds an activity (`userInitiatedAllowingIdleSystemSleep`) for as long as
+  it runs; the Mac may still sleep when idle.
 - **A machine's first start** is slower than its later ones: to its macOS it is a Mac it has not
   seen, and it rebuilds what it keeps per Mac. Spotlight's index is off in machines (the tools).
 
 Not measured: how much each of these is worth on a given Mac.
+
+### What a machine costs this Mac while nobody looks at it
+
+The owner, 16 November: one running machine — "Virtual Machine Service" (where the guest's
+processors run) about 57 % of a core, WindowServer 35 %, and two of Apple's paravirtual graphics
+processes 13 % and 5 %. A guest draws its screen whether anyone sees the window or not: its pages
+animate, its window server composes them, the virtual graphics card does that work on this Mac's,
+and a visible window is composed again by this Mac's WindowServer. Most of that is the price of a
+Mac shown at a real Mac's resolution, which a page reads and which stays (`VMDisplay`). What was
+in this app's hands:
+
+- **Timer precision only while the window is in sight.** The helper asked for the highest timer
+  and I/O precision (`latencyCritical`, which keeps macOS from gathering a process's wake-ups
+  together) for as long as it ran. It now holds that only while the machine's window is in sight
+  (AppKit's occlusion state: not minimised, covered, on another desktop, or behind this Mac's
+  sleeping or locked screen) — someone may be at the machine then, and its pointer and pages
+  answer at once. Out of sight it keeps the activity that holds App Nap off, so the guest runs on
+  as before, and its wake-ups may be gathered with this Mac's others. Nothing in the guest
+  changes. Inferred, not measured: how far the framework's own process (Virtual Machine Service)
+  follows the helper's precision; the helper's own wake-ups (its network, its two-second count of
+  the traffic, which now has half a second of tolerance) may be gathered from then on.
+- **Screen off while hidden** (a machine's setting, off unless chosen, `VMScreenSleep`). Once the
+  window has been out of sight for 30 seconds, the helper leaves a word in the shared folder
+  (`lumen-screen-sleep`); the boot script (tools 14) puts the display to sleep while it is there
+  (`pmset displaysleepnow`), as a Mac's display sleeps, and wakes it when the window is seen again
+  and the word is gone — by a person's activity said to the system (`caffeinate -u`), so that no
+  key or click reaches anything in the machine; it looks every second while the display sleeps.
+  A display asleep draws nothing, nor do the pages in it, which are hidden meanwhile — as on a
+  Mac whose display slept, and a page can see that (`document.visibilityState`): that is why it
+  is the person's choice and not the rule. Not where the person's screen lock is on: waking would
+  ask for the account's password, so the script first asks the system
+  (`sysadminctl -screenLock status`, as the person) and puts the display to sleep only when it says
+  the lock is off — which the installer has set since tools 1. Otherwise the display stays on, the
+  status says so (`LUMEN_SCREEN_SLEEP=locks`, with the system's words), the helper's log too, the
+  machine is not asked again while it runs, and the editor says it under the setting. Not while
+  the start's cover is up, nor while the machine is being woken or closed: looked at again 30
+  seconds later. A machine put to sleep (instant wake) with its display asleep has it woken as it
+  wakes: the helper takes the word away at every start. A machine woken from a state saved under
+  tools 13 runs that script until its next real start, and its display is left as it is.
+- **The app's rows** are told of a machine's traffic once per count, and only when something
+  changed, not once for each of six fields every two seconds.
+
+Looked at, and left as it is (Apple's documentation, read 16 November; what it does not say is
+said so):
+
+- **Memory balloon** (`VZVirtioTraditionalMemoryBalloonDevice`). The machine has one, and nothing
+  ever sets its target, so the guest keeps all its memory — as before. Apple documents the device
+  as asking the guest to give pages back when the target is lowered, "if the guest complies"; it
+  does not say whether macOS as a guest does, and no source found says either way. Lowering the
+  target would also shrink what the guest has, which a page can come to notice; not done.
+- **The disk's caching** (`cachingMode`): `.automatic` stays. `.uncached` would keep the disk's
+  blocks out of this Mac's file cache (memory it frees at once when asked anyway) at the price of
+  reads the guest's own cache misses; unmeasured, so unchanged. Its synchronisation is `.fsync`
+  since 13 November (above).
+- **Sound.** The machine keeps its speakers and microphone either way: a page can read which audio
+  devices a Mac has. With "Sound from the machine" off they are connected to nothing on this Mac.
+  (Apple's sample for macOS guests, macOS 27, has a sound device and calls
+  `validateSaveRestoreSupport` with it; whether instant wake still needs a silent machine on newer
+  macOS is to be tried on a Mac.)
+- **The source of random numbers** (`VZVirtioEntropyDevice`) and the second pointer cost nothing
+  while nothing asks them; no console device is attached.
+- **Processors.** An idle virtual processor waits without taking this Mac's time; more of them
+  cost little while the guest idles. A page reads the count (`navigator.hardwareConcurrency`):
+  "As a Mac (8 cores)" stays the default, and 4 or 6 are the person's choice.
+- **The screen** (its size, pixels per inch) is what a page reads, and stays the profile's, whatever
+  it costs to draw. The window scales the picture and never changes it
+  (`automaticallyReconfiguresDisplay` off).
+- **The guest's background work.** The tools turn off the Spotlight index, sleep, the screen lock
+  and automatic updates (and Apple's update hosts are blocked by the machine's network); the base's
+  setup guide has Location, analytics, Screen Time and Siri off and no Apple ID, so iCloud, Photos'
+  and Game Center's work has nothing to do. Nothing else is turned off: what remains is macOS as
+  any Mac runs it, and the work in a machine is mostly its pages.
+- **The boot script's own look** at the shared folder every two seconds (a few file lookups) and
+  the network's: event-driven, with nothing to do while the guest is quiet.
+
+What to look at on a Mac (Activity Monitor, the CPU tab, with "% CPU", "Idle Wake Ups" and, in
+the Energy tab, "Energy Impact" shown; a machine started, a page with animation open in it, and
+left a minute to settle):
+
+1. The machine's window in sight: note "Virtual Machine Service", "LumenVM", WindowServer and the
+   `com.apple.gpusw…Paravirtualized…` processes. Then minimise the window and wait a minute: with
+   this version, LumenVM's (and perhaps Virtual Machine Service's) Idle Wake Ups go down;
+   WindowServer goes down as for any hidden window. Bring the window back: the machine answers the
+   pointer and the keys at once, as before.
+2. Turn "Screen off while hidden" on for the machine (it takes at its next start), start it, open
+   the same page, minimise the window and wait a minute: Virtual Machine Service and the
+   paravirtual graphics processes should fall well below what they were in 1 with the window
+   minimised; the helper's log says "screen: … the machine's display is put to sleep" and then
+   "the guest says its display is asleep". Bring the window back: the machine's screen is there in
+   a second or two, as it was; the log says it was woken. If the log says the screen lock is on,
+   the machine's lock is not off (System Settings → Lock Screen in the machine).
+3. With two machines open and one of them behind the other's window for a minute, the same as 2 for
+   the one behind.
 
 ## The download
 
@@ -665,6 +807,14 @@ at a pause. The setup shows what the chunks that are here come to, not the parti
 - A chunk that does not come whole is asked for again after a moment; a network that brings
   nothing again and again is given up on, with what is here kept. A server's own trouble (5xx,
   408, 429) is tried again; any other refusal is said.
+- **A network that drops** (Wi-Fi gone, a VPN reconnecting) fails nothing: the requests wait for the
+  connection. After eight seconds without a byte the setup says it is waiting for the network — no
+  speed, no time left (`VMImageFetch.Progress.stalled`) — and goes on by itself once bytes come
+  again. (It used to show the last speed and time left for as long as the wait lasted.)
+- **A download that stopped** is said by what stopped it (`VMDownloadFailure`): a full disk (what
+  was fetched is kept: free room, then Continue), the network, Apple's refusal (with the other way to
+  the file), anything else — the system's words or the server's status under them as the technical
+  detail, never alone.
 - The connections go the way any app's do on this Mac — its VPN, its system proxy.
 
 ### A file the person has
@@ -696,8 +846,10 @@ called off), a file that is not there.
   By WebGL a machine is that Mac. **Not measured**: WebGPU, the 2D canvas, audio, timing — no
   claim is made of them, and "cannot be told from a Mac" is not said.
 - **No camera.** A guest has no camera device; a site that asks for one finds none.
-- **UDP through a proxy**: none, by design (above). A site that needs WebRTC media will not have it
-  in a proxied machine.
+- **UDP through a proxy**: only a SOCKS5 proxy that carries UDP from its pages' address (checked
+  before every start); with any other proxy a site that needs WebRTC media or HTTP/3 will not have
+  them in the machine. A macOS guest's own QUIC and WebRTC through a real provider's relay are
+  checked on a Mac (detectme.pro, browserleaks.com/webrtc, cloudflare-quic.com), not in CI.
 - **macOS updates** are off in the machines. Safari in them is the base's until the base is set up
   again from a newer macOS; machines made before keep theirs.
 - **Two machines at once**, and Apple silicon only. A sandboxed build has no machines.
@@ -727,8 +879,9 @@ What is checked where:
   helper's own failures, the events that carry them, and the room a start needs — on a volume
   that clones and on one that cannot; and where a machine's window opens (`VMWindowPlacement`):
   where it was left, and not at a place that is no longer one. The self-test checks that every kind has its words in the
-  interface's language, and the start's proxy check against its loopback proxies (one tunnel, no
-  UDP asked; a rejected login said as that). The UI snapshots draw the list's rows saying each of
+  interface's language, and the start's proxy check against its loopback proxies (one tunnel, the
+  UDP found and the machine's UDP through the proxy, a proxy that refuses UDP ASSOCIATE leaving it
+  off; a rejected login said as that). The UI snapshots draw the list's rows saying each of
   these (`vm-list-states`: running, asleep, a rejected login, a full disk, Apple's limit with the
   system's words under Lumen's, a machine shut down instead of kept).
 - `Tests/BrowserCoreTests/VMImageFetchTests.swift` (Linux and macOS): **the download itself**,
@@ -738,6 +891,12 @@ What is checked where:
   one stream from before taken up at its whole chunks, a file replaced between two runs started
   over, a server without ranges given one stream, connections cut short taken up again, a refusal
   said, only https fetched. Each time the file byte for byte.
+- `Tests/BrowserCoreTests/VMScreenSleepTests.swift` (Linux and macOS): when a hidden machine's
+  display is put to sleep and woken — off unless chosen, never the base, half a minute out of
+  sight, a glance away not enough, a busy machine looked at later, a screen lock that is on not
+  asked again; and the boot script (`VMGuestScriptTests`) putting the display to sleep once for
+  the word, waking it when the word goes, leaving it on behind a screen lock, and leaving it alone
+  without the word, without a person signed in, or with a link in the word's place.
 - `Tests/BrowserCoreTests/VMStartCoverTests.swift` (Linux and macOS): the start's cover — the
   steps and the ready settings read from the status, this start's settings only, a status from
   before the start, an older script, the limits, browser mode, which starts are covered. The UI
@@ -804,3 +963,9 @@ What is checked where:
     it again: the window opens there, at that size. Disconnect the display and start it: the
     window opens on the Mac's own screen as a new one does. Two machines moved apart once open
     apart from then on.
+14. A machine with "Screen off while hidden", its window minimised for a minute: the helper's log
+    says its display was put to sleep and the guest says it is asleep; Activity Monitor shows its
+    Virtual Machine Service and the paravirtual graphics processes far lower than before the
+    minute ("What a machine costs this Mac while nobody looks at it", steps 1–3). Brought back,
+    the machine's screen is there in a second or two, nothing in it was clicked or typed into, and
+    no password is asked. The same after this Mac's own screen was locked for a minute.

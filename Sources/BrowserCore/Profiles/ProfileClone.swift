@@ -30,6 +30,7 @@ public enum ProfileClone {
         copy.lastProxyLocation = nil
         copy.settingsModifiedAt = nil
         copy.webRTCRelay = nil
+        copy.webRTCSilent = false
         copy.notes = ""
         copy.avatar = nil
         // A camera of its own: the same choices, another identity — as a new profile's camera gets one

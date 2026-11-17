@@ -256,14 +256,112 @@ public struct ScenarioFile: Codable, Equatable, Sendable {
 
     /// What a person is shown before a file's scenario is added: the sites it opens by name (the
     /// addresses written out in it) and the profile's values it reads.
-    public var hosts: [String] {
-        guard let regex = try? NSRegularExpression(pattern: #"https?://([A-Za-z0-9.-]+)"#) else { return [] }
-        let text = source as NSString
+    public var hosts: [String] { Self.hosts(in: source) }
+
+    /// Whether the text can open an address it does not write out (`buildsAddresses(_:)`): the
+    /// review says so beside the sites it names.
+    public var buildsAddresses: Bool { Self.buildsAddresses(source) }
+
+    /// The hosts of the http and https addresses written out in `text`, each once, in lower case
+    /// (`HTTPS://` too; a name and password before `@` are not the host).
+    public static func hosts(in text: String) -> [String] {
+        guard let regex = try? NSRegularExpression(pattern: #"https?://(?:[^/?#\s'"`@\\]*@)?([A-Za-z0-9.-]+)"#, options: [.caseInsensitive]) else { return [] }
+        let whole = text as NSString
         var seen = Set<String>(), found: [String] = []
-        for match in regex.matches(in: source, range: NSRange(location: 0, length: text.length)) {
-            let host = text.substring(with: match.range(at: 1)).lowercased()
+        for match in regex.matches(in: text, range: NSRange(location: 0, length: whole.length)) {
+            let host = whole.substring(with: match.range(at: 1)).lowercased()
             if host.contains("."), seen.insert(host).inserted { found.append(host) }
         }
         return found
+    }
+
+    /// Whether `source` can open an address that is not written out in it: a `goto` given anything
+    /// but an address in quotes, or a text setting of its head (`ScenarioSettings`) that nothing
+    /// names again, whose sites are among those it names; `goto` or `page` taken otherwise than
+    /// called by name; or code that reaches past the commands — run in the page
+    /// (`page.evaluate`, which can fetch any address), `eval`, `with`, `Function`, the runner's
+    /// own `__…` functions. A reading of the text, not a proof: the sites it names are listed, and
+    /// the review says when there may be others. Comments are not read.
+    public static func buildsAddresses(_ source: String) -> Bool {
+        // Without comments, and without the insides of quoted texts: what the code itself names.
+        let code = ScenarioSteps.withoutComments(source, blankingTexts: true)
+        let reaching = #"(?<![A-Za-z0-9_$])(?:evaluate|eval|Function|globalThis|this|Reflect|__[A-Za-z0-9_$]+)(?![A-Za-z0-9_$])"#
+            + #"|(?<![A-Za-z0-9_$])with\s*\("#
+            + #"|(?<![A-Za-z0-9_$])page(?![A-Za-z0-9_$])(?!\s*\.\s*[A-Za-z_$])"#
+            + #"|(?<![A-Za-z0-9_$])goto(?![A-Za-z0-9_$])(?!\s*\()"#
+        if ScenarioSteps.firstMatch(reaching, code) != nil { return true }
+        guard let calls = try? NSRegularExpression(pattern: #"(?<![A-Za-z0-9_$])goto\s*\("#) else { return true }
+        let named = Set(hosts(in: source))
+        // The same text with its quoted texts: what each `goto` is given (an offset is the same place in both).
+        let texts = Array(ScenarioSteps.withoutComments(source).utf16)
+        // The head's settings of text, and whether each is named again: looked up once, whatever
+        // the number of calls (each look is a pass over the whole text).
+        var settings: [String: String] = [:]
+        for setting in ScenarioSettings(source).settings {
+            if case .text(let text) = setting.value, settings[setting.name] == nil { settings[setting.name] = text }
+        }
+        var namedAgain: [String: Bool] = [:]
+        let whole = code as NSString
+        for match in calls.matches(in: code, range: NSRange(location: 0, length: whole.length)) {
+            guard let given = firstArgument(texts, from: match.range.location + match.range.length) else { return true }
+            let argument = given.trimmingCharacters(in: .whitespacesAndNewlines)
+            let address: String
+            if let text = ScenarioSettings.unquoted(argument) {
+                address = text
+            } else if argument.count >= 2, argument.hasPrefix("\""), argument.hasSuffix("\""),
+                      !argument.dropFirst().dropLast().contains(where: { $0 == "\"" || $0 == "\\" }) {
+                address = String(argument.dropFirst().dropLast())
+            } else if let text = settings[argument] {
+                let again = namedAgain[argument] ?? isNamedAgain(argument, in: code)
+                namedAgain[argument] = again
+                if again { return true }
+                address = text
+            } else {
+                return true
+            }
+            // `'ht\x74ps://…'` is an address too, though its host is not written out as one.
+            if !hosts(in: address).allSatisfy({ named.contains($0) }) { return true }
+        }
+        return false
+    }
+
+    /// The first argument of a call whose `(` ends just before `start` in `text` (UTF-16): up to
+    /// its `,` or `)`, quoted texts and brackets passed whole. Nil past 4,096 units, or at the
+    /// text's end.
+    private static func firstArgument(_ text: [UInt16], from start: Int) -> String? {
+        var quote: UInt16?
+        var escaped = false
+        var depth = 0
+        var index = start
+        while index < text.count, index - start <= 4096 {
+            let unit = text[index]
+            if let open = quote {
+                if escaped { escaped = false } else if unit == 0x5C { escaped = true } else if unit == open { quote = nil }
+            } else {
+                switch unit {
+                case 0x27, 0x22, 0x60: quote = unit // ' " `
+                case 0x28, 0x5B, 0x7B: depth += 1 // ( [ {
+                case 0x29, 0x5D, 0x7D: // ) ] }
+                    if depth == 0 { return String(decoding: text[start..<index], as: UTF16.self) }
+                    depth -= 1
+                case 0x2C where depth == 0: // ,
+                    return String(decoding: text[start..<index], as: UTF16.self)
+                default: break
+                }
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    /// Whether the setting `name` is named in `code` (comments and quoted texts blanked) anywhere
+    /// but at its own line and as what a `goto(…)` or an `if (…)` is given: anything else may bind
+    /// the name anew (a block's own `const`, a function's parameter, a destructuring).
+    private static func isNamedAgain(_ name: String, in code: String) -> Bool {
+        let word = NSRegularExpression.escapedPattern(for: name)
+        guard let every = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_$])\(word)(?![A-Za-z0-9_$])"),
+              let given = try? NSRegularExpression(pattern: "(?<![A-Za-z0-9_$])(?:goto|if)\\s*\\(\\s*!?\\s*\(word)\\s*[,)]") else { return true }
+        let range = NSRange(location: 0, length: (code as NSString).length)
+        return every.numberOfMatches(in: code, range: range) != given.numberOfMatches(in: code, range: range) + 1
     }
 }

@@ -142,8 +142,6 @@ import threading
 import time
 from urllib.parse import parse_qs
 
-import cores_page  # scripts/cores_page.py: the processor-count page, served at /pb-cores
-
 
 def read_until_blank_line(conn: socket.socket) -> bytes:
     data = b""
@@ -700,18 +698,6 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
         body, content_type = leak_user_top_go(safe_run(query)), "text/html; charset=utf-8"
     elif plain_path == "/pb-leak/usertop":
         body, content_type = leak_user_top(safe_run(query)), "text/html; charset=utf-8"
-    elif plain_path == "/pb-cores":
-        # What a page is told of the processor count, everywhere it can ask (scripts/cores_page.py);
-        # the other-origin frame on "localhost" of the same port, the report into the leak log.
-        port = header(request, "Host").rpartition(":")[2] or "80"
-        body = cores_page.page_html(f"/pb-leak/report?run={safe_run(query)}&data=", f"http://localhost:{port}", "/pb-cores").encode()
-        content_type = "text/html; charset=utf-8"
-    elif plain_path == "/pb-cores/worker.js":
-        body, content_type = cores_page.URL_WORKER_SCRIPT.encode(), "text/javascript"
-    elif plain_path == "/pb-cores/sw.js":
-        body, content_type = cores_page.SW_SCRIPT.encode(), "text/javascript"
-    elif plain_path == "/pb-cores/frame":
-        body, content_type = ("<!doctype html><script>" + cores_page.FRAME_SCRIPT + "</script>").encode(), "text/html; charset=utf-8"
     elif plain_path == "/pb-rtc":
         params = parse_qs(query)
         body, content_type = rtc_page(safe_run(query), params.get("mode", ["presence"])[0]), "text/html; charset=utf-8"
@@ -1013,6 +999,27 @@ const timeout = (ms, value) => new Promise((resolve) => setTimeout(() => resolve
   document.body.appendChild(frame);
   const presence = { rtc: typeof RTCPeerConnection, rtcFrame: typeof frame.contentWindow.RTCPeerConnection,
                      dataChannel: typeof RTCDataChannel };
+  if ('MODE' !== 'call' && typeof RTCPeerConnection === 'function') {
+    // Present: what it gathers for the page's own STUN server, named after the run. WebRTC that
+    // must not connect (present, connecting nowhere) gathers nothing and asks that server nothing:
+    // a DNS question for it, or a packet to it, is a leak the capture sees.
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun-RUN.leak.example.com:3478' }] });
+    const seen = [];
+    pc.onicecandidate = (event) => { if (event.candidate && event.candidate.candidate) seen.push(event.candidate.candidate); };
+    pc.createDataChannel('presence');
+    try {
+      await pc.setLocalDescription(await pc.createOffer());
+      await Promise.race([new Promise((resolve) => {
+        pc.onicegatheringstatechange = () => { if (pc.iceGatheringState === 'complete') resolve(); };
+        if (pc.iceGatheringState === 'complete') resolve();
+      }), timeout(8000)]);
+    } catch (e) { presence.gatherError = String(e); }
+    presence.gathered = seen.length;
+    presence.gathering = pc.iceGatheringState;
+    presence.policySeen = pc.getConfiguration().iceTransportPolicy;
+    presence.offer = !!(pc.localDescription && pc.localDescription.sdp && pc.localDescription.sdp.includes('m=application'));
+    pc.close();
+  }
   if ('MODE' !== 'call' || typeof RTCPeerConnection !== 'function') { await report(presence); return; }
   // The page's own STUN server, named after the run: through the relay it is never asked, and a
   // DNS question for it, or a packet to it, is a leak the capture sees.

@@ -179,6 +179,24 @@ final class UpdateTests: XCTestCase {
         XCTAssertNoThrow(try UpdateVerifier.checkInstallable(newer, running: running, system: macOS14, keys: keys))
     }
 
+    /// A new release joins the appcast only with a build greater than every one published
+    /// (`pbupdate appcast`, `release.sh`): one listed already would take a published release's
+    /// place, a lower one would be offered below an older release.
+    func testANewReleasesBuildIsGreaterThanEveryPublishedOne() throws {
+        let published = [try release(build: "17").item, try release(build: "16").item] // versions 0.17, 0.16
+        XCTAssertNil(UpdateSigner.refusalToAdd(version: "0.18", build: "18", to: published))
+        XCTAssertNil(UpdateSigner.refusalToAdd(version: "0.18", build: "17.1", to: published))
+        XCTAssertNil(UpdateSigner.refusalToAdd(version: "0.1", build: "1", to: []), "the first release")
+        let listed = UpdateSigner.refusalToAdd(version: "0.18", build: "17", to: published)
+        XCTAssertNotNil(listed, "a build listed under another version")
+        XCTAssertTrue(listed?.contains("0.17") ?? false, "the release that has it is named: \(listed ?? "")")
+        XCTAssertNotNil(UpdateSigner.refusalToAdd(version: "0.17", build: "17", to: published), "the same release again")
+        XCTAssertNotNil(UpdateSigner.refusalToAdd(version: "0.18", build: "17.0", to: published), "17.0 is 17")
+        XCTAssertNotNil(UpdateSigner.refusalToAdd(version: "0.18", build: "16", to: published), "listed, and lower than the newest")
+        XCTAssertNotNil(UpdateSigner.refusalToAdd(version: "0.18", build: "15", to: published), "lower than the newest")
+        XCTAssertNotNil(UpdateSigner.refusalToAdd(version: "0.18", build: "eighteen", to: published))
+    }
+
     func testAReleaseForANewerMacOSOrAnotherKeyIsNotOffered() throws {
         let forMacOS15 = try release(build: "50", minimumSystem: "15.0").item
         let forMacOS14 = try release(build: "49").item

@@ -138,12 +138,6 @@ final class ProfileCheckTests: XCTestCase {
         let fixed = ProfileCheck.applying(.safariOfThisMac, to: configuration)
         XCTAssertNil(fixed.userAgent)
         XCTAssertNil(fixed.safariVersion)
-
-        // An iPhone view is Safari of another device by design: not judged against this Mac's.
-        var phone = facts()
-        phone.isMobileView = true
-        XCTAssertEqual(finding(.engine, phone).level, .unknown)
-        XCTAssertEqual(finding(.window, phone).level, .unknown)
     }
 
     func testAWindowTheScreenCannotHold() {
@@ -183,6 +177,14 @@ final class ProfileCheckTests: XCTestCase {
         XCTAssertEqual(finding(.webRTC, direct).key, "check.webRTC.directNoProxy")
         XCTAssertEqual(finding(.dns, direct).key, "check.dns.direct")
         XCTAssertEqual(ProfileCheck.attention(in: ProfileCheck.findings(direct, now: winter)), 0)
+
+        // Present and connecting nowhere, with a proxy or without: nothing to learn through it.
+        for configuration in [ProfileConfiguration(), proxied()] {
+            var silentRTC = facts(configuration)
+            silentRTC.webRTC = .silent
+            XCTAssertEqual(finding(.webRTC, silentRTC).key, "check.webRTC.silent")
+            XCTAssertEqual(finding(.webRTC, silentRTC).level, .ok)
+        }
     }
 
     func testAPageFromASnapshotsValues() {

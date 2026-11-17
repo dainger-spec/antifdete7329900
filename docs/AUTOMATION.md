@@ -79,9 +79,8 @@ the page — with:
 profile's own process that hosts Safari's chrome, the run opens a window of Safari's for itself, on
 an empty page (`SafariChromeHost.openScenarioPage`), acts on its tab's web view and goes to
 addresses through the tab (`loadURL:`), as the address bar does. A profile that was stopped is
-started without a window of its own, so the run's is the only one. Everywhere else — an iPhone or
-iPad view, the sandboxed build, a macOS where the chrome is not hosted — it is a window of the
-app's, as before; and when Safari's window gives no page to act on within a few seconds, the run
+started without a window of its own, so the run's is the only one. Everywhere else — the sandboxed
+build, a macOS where the chrome is not hosted — it is a window of the app's, as before; and when Safari's window gives no page to act on within a few seconds, the run
 goes on in a window of the app's rather than being lost. The run's log says which, in its first line. In Safari's window the page may run
 under the toolbar, so the viewport's place in the web view is measured, not assumed: the page is
 asked, from the driver's own world, where it saw a move of the input (`PageDriver.measureViewport`).
@@ -93,7 +92,8 @@ the page's own record.
   `page.evaluate(fn, arg, {world: 'page'})` takes a function or a function body;
   `page.url()` and `page.title()` are promises too (in Playwright they are not);
 - `log(...)` for the run's log, `sleep(ms)`, `params` (the run's parameters, read-only: the
-  profile's own values — "A profile's values" below — under what an API request gave).
+  profile's own values that the scenario's text names — "A profile's values" below — under what
+  an API request gave).
   `sleep(Infinity)` — or any wait longer than a year — waits until Stop; a negative number or
   `NaN` does not wait. A `type` delay is held to a year a key the same way (`ScenarioWait`:
   a number past what the system's sleep holds stopped the profile's process).
@@ -152,9 +152,18 @@ an empty password.
   (64 at most); a value up to 4,096 characters, 64 values a profile. `scenario-values.bin` at the
   vault's root, sealed under the scenarios' key — a file of its own, as the schedules' is. This
   Mac's; not synced, not part of a profile's export or copy.
-- **A run's `params`** (`ScenarioValues.parametersJSON`): the profile's values, each as text —
-  from the editor's Run, from a schedule, and from an API request that names a **saved** scenario,
-  where what the request gave in `params` wins name by name. A text sent with the request
+- **A run's `params`** (`ScenarioValues.parametersJSON`): of the profile's values, **those the
+  scenario's text names** (`ScenarioValues.namesRead`: `params.name`, `params['name']`, in a
+  comment too — the recorder's note names `params.password`), each as text — from the editor's
+  Run and Check, from a run on many, from a schedule, and from an API request that names a
+  **saved** scenario, where what the request gave in `params` wins name by name. A value the text
+  does not name is not given, however its code reads `params` (as a whole, `JSON.stringify(params)`;
+  by a name it builds, `params[key]`; `eval`): what the import's review, the list and the editor
+  say a scenario reads is all of the profile's it gets — a scenario from someone else cannot
+  collect the passwords kept for the others. Code that reads `params` that way
+  (`ScenarioValues.readsByBuiltNames`) is said on the scenario's line in the list, under its name
+  in the editor and in the import's review: "reads values by names its code builds — none given".
+  The templates and the recorder name their values. A text sent with the request
   (`{"source": …}`) gets the request's own `params` and no more: what is kept for a profile is
   read by the scenarios the person wrote, not by whatever holds the API's token.
 - **In the editor**: the values of the chosen profile open from the button beside the profile's
@@ -186,7 +195,11 @@ and `if (await page.isVisible(…)) {}` are blocks with steps inside; anything e
 own code, shown as it is. Moving a step, removing it, switching it off (its lines become comments
 marked `//- `) and changing what a command is given are moves and rewrites of whole lines, so what
 is not understood is never touched. A text that cannot be cut safely — a bracket or a template left
-open — is one step, and the editor says so.
+open — is one step, and the editor says so. Blocks are read for the steps inside them 16 levels deep
+at most (`ScenarioSteps.maximumDepth`; steps switched off inside steps switched off count as
+levels): one deeper is a step of its own code, and a block of any other shape is not cut again — so
+a text nested thousands deep, or one long line, is read in a moment, each line a bounded number of
+times.
 
 The `const NAME = value; // what it is` lines at a scenario's head are its **settings**
 (`ScenarioSettings`): text, a number, `true`/`false`, or a list of texts. The editor shows them as
@@ -223,7 +236,9 @@ The editor's **Check** is a run of one profile, and marks the failed step among 
 The runs are kept: `scenario-runs.bin` at the vault's root, sealed under the scenarios' key — the
 last 100, newest first; for a profile whose run failed, the last 300 lines of its log; never a
 profile's values. A run the app did not see the end of (it quit, the vault was locked) is found as
-one that was stopped. This Mac's; not synced. Runs a schedule makes are not among them yet: a
+one that was stopped. Lock and Quit stop a run going on before the profiles stop
+(`ScenarioBatchCoordinator.shutDown`): no profile waiting is started meanwhile — no proxy's IP is
+changed for it — and those waiting are written down as stopped, so Run the Failed Again has them. This Mac's; not synced. Runs a schedule makes are not among them yet: a
 schedule's own row says how its last run ended.
 
 ### A scenario as a file
@@ -232,7 +247,14 @@ schedule's own row says how its last run ended.
 text — no folder, no schedule, nothing of a profile). **Import a Scenario File…** reads one (at
 most 2 MB, refused when it is not one or is a newer version's) and shows, before anything is added,
 its steps, the sites its text names and the profile's values it reads: a scenario does in a profile
-whatever a person can.
+whatever a person can. The sites are the addresses written out in it (`ScenarioFile.hosts`); when
+its code may open others — a `goto` given an address it builds rather than one in quotes or a
+setting of its head, code run in the page (`page.evaluate`), `eval` — the review says "and
+addresses its code builds" (`ScenarioFile.buildsAddresses`, a reading of the text, not a proof).
+The values are those its text names, which is all a run of it is given; code that reads `params`
+otherwise is said ("reads values by names its code builds — none given"). The review reads the text
+off the main thread (`ScenarioImportReading`) and lists 300 steps at most, counting the others; Add
+waits until it has been read.
 
 Checked: `ScenarioStepsTests` (the cut is lossless on every template, a recording and hostile texts;
 what is read as which step; each change leaves the other steps as they were; settings read and

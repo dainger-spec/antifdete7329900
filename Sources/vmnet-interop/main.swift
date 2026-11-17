@@ -62,6 +62,7 @@ var blocked: [String] = []
 var waitFile: String?
 var lossToGuest = 0.0, lossFromGuest = 0.0
 var verbose = false
+var relaysUDP = false
 
 var arguments = Array(CommandLine.arguments.dropFirst())
 func value(_ option: String) -> String {
@@ -89,6 +90,8 @@ while !arguments.isEmpty {
     case "--loss-to-guest": lossToGuest = Double(value(option)) ?? 0
     case "--loss-from-guest": lossFromGuest = Double(value(option)) ?? 0
     case "--verbose": verbose = true
+    // The guest's UDP through the SOCKS5 proxy's relay (VMNetConfiguration.relaysUDP).
+    case "--relay-udp": relaysUDP = true
     default: fail("unknown option \(option)")
     }
 }
@@ -111,8 +114,9 @@ if let waitFile {
     while !FileManager.default.fileExists(atPath: waitFile) { usleep(20_000) }
 }
 
-let configuration = VMNetConfiguration(guestMAC: guestMAC, gatewayMAC: gatewayMAC, gatewayAddress: gateway, guestAddress: guest,
+var configuration = VMNetConfiguration(guestMAC: guestMAC, gatewayMAC: gatewayMAC, gatewayAddress: gateway, guestAddress: guest,
                                        upstream: upstream, blockedHostSuffixes: blocked)
+configuration.relaysUDP = relaysUDP
 let network = VMNetwork(configuration: configuration, frameDescriptor: tap)
 network.setFrameLossForTesting(toGuest: lossToGuest, fromGuest: lossFromGuest)
 network.log = { line in
@@ -129,7 +133,11 @@ let counters = network.counters()
 print("COUNTERS bytesFromGuest=\(counters.bytesFromGuest) bytesToGuest=\(counters.bytesToGuest) "
     + "connectionsOpened=\(counters.connectionsOpened) connectionsFailed=\(counters.connectionsFailed) "
     + "connectionsActive=\(counters.connectionsActive) dnsQueries=\(counters.dnsQueries) dnsBlocked=\(counters.dnsBlocked) "
-    + "datagramsDropped=\(counters.datagramsDropped)")
+    + "datagramsDropped=\(counters.datagramsDropped) datagramsRelayed=\(counters.datagramsRelayed) "
+    + "datagramsToGuest=\(counters.datagramsToGuest) udpBytesFromGuest=\(counters.udpBytesFromGuest) "
+    + "udpBytesToGuest=\(counters.udpBytesToGuest) udpAssociationsOpened=\(counters.udpAssociationsOpened) "
+    + "udpAssociationsFailed=\(counters.udpAssociationsFailed) udpAssociationsActive=\(counters.udpAssociationsActive) "
+    + "timeQueries=\(counters.timeQueries)")
 close(tap)
 exit(0)
 #else

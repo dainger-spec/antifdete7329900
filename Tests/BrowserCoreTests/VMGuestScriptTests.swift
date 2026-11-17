@@ -43,7 +43,8 @@ final class VMGuestScriptTests: XCTestCase {
     /// or works on the test's own files, a recorder where it would change a system.
     private static let passedOn = ["sed", "head", "ls", "mkdir", "cksum", "cut", "tr", "cp", "chmod", "rm", "mv", "mktemp", "grep"]
     private static let recorded = ["defaults", "scutil", "systemsetup", "osascript", "open", "killall", "shutdown", "chown", "ln",
-                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate", "sntp"]
+                                   "mount", "mount_virtiofs", "sysadminctl", "pmset", "mdutil", "softwareupdate", "sntp",
+                                   "caffeinate"]
     private static let answered = ["sh", "sleep", "launchctl", "sudo", "stat", "id", "pgrep", "sw_vers", "logger",
                                    "sysctl", "fdesetup", "stty", "readlink"]
 
@@ -64,6 +65,11 @@ final class VMGuestScriptTests: XCTestCase {
               printf '\\n'; } >> '\(log)'
             """
         for name in Self.recorded where name != "defaults" && name != "osascript" { try stub(name, record) }
+        // What the system says of the person's screen lock, as sysadminctl says it: on its error output.
+        try stub("sysadminctl", record + """
+
+            [ -z "$SCREEN_LOCK" ] || echo "$SCREEN_LOCK" >&2
+            """)
         try stub("defaults", record + """
 
             if [ "$1" = read ]; then
@@ -931,5 +937,110 @@ final class VMGuestScriptTests: XCTestCase {
         XCTAssertLessThan(safari, first)
         XCTAssertLessThan(first, last)
         XCTAssertLessThan(last, try XCTUnwrap(run.calls.firstIndex(of: "root shutdown -h now")))
+    }
+
+    // MARK: - The display while the window is out of sight (tools 14)
+
+    /// The script's waits, as a stand-in for `sleep` that writes down how long each was, and does
+    /// what `events` says at a wait (by its number): "word" leaves Lumen's word to put the display
+    /// to sleep, "gone" takes it back; the shutdown is asked for at `shutdownAt`.
+    private func waits(_ events: [Int: String], shutdownAt: Int) throws {
+        let word = share.appendingPathComponent(VMGuestSettings.screenSleepFileName).path
+        var cases = ""
+        for (wait, what) in events.sorted(by: { $0.key < $1.key }) {
+            cases += "  \(wait)) " + (what == "word" ? ": > '\(word)'" : "/usr/bin/env rm -f '\(word)'") + " ;;\n"
+        }
+        let waits = root.appendingPathComponent("bin/sleep")
+        try Data("""
+            #!/bin/sh
+            echo "$1" >> '\(root.appendingPathComponent("sleeps").path)'
+            waited=$(( $(/usr/bin/env wc -l < '\(root.appendingPathComponent("sleeps").path)') ))
+            case "$waited" in
+            \(cases)esac
+            if [ "$waited" -ge \(shutdownAt) ]; then
+              : > '\(share.path)/lumen-shutdown'
+            fi
+
+            """.utf8).write(to: waits)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: waits.path)
+    }
+
+    /// How long each of the script's waits was, in order.
+    private func waited() -> [String] {
+        ((try? String(contentsOf: root.appendingPathComponent("sleeps"), encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    /// Lumen leaves its word while the machine's window is out of sight: the display is put to
+    /// sleep once — where the person's screen lock is off — and woken, by a person's activity said
+    /// to the system, once the word is gone; meanwhile the script looks every second.
+    func testTheDisplaySleepsWhileLumensWordIsThereAndWakesWhenItGoes() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        try waits([3: "word", 6: "gone"], shutdownAt: 9)
+        let run = try boot(settings: settings,
+                           environment: ["SCREEN_LOCK": "2026-11-16 10:00:00.000 sysadminctl[512:3301] screenLock is off"])
+        XCTAssertEqual(run.status, 0)
+        let asked = "tester sysadminctl -screenLock status"
+        let asleep = "root pmset displaysleepnow"
+        let woken = "root caffeinate -u -t 1"
+        XCTAssertEqual(run.count(asked), 1, "\(run.calls)")
+        XCTAssertEqual(run.count(asleep), 1, "the word is taken once, however long it is there: \(run.calls)")
+        XCTAssertEqual(run.count(woken), 1, "\(run.calls)")
+        // After the start's settings and Safari; the lock looked at first; all before the shutdown.
+        let safari = try XCTUnwrap(run.calls.firstIndex(of: "tester open -a Safari"))
+        let lock = try XCTUnwrap(run.calls.firstIndex(of: asked))
+        let slept = try XCTUnwrap(run.calls.firstIndex(of: asleep))
+        let woke = try XCTUnwrap(run.calls.firstIndex(of: woken))
+        XCTAssertLessThan(safari, lock)
+        XCTAssertLessThan(lock, slept)
+        XCTAssertLessThan(slept, woke)
+        XCTAssertLessThan(woke, try XCTUnwrap(run.calls.firstIndex(of: "root shutdown -h now")))
+        // While the display sleeps the script looks every second, otherwise every two.
+        let looks = waited()
+        XCTAssertTrue(looks.contains("1"), "\(looks)")
+        XCTAssertEqual(looks.last, "2", "awake again: \(looks)")
+        XCTAssertEqual(status().screenSleep, "awake")
+        XCTAssertNil(status().screenSleepNote)
+    }
+
+    /// Where the screen lock is on — or the system does not say it is off — waking the display
+    /// would ask for the password: it is left on, and the status says why, with the system's words.
+    func testADisplayWhoseWakingWouldAskForThePasswordIsLeftOn() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        for lock in ["2026-11-16 10:00:00.000 sysadminctl[512:3301] screenLock delay is immediate", ""] {
+            try waits([3: "word"], shutdownAt: 8)
+            let run = try boot(settings: settings, environment: ["SCREEN_LOCK": lock])
+            XCTAssertEqual(run.count("tester sysadminctl -screenLock status"), 1, "asked once while the word stays: \(run.calls)")
+            XCTAssertFalse(run.calls.contains { $0.contains("pmset displaysleepnow") || $0.contains("caffeinate") }, "\(lock): \(run.calls)")
+            XCTAssertEqual(status().screenSleep, "locks", lock)
+            XCTAssertTrue(status().screenSleepWouldLock, lock)
+            if !lock.isEmpty {
+                XCTAssertTrue(status().screenSleepNote?.contains("screenLock delay is immediate") == true, "\(String(describing: status().screenSleepNote))")
+                XCTAssertFalse(status().screenSleepNote?.contains("[") == true, "the system's words, as plain characters")
+            }
+            try? FileManager.default.removeItem(at: share.appendingPathComponent(VMGuestSettings.screenSleepFileName))
+        }
+    }
+
+    /// Nobody signed in, no word at all, or a link in the word's place: the display is left alone.
+    func testTheDisplayIsLeftAloneWithoutLumensWordOrAPerson() throws {
+        let settings = VMGuestSettings(profile: VMProfile(name: "A", lumenWallpaper: false)).text
+        let on = ["SCREEN_LOCK": "screenLock is off"]
+        func touched(_ run: Run) -> Bool { run.calls.contains { $0.contains("screenLock") || $0.contains("pmset") || $0.contains("caffeinate") } }
+
+        try waits([:], shutdownAt: 6)
+        XCTAssertFalse(touched(try boot(settings: settings, environment: on)))
+        XCTAssertNil(status().screenSleep)
+
+        try waits([1: "word"], shutdownAt: 6)
+        XCTAssertFalse(touched(try boot(settings: settings, environment: on.merging(["CONSOLE_USER": ""]) { $1 })))
+
+        let word = share.appendingPathComponent(VMGuestSettings.screenSleepFileName)
+        try? FileManager.default.removeItem(at: word)
+        let elsewhere = root.appendingPathComponent("elsewhere")
+        try Data().write(to: elsewhere)
+        try FileManager.default.createSymbolicLink(at: word, withDestinationURL: elsewhere)
+        try waits([:], shutdownAt: 6)
+        XCTAssertFalse(touched(try boot(settings: settings, environment: on)))
+        try? FileManager.default.removeItem(at: word)
     }
 }

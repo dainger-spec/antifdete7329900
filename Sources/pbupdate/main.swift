@@ -16,9 +16,12 @@ let usage = """
           prints the release of ZIP, signed, as JSON
       pbupdate appcast --key PRIVATE_KEY_FILE --out FILE [--previous APPCAST [--public-key ID=BASE64...]] ITEM_FILE...
           writes the signed appcast of the releases in ITEM_FILEs and of a previous appcast (checked
-          with this key, or the keys given), the newest first; a build listed twice is taken once
-      pbupdate verify --appcast FILE --public-key ID=BASE64... [--archive ZIP --build B]
-          checks the appcast's signature, and a downloaded ZIP against the release with build B
+          with this key, or the keys given), the newest first; refused when a new release's build is
+          not greater than every build of the previous appcast (it would replace a published release,
+          or be offered below an older one), or is given twice
+      pbupdate verify --appcast FILE --public-key ID=BASE64... [--archive ZIP --build B] [--new-build B --new-version V]
+          checks the appcast's signature, and a downloaded ZIP against the release with build B;
+          with --new-build, that a release V with build B may join it (its build greater than all)
     """
 
 struct Failure: Error, CustomStringConvertible {
@@ -121,14 +124,24 @@ func run(_ command: String, _ arguments: Arguments) throws {
         let privateKey = try readPrivateKey(arguments.one("key"))
         let publicKey = try UpdateSigner.publicKey(of: privateKey)
         var items = try arguments.operands.map { try decoder.decode(AppcastItem.self, from: Data(contentsOf: URL(fileURLWithPath: $0))) }
+        var published: [AppcastItem] = []
         if let previous = arguments.optional("previous") {
             // Checked with this key, or a key it replaces (--public-key).
             var keys = try publicKeys(arguments)
             keys[UpdateKeys.keyID(of: publicKey)] = publicKey
-            let old = try UpdateVerifier.appcast(from: Data(contentsOf: URL(fileURLWithPath: previous)), keys: keys)
-            let builds = items.map { BuildVersion($0.build) }
-            items += old.items.filter { !builds.contains(BuildVersion($0.build)) }
+            published = try UpdateVerifier.appcast(from: Data(contentsOf: URL(fileURLWithPath: previous)), keys: keys).items
         }
+        // Each new release's build is greater than every published one: a build listed again took a
+        // published release's place without a word, and a lower one offered an older version as an
+        // update. Among the new ones (scripts/update_check.py lists an older one on purpose), each
+        // build once.
+        for (index, item) in items.enumerated() {
+            if let refusal = UpdateSigner.refusalToAdd(version: item.version, build: item.build, to: published) { throw Failure(refusal) }
+            if let twin = items[..<index].first(where: { BuildVersion($0.build) == BuildVersion(item.build) }) {
+                throw Failure("build \(item.build) is given twice: as version \(twin.version) and as \(item.version)")
+            }
+        }
+        items += published
         let newestFirst = try items.map { item -> (item: AppcastItem, build: BuildVersion) in
             guard let build = BuildVersion(item.build) else { throw Failure("\(item.build) is not a build number") }
             return (item, build)
@@ -141,6 +154,11 @@ func run(_ command: String, _ arguments: Arguments) throws {
         let keys = try publicKeys(arguments)
         let appcast = try UpdateVerifier.appcast(from: Data(contentsOf: URL(fileURLWithPath: arguments.one("appcast"))), keys: keys)
         print("appcast: signature checks; generated \(appcast.generatedAt); builds \(appcast.items.map(\.build).joined(separator: ", "))")
+        if let build = arguments.optional("new-build") {
+            let version = try arguments.one("new-version")
+            if let refusal = UpdateSigner.refusalToAdd(version: version, build: build, to: appcast.items) { throw Failure(refusal) }
+            print("new release: \(version) (\(build)) follows every release in it")
+        }
         if let archive = arguments.optional("archive") {
             let build = try arguments.one("build")
             guard let item = appcast.items.first(where: { $0.build == build }) else { throw Failure("no release with build \(build)") }

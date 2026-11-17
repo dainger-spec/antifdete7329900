@@ -73,6 +73,11 @@ public struct ScenarioSteps: Equatable, Sendable {
     /// The mark of a line of a step that is switched off.
     public static let offMark = "//- "
 
+    /// How deep blocks (and steps switched off within steps switched off) are read for the steps
+    /// inside them; one deeper is a step of its own code. Each level reads its lines once more, so
+    /// a text from outside nested thousands deep is read in a moment, not for minutes.
+    public static let maximumDepth = 16
+
     public init(_ source: String) {
         let lines = Self.lines(of: source)
         if let pieces = Self.cut(lines, firstLine: 1) {
@@ -206,6 +211,109 @@ public struct ScenarioSteps: Equatable, Sendable {
         return parts.enumerated().map { index, part in index < parts.count - 1 || endsWithNewline ? part + "\n" : part }
     }
 
+    /// The text with its comments blanked out — and, with `blankingTexts`, the insides of its
+    /// quoted texts (a template's `${…}` stays code) — each character a space: its line breaks are
+    /// kept, and as many UTF-16 units as it had, so an offset in it is the same place in the text.
+    /// What the import's review reads for what the code does (`ScenarioValues.readsByBuiltNames`,
+    /// `ScenarioFile.buildsAddresses`). One pass. A regular expression's literal is not known: a
+    /// quote in one is read as a text's beginning, which ends with the line.
+    static func withoutComments(_ source: String, blankingTexts: Bool = false) -> String {
+        let scalars = Array(source.unicodeScalars)
+        let space: Unicode.Scalar = " ", newline: Unicode.Scalar = "\n"
+        var out = String.UnicodeScalarView()
+        func blank(_ scalar: Unicode.Scalar) {
+            if scalar == newline {
+                out.append(newline)
+                return
+            }
+            out.append(space)
+            if scalar.value > 0xFFFF { out.append(space) }
+        }
+        var quote: Unicode.Scalar?
+        var escaped = false
+        var inTemplate = false
+        // The brace depth each open template's `${` began at.
+        var templates: [Int] = []
+        var depth = 0
+        var index = 0
+        while index < scalars.count {
+            let scalar = scalars[index]
+            let next: Unicode.Scalar? = index + 1 < scalars.count ? scalars[index + 1] : nil
+            index += 1
+            if let open = quote {
+                if escaped {
+                    escaped = false
+                } else if scalar == "\\" {
+                    escaped = true
+                } else if scalar == open || scalar == newline {
+                    quote = nil
+                    out.append(scalar)
+                    continue
+                }
+                if blankingTexts { blank(scalar) } else { out.append(scalar) }
+                continue
+            }
+            if inTemplate {
+                if escaped {
+                    escaped = false
+                } else if scalar == "\\" {
+                    escaped = true
+                } else if scalar == "`" {
+                    inTemplate = false
+                    out.append(scalar)
+                    continue
+                } else if scalar == "$", next == "{" {
+                    inTemplate = false
+                    templates.append(depth)
+                    depth += 1
+                    out.append(scalar)
+                    out.append("{")
+                    index += 1
+                    continue
+                }
+                if blankingTexts { blank(scalar) } else { out.append(scalar) }
+                continue
+            }
+            if scalar == "/", next == "/" {
+                blank(scalar)
+                while index < scalars.count, scalars[index] != newline {
+                    blank(scalars[index])
+                    index += 1
+                }
+                continue
+            }
+            if scalar == "/", next == "*" {
+                blank(scalar)
+                blank(space)
+                index += 1
+                while index < scalars.count, !(scalars[index] == "*" && index + 1 < scalars.count && scalars[index + 1] == "/") {
+                    blank(scalars[index])
+                    index += 1
+                }
+                if index < scalars.count {
+                    blank(space)
+                    blank(space)
+                    index += 2
+                }
+                continue
+            }
+            out.append(scalar)
+            switch scalar {
+            case "'", "\"": quote = scalar
+            case "`": inTemplate = true
+            case "{": depth += 1
+            case "}":
+                depth -= 1
+                if let began = templates.last, began == depth {
+                    templates.removeLast()
+                    inTemplate = true
+                }
+            default: break
+            }
+        }
+        return String(out)
+    }
+
     private static func trimmed(_ line: String) -> String { line.trimmingCharacters(in: .whitespacesAndNewlines) }
     private static func isComment(_ line: String) -> Bool { trimmed(line).hasPrefix("//") }
     private static func isOff(_ line: String) -> Bool { trimmed(line).hasPrefix("//-") }
@@ -276,8 +384,9 @@ public struct ScenarioSteps: Equatable, Sendable {
         }
     }
 
-    /// The lines as pieces; nil when they cannot be cut safely.
-    private static func cut(_ lines: [String], firstLine: Int) -> [Piece]? {
+    /// The lines as pieces; nil when they cannot be cut safely, or lie deeper than `maximumDepth`.
+    private static func cut(_ lines: [String], firstLine: Int, depth: Int = 0) -> [Piece]? {
+        guard depth <= maximumDepth else { return nil }
         var pieces: [Piece] = []
         var index = 0
         while index < lines.count {
@@ -296,7 +405,7 @@ public struct ScenarioSteps: Equatable, Sendable {
                     guard let range = line.range(of: offMark) else { return line.replacingOccurrences(of: "//-", with: "") }
                     return String(line[line.startIndex..<range.lowerBound]) + String(line[range.upperBound...])
                 }
-                var step = (cut(inner, firstLine: firstLine + index)?.compactMap(\.step).first)
+                var step = (cut(inner, firstLine: firstLine + index, depth: depth + 1)?.compactMap(\.step).first)
                     ?? Step(kind: .code, title: nil, arguments: [], isOff: true, code: inner.joined(), lines: (firstLine + index)...(firstLine + end), children: [])
                 step.isOff = true
                 step.lines = (firstLine + index)...(firstLine + end)
@@ -341,7 +450,7 @@ public struct ScenarioSteps: Equatable, Sendable {
                 text.removeFirst(2)
                 return text.trimmingCharacters(in: .whitespaces)
             }.filter { !$0.isEmpty }.joined(separator: " ")
-            var step = read(codeLines, firstLine: firstLine + codeStart)
+            var step = read(codeLines, firstLine: firstLine + codeStart, depth: depth)
             step.title = title.isEmpty ? nil : title
             step.lines = (firstLine + start)...(firstLine + index - 1)
             pieces.append(Piece(text: lines[start..<index].joined(), step: step))
@@ -351,7 +460,8 @@ public struct ScenarioSteps: Equatable, Sendable {
 
     // MARK: Reading a statement
 
-    private static func read(_ codeLines: [String], firstLine: Int) -> Step {
+    /// `depth`: the cut's the statement is in.
+    private static func read(_ codeLines: [String], firstLine: Int, depth: Int) -> Step {
         let code = codeLines.joined()
         var step = Step(kind: .code, title: nil, arguments: [], isOff: false, code: code, lines: firstLine...(firstLine + codeLines.count - 1), children: [])
         // A comment at the line's end (the recorder's note beside a password) is not the command's.
@@ -363,29 +473,39 @@ public struct ScenarioSteps: Equatable, Sendable {
             }
             return step
         }
-        // A block of one of the two shapes, its body cut again.
+        // A block of one of the two shapes, its body cut again — one level deeper. Any other block
+        // is its own code, and is not cut again: its lines are read once.
         let head = trimmed(codeLines[0])
         guard trimmed(codeLines[codeLines.count - 1]) == "}", head.hasSuffix("{") else { return step }
-        let body = Array(codeLines[1..<(codeLines.count - 1)])
-        guard let inner = cut(body, firstLine: firstLine + 1) else { return step }
+        let kind: Kind, given: String
         if let match = firstMatch(#"^for \(let (\w+) = 0; \1 < ([^;]+); \1\+\+\) \{$"#, head), match.count == 3 {
-            step.kind = .repeatTimes
-            step.arguments = [argument(match[2])]
-            step.children = inner.compactMap(\.step)
+            (kind, given) = (.repeatTimes, match[2])
         } else if let match = firstMatch(#"^if \(await page\.isVisible\((.+)\)\) \{$"#, head), match.count == 2 {
-            step.kind = .ifVisible
-            step.arguments = [argument(match[1])]
-            step.children = inner.compactMap(\.step)
+            (kind, given) = (.ifVisible, match[1])
+        } else {
+            return step
         }
+        let body = Array(codeLines[1..<(codeLines.count - 1)])
+        guard let inner = cut(body, firstLine: firstLine + 1, depth: depth + 1) else { return step }
+        step.kind = kind
+        step.arguments = [argument(given)]
+        step.children = inner.compactMap(\.step)
         return step
     }
 
     /// A one-line command and what it is given; nil for any other line.
     static func command(_ text: String) -> (Kind, [Argument])? {
-        // The recorder's "type over what was there": a click, select all, then the typing.
-        if let match = firstMatch(#"^await page\.click\((.+?)\); await page\.press\('Meta\+a'\); await page\.type\((.+)\);$"#, text), match.count == 3,
-           let parts = arguments(match[2]), parts.count == 2 {
-            return (.type, parts)
+        // The recorder's "type over what was there": a click, select all, then the typing. Found
+        // by its first joint, not by a pattern that tries every one (a long line of them took minutes).
+        let click = "await page.click(", joint = "); await page.press('Meta+a'); await page.type("
+        if text.count > click.count + 2, text.hasPrefix(click), text.hasSuffix(");") {
+            // What is clicked is one character at least; what is typed too, before the last `);`.
+            let selector = text.index(text.startIndex, offsetBy: click.count + 1)
+            let end = text.index(text.endIndex, offsetBy: -2)
+            if selector < end, let middle = text.range(of: joint, range: selector..<text.endIndex), middle.upperBound < end,
+               let parts = arguments(String(text[middle.upperBound..<end])), parts.count == 2 {
+                return (.type, parts)
+            }
         }
         let shapes: [(String, Kind, Int)] = [
             (#"^await page\.goto\((.+)\);$"#, .open, 1), (#"^await page\.click\((.+)\);$"#, .click, 1),

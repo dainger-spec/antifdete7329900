@@ -123,7 +123,9 @@ enum MachineCatalog {
             DispatchQueue.main.async {
                 switch result {
                 case .failure(let error):
-                    HelperIO.fail(error)
+                    // Whatever stopped the question (no connection, a filter, Apple's server) is
+                    // said as Apple not being asked, with what to do; a full disk stays itself.
+                    HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .catalog)
                 case .success(let image):
                     guard let requirements = image.mostFeaturefulSupportedConfiguration, requirements.hardwareModel.isSupported else {
                         HelperIO.fail("The macOS Apple offers now cannot run in a virtual machine on this Mac. Update this Mac's macOS and try again.",
@@ -186,7 +188,9 @@ final class MachineInstaller {
         VZMacOSRestoreImage.load(from: imageURL) { result in
             DispatchQueue.main.async {
                 switch result {
-                case .failure(let error): HelperIO.fail(error)
+                // A downloaded image that does not load is damaged or cut short: said so, with
+                // what to do, whatever error the framework had for it.
+                case .failure(let error): HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .image)
                 case .success(let image): self.install(image, from: imageURL, into: files)
                 }
             }
@@ -232,7 +236,8 @@ final class MachineInstaller {
                 DispatchQueue.main.async {
                     switch result {
                     case .failure(let error):
-                        HelperIO.fail(error)
+                        // The installation did not finish, whatever the framework's code for it.
+                        HelperIO.fail((error as NSError).localizedDescription, kind: VMFailureKind.of(error) ?? .installation)
                     case .success:
                         HelperIO.emit(VMHelperEvent(kind: .installed, image: MachineCatalog.restoreImage(image)))
                         exit(0)

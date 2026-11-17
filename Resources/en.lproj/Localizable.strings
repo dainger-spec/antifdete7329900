@@ -133,10 +133,7 @@
 "editor.error.startURL" = "Start URL is not a valid URL";
 "editor.footer.note" = "Changes apply at the next launch.";
 "editor.generation" = "View for websites";
-"editor.generation.footer" = "Mac is Safari on this Mac as it is. A mobile view changes what the profile calls itself to websites (the User-Agent) and the size of its window; an iPhone view also answers as an iPhone where WebKit itself can (the platform, the screen's density) and, with the full disguise, in the screen, touch and pointer. The engine, fonts and hardware stay this Mac's — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
-"editor.generation.ipad" = "An iPad view in a window on a Mac is Safari on the Mac in an iPad-sized window (an iPad calls itself a Mac anyway): there is no touch, and the fonts, graphics and audio are this Mac's; a site that checks for touch will see it.";
-"editor.phoneDisguise" = "Full iPhone disguise";
-"editor.phoneDisguise.detail" = "On: a page sees an iPhone's screen (%ld×%ld at %ldx), %ld touch points, touch events from a press, a coarse pointer without hover, portrait. Part of it is a script, and a careful site can find the script's traces. Off: no traces of a substitution — only what WebKit itself answers as an iPhone (the platform, the density); the screen, touch and pointer stay this Mac's.";
+"editor.generation.footer" = "Safari on this Mac as it is: the engine and hardware are this Mac's, as a page measures them. The canvas is drawn as it is, without noise — see docs/ISOLATION_AND_LIMITATIONS.md §2.";
 "editor.geo" = "Geolocation";
 "editor.geo.accuracy" = "Accuracy (m)";
 "editor.geo.deny" = "Deny";
@@ -163,7 +160,7 @@
 "editor.location.unknown" = "Exit location not checked yet";
 "editor.location.unknown.detail" = "At the next launch the app asks a location service through the proxy.";
 "editor.name" = "Name";
-"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC goes through the proxy only with the network extension and SOCKS5; otherwise it is off.";
+"editor.network.footer" = "Native per-profile proxy, fail-closed (no direct fallback). WebRTC goes through the proxy only with the network guard and SOCKS5; otherwise it stays in the pages connecting nowhere where the guard can hold the profile, and is taken out where it cannot.";
 "editor.passwords.autoFill" = "AutoFill user names and passwords";
 "editor.passwords.footer" = "After a sign-in the browser offers to save the password, encrypted with this profile; a login field then lists the saved logins for its site. Nothing is filled until you choose a login.";
 "editor.privacy.footer" = "Safe Browsing looks sites up outside the profile's proxy (WebKit does it itself), so it is off by default.";
@@ -286,9 +283,8 @@
 "editor.camera.error.read" = "Could not read %@.";
 
 /* Camera: adjustments, crop, playback */
-"editor.camera.label.note" = "Set this to match a real camera so a page cannot tell them apart — the match button fills a device’s exact name and resolution (this Mac’s own camera, or a typical iPhone front camera for a mobile profile).";
+"editor.camera.label.note" = "Set this to match a real camera so a page cannot tell them apart — the match button fills this Mac’s own camera’s exact name and resolution.";
 "editor.camera.matchMac" = "Match this Mac";
-"editor.camera.matchMobile" = "Match an iPhone";
 "editor.camera.preview.note" = "Live preview of what a page gets — it updates as you change the source, crop and adjustments. A video plays and loops here.";
 "editor.camera.preview.open" = "Open preview";
 "editor.camera.preview.window" = "Camera preview";
@@ -384,9 +380,19 @@
 "editor.ua.useCustom" = "Custom user agent";
 "editor.webrtc" = "WebRTC";
 "editor.webrtc.disabled" = "Disabled";
-"editor.webrtc.httpProxy" = "An HTTP proxy cannot carry UDP: WebRTC is off with it. WebRTC through a proxy needs SOCKS5.";
 "editor.webrtc.relay" = "Relay (TURN) only";
 "editor.webrtc.unrestricted" = "Unrestricted";
+"editor.webrtc.automatic" = "Automatic (through the connection)";
+"editor.webrtc.now.likeSafari" = "Now: as in Safari, over this Mac's own connection — WebRTC shows the same address as the pages.";
+"editor.webrtc.now.relayNoProxy" = "Now: only through a site's own TURN server. The page is not shown this Mac's address; the TURN server sees it.";
+"editor.webrtc.now.silent" = "Now: present in the pages as in Safari, but connects nowhere — no address is gathered or sent, as on a network that lets no UDP through.";
+"editor.webrtc.now.throughProxy" = "Now: through the SOCKS5 proxy, from its address; the network guard keeps the profile from going around it. If at the start the proxy turns out not to carry UDP, WebRTC stays in the pages and connects nowhere.";
+"editor.webrtc.now.silentHTTP" = "Now: present in the pages as in Safari, but connects nowhere — an HTTP proxy cannot carry UDP, and the network guard keeps the profile from going around it. Through a proxy WebRTC works with SOCKS5.";
+"editor.webrtc.now.removedGuard" = "Now: taken out of the pages until the network guard is ready — without it WebRTC could go around the proxy from this Mac's address. Sites can notice that WebRTC is missing.";
+"editor.webrtc.now.removedNoGuardInBuild" = "Now: taken out of the pages — this version of Lumen has no network guard, and without it WebRTC could go around the proxy.";
+"editor.webrtc.now.removedNotOwnProcess" = "Now: taken out of the pages — with a proxy, WebRTC needs the profile in a process of its own, and this build runs profiles inside the app.";
+"editor.webrtc.now.removed" = "Now: taken out of the pages.";
+"editor.webrtc.now.removedBypass" = "Now: taken out of the pages — some sites bypass this proxy, so the network guard cannot hold the profile to it.";
 "error.core.authenticationFailed" = "The data could not be decrypted: a wrong key, or the data was changed.";
 "error.core.wrongPassword" = "Wrong master password.";
 "error.core.vaultAlreadyExists" = "A vault already exists here.";
@@ -432,9 +438,6 @@
 "errorpage.proxy.noCredentials" = "The profile’s proxy requires a user name and password. Add them in the profile settings.";
 "errorpage.proxy.rejected" = "The proxy rejected the profile’s user name and password.";
 "errorpage.title" = "Page could not be loaded";
-"gen.ios26" = "Mobile view: iPhone, Safari 26 (User-Agent only)";
-"gen.ios27" = "Mobile view: iPhone, Safari 27 (User-Agent only)";
-"gen.ipados26" = "iPad view: Safari 26, an iPad-sized window";
 "gen.macos26" = "Safari on macOS 26 (matches this engine)";
 "gen.macos.host" = "This Mac’s Safari, %@ (matches the engine)";
 "history.clear" = "Clear";
@@ -557,8 +560,6 @@
 "whatSites.compare" = "Compare with Safari…";
 "whatSites.onlyDifferences" = "Only differences";
 "whatSites.allSame" = "Everything here is the same as in Safari.";
-"whatSites.allSame.mobile" = "The same as Safari on this Mac — there is nothing to compare with a real iPhone.";
-"whatSites.mobileView" = "There is no reference here: the panel compares the profile with Safari on this Mac, and the profile calls itself an iPhone or an iPad. It also differs from the real device in what this panel cannot see: touch, fonts, graphics (WebGL), audio, motion sensors, the screen.";
 "whatSites.summary" = "%ld same · %ld differ · %ld each window's own";
 "whatSites.same" = "same";
 "whatSites.differs" = "differs";
@@ -651,6 +652,7 @@
 "check.webRTC.off" = "WebRTC is off: this Mac's real address cannot be learned through it.";
 "check.webRTC.throughProxy" = "WebRTC goes through the proxy: sites see the proxy's address in it.";
 "check.webRTC.directNoProxy" = "No proxy: WebRTC shows the same address of this Mac as ordinary requests do.";
+"check.webRTC.silent" = "WebRTC is in the pages as in Safari but connects nowhere: no address of this Mac can be learned through it.";
 "check.webRTC.direct" = "WebRTC is on and goes around the proxy: a site can learn this Mac's real address. Turn WebRTC off in the profile's settings.";
 "check.webRTC.onWhereOff" = "WebRTC is on in the profile's windows (windows: %1$@) where it should be off. Restart the profile.";
 "check.dns.throughProxy" = "Sites' names are looked up by the proxy, not by this Mac: requests go to the proxy by name, DNS prefetching is off, UDP is closed to the process (checked from how the profile is built, with no outside service).";
@@ -663,12 +665,10 @@
 "check.engine.close" = "The User-Agent names Safari %1$@, the engine is Safari %2$@: neighbouring releases, a small difference to a site.";
 "check.engine.far" = "The User-Agent names Safari %1$@, and the page is drawn by the engine of Safari %2$@. A site measures the engine and sees that the version named is another.";
 "check.engine.notSafari" = "The User-Agent does not name Safari, and the page is drawn by Safari's engine. Any site can see that.";
-"check.engine.mobile" = "An iPhone or iPad view: this Mac's Safari under another device's name. Not compared with the Mac's engine.";
 "check.engine.notMeasured" = "The page did not say its User-Agent.";
 "check.window.fits" = "A window of %1$@ on a screen of %2$@.";
 "check.window.larger" = "The window (%1$@) is larger than the screen (%2$@): no real user has that.";
 "check.window.cut" = "The settings ask for a window of %1$@, and this Mac's screen is %2$@: the window opens smaller than asked.";
-"check.window.mobile" = "An iPhone or iPad view: the window is the device's screen in size, not compared with the Mac's screen.";
 "check.window.notMeasured" = "The page did not say the sizes of its window and screen.";
 "check.intro.title" = "No result yet";
 "check.progress.page" = "The measuring page in a window of the profile";
@@ -702,7 +702,6 @@
 "menu.copy" = "Copy";
 "menu.paste" = "Paste";
 "menu.selectAll" = "Select All";
-"menu.showAllTabs" = "Show All Tabs";
 "menu.window" = "Window";
 "menu.minimize" = "Minimize";
 "menu.findOnPage" = "Find…";
@@ -724,14 +723,6 @@
 "menu.copyLink" = "Copy Link";
 "menu.history" = "History";
 "menu.showDownloads" = "Show Downloads";
-"mobile.tabs.one" = "%ld tab";
-"mobile.tabs.few" = "%ld tabs";
-"mobile.tabs.many" = "%ld tabs";
-"mobile.tabs.close" = "Close %@";
-"mobile.tabs.new" = "New Tab";
-"mobile.tabs.done" = "Done";
-"mobile.tabs.show" = "Tabs";
-"mobile.address.placeholder" = "Search or enter website";
 "passwords.add" = "Add Password";
 "passwords.addTitle" = "New password";
 "passwords.conflict.badgeNumbered" = "Other version %ld";
@@ -822,8 +813,6 @@
 "profiles.kept.removeMessage" = "This profile's settings, passwords, bookmarks, history and website data are deleted from this Mac. They cannot be brought back.";
 "profiles.kept.removeTitle.broughtBack" = "Remove the old folder of the profile “%@”?";
 "profiles.kept.removeMessage.broughtBack" = "The new profile brought back from this folder stays. The old folder is deleted from this Mac, and with it what was not carried over to the new profile: open tabs, the warm-up schedule, kept versions of the settings. They cannot be brought back.";
-"profiles.device.ipad" = "iPad view";
-"profiles.device.iphone" = "Mobile view";
 "profiles.device.mac" = "Mac";
 "profiles.empty.subtitle" = "Create your first isolated profile to start browsing.";
 "profiles.empty.title" = "No profiles yet";
@@ -1477,7 +1466,6 @@
 "simplified.title" = "This profile runs in a simplified mode";
 "simplified.body" = "Its window is the app's own, not Safari's. The profile goes through its proxy and keeps its data as always, but it does not match Safari: without Safari's window this is plain WebKit, and sites can tell.";
 "simplified.why" = "Why: %@";
-"simplified.reason.device" = "the profile presents an iPhone or an iPad, and Safari's window is a Mac's: such a profile always opens in the app's window.";
 "simplified.reason.sandboxed" = "this build of Lumen runs in the App Sandbox, where Safari's window cannot be hosted. The build without the App Sandbox hosts it.";
 "simplified.reason.turnedOff" = "Safari's window is turned off for profiles (PB_SAFARI_CHROME=0).";
 "simplified.reason.noProfileProcess" = "profiles run inside the app's own process (PB_PROFILE_PROCESS or the PBProfileProcess setting), and Safari's window is hosted only in a profile's own process.";
@@ -1712,6 +1700,10 @@
 "settings.newProfiles.local.detail" = "A new profile's pages from the internet cannot reach this Mac or the local network — a page could otherwise scan them. Each profile changes it in its editor (Privacy).";
 "settings.newProfiles.randomWindow" = "Random safe window size";
 "settings.newProfiles.randomWindow.detail" = "A new profile gets a window size of its own, at random among those that fit this Mac's screen (two thirds to nine tenths of it each way), so that profiles do not all open with the same window. A real window: a page measures it.";
+"settings.newProfiles.webRTC" = "WebRTC through the profile's connection automatically";
+"settings.newProfiles.webRTC.detail" = "New profiles get WebRTC “Automatic”: through a SOCKS5 proxy with the network guard, as in Safari without a proxy, and with an HTTP proxy present but connecting nowhere — never another address than the pages show. Off: new profiles start with WebRTC Disabled. Existing profiles keep their choice; change it in a profile's settings.";
+"settings.newProfiles.webRTC.guard" = "Through a proxy this needs Lumen's network guard, which is not ready on this Mac. Until it is, WebRTC is taken out of the pages of profiles with a proxy.";
+"settings.newProfiles.webRTC.guardButton" = "Set up the network guard…";
 "settings.behavior.subtitle" = "How the app's browser windows behave, in every profile.";
 "settings.behavior.autoFill" = "AutoFill passwords";
 "settings.behavior.autoFill.detail" = "Offers saved logins and asks to save new ones. Each profile has its own switch too; both must be on.";
@@ -1894,7 +1886,11 @@
 "profiles.exit.directIn" = "Direct, no proxy";
 "inspector.webRTC" = "WebRTC";
 "inspector.webRTC.viaProxy" = "Through the proxy, relay only";
-"inspector.webRTC.offHTTP" = "Off: an HTTP proxy does not carry UDP";
+"inspector.webRTC.likeSafari" = "As in Safari, over this Mac's connection";
+"inspector.webRTC.silent" = "Present, connects nowhere";
+"inspector.webRTC.silentHTTP" = "Present, connects nowhere: an HTTP proxy does not carry UDP";
+"inspector.webRTC.notOwnProcess" = "Off: profiles run inside the app in this build";
+"inspector.webRTC.bypass" = "Off: some sites bypass the proxy";
 "inspector.checkProxy" = "Check the proxy";
 "inspector.seen" = "How sites see it";
 "inspector.device" = "Device";
@@ -1960,6 +1956,8 @@
 "settings.appearance.entry" = "Entry screen";
 "settings.appearance.light" = "Lumen's light at entry";
 "settings.appearance.light.detail" = "The eclipse’s horizon on the entry screen and the light in the corners of the profiles window. They come in once, as the app opens, and stay as a dimmed background.";
+"settings.appearance.welcome" = "Greet with the welcome window at every start";
+"settings.appearance.welcome.detail" = "“welcome” written as with a pen before the lock screen, every time Lumen starts. Off: it greets you only at the very first start.";
 "settings.appearance.listAndMotion" = "List and motion";
 "settings.appearance.density" = "Profile list density";
 "settings.appearance.density.detail" = "Compact: lower rows, more profiles on the screen.";
@@ -2027,7 +2025,7 @@
 "scenarios.log.copy" = "Copy the Log";
 "scenarios.values.open" = "This profile’s values for scenarios…";
 "scenarios.values.title" = "Values of “%@” for scenarios";
-"scenarios.values.subtitle" = "What a scenario reads as params.name when it runs on this profile: a login, a password, a city. The same scenario on another profile reads that profile’s own.";
+"scenarios.values.subtitle" = "What a scenario reads as params.name when it runs on this profile: a login, a password, a city. A scenario is given only the values its text names; the same scenario on another profile reads that profile’s own.";
 "scenarios.values.name" = "name";
 "scenarios.values.value" = "value";
 "scenarios.values.add" = "Add a Value";
@@ -2039,6 +2037,7 @@
 "scenarios.values.problem.name" = "“%@” cannot be a name: Latin letters, digits and _, not beginning with a digit. A scenario reads it as params.name.";
 "scenarios.values.problem.twice" = "Two values are named “%@”.";
 "scenarios.values.missing" = "This profile has no value for: %@";
+"scenarios.values.built" = "reads values by names its code builds — none given";
 "scenarios.values.fill" = "Fill In…";
 "scenarios.values.unreadable" = "The profiles’ values for scenarios could not be read. Their file is kept as it is, and moved aside when values are next saved.";
 "scenarios.values.newer" = "The profiles’ values for scenarios were written by a newer version of Lumen. Update Lumen to change them.";
@@ -2257,7 +2256,7 @@
 "help.commands.screenshot" = "A picture of the part of the page in view, or of an element with page.screenshot(selector). The result is a PNG in base64.";
 "help.commands.script" = "In the scenario itself";
 "help.commands.log" = "A line in the run’s log.";
-"help.commands.params" = "The run’s parameters: the profile’s own values for scenarios (Scenarios window, the profile’s values), so that one scenario has each profile’s login and password; and what a request of the automation API gives in params, which wins.";
+"help.commands.params" = "The run’s parameters: the profile’s own values for scenarios (Scenarios window, the profile’s values) that the scenario’s text names as params.name or params['name'], so that one scenario has each profile’s login and password; and what a request of the automation API gives in params, which wins.";
 "help.commands.result" = "What the scenario returns is the run’s result: shown in the log, and given as result by the automation API.";
 "help.api.intro" = "A script on this Mac can do what the Profiles window does: list the profiles, start and stop one, open a page in it, read and write its cookies, run a scenario. It connects only from this Mac (127.0.0.1) and only with the token.";
 "help.api.plan" = "The API is part of the Professional and Team plans, and of the trial. Without it every request is refused with 403 automation_not_in_plan.";
@@ -2276,7 +2275,7 @@
 "help.api.request.open" = "A new window of the running profile at the body’s address: {\"url\": \"https://…\"}.";
 "help.api.request.cookies" = "Every cookie of the profile. ?format=playwright (the default), netscape or extension.";
 "help.api.request.importCookies" = "Imports the cookies in the body: a JSON or a Netscape file.";
-"help.api.request.scenario" = "Runs a scenario on the running profile: {\"source\": \"…\", \"params\": {…}}, or a saved one, {\"scenario\": \"Its name\"}. A saved scenario also has the profile’s own values in params.";
+"help.api.request.scenario" = "Runs a scenario on the running profile: {\"source\": \"…\", \"params\": {…}}, or a saved one, {\"scenario\": \"Its name\"}. A saved scenario also has in params the profile’s own values that its text names.";
 "help.api.request.scenarioState" = "The profile’s last run: whether it is running, how it ended, its log, and its result — what the scenario returned.";
 "help.api.request.scenarioStop" = "Stops the run: a wait under way ends, a pressed button or key is let go.";
 "help.api.scenario" = "A scenario from a script";
@@ -2700,9 +2699,6 @@
 "license.masterPassword.change" = "Change Master Password";
 
 /* The network guard (NetworkGuard, NetworkGuardSettingsView; docs/TUNNEL.md). */
-"editor.webrtc.viaGuard" = "With a proxy, WebRTC goes through the relay only and leaves from the proxy's address; the network guard keeps the profile from connecting around the proxy. Needs a SOCKS5 proxy with UDP.";
-"editor.webrtc.noGuardInBuild" = "This version of Lumen has no network guard: WebRTC is off in a profile with a proxy, or its UDP could go around the proxy from the real address.";
-"editor.webrtc.guardNotReady" = "The network guard is not ready: until it is, WebRTC is off in a profile with a proxy, or its UDP could go around the proxy.";
 "editor.webrtc.guardSettings" = "Network guard…";
 "inspector.webRTC.guardNotReady" = "Off: the network guard is not ready";
 "inspector.webRTC.noGuardInBuild" = "Off: no network guard in this version";
@@ -2759,7 +2755,7 @@
 "guard.how.guard.title" = "The network guard";
 "guard.how.guard" = "Lumen's system extension is a content filter. It carries and reads nothing — it isn't even allowed to open a connection: it only lets a connection through or drops it. The process of a profile whose WebRTC goes through its proxy, and whatever WebKit and macOS open for it, may connect only to its proxy and to this Mac (127.0.0.1); everything else is dropped. Other apps' connections, and Lumen's own — updates, the account, sync — are let through at once.";
 "guard.how.limits.title" = "Limits";
-"guard.how.limits" = "It needs a SOCKS5 proxy whose UDP ASSOCIATE works: this is checked before the profile starts, and without UDP WebRTC is off in the profile. An HTTP proxy cannot carry UDP. The relay carries UDP only: WebRTC over TCP (TURN/TCP) is not supported. To know a profile's connections, the filter sees the start of every new connection of this Mac — its address and app; none of it is recorded or sent anywhere.";
+"guard.how.limits" = "It needs a SOCKS5 proxy whose UDP ASSOCIATE works: this is checked before the profile starts, and without UDP WebRTC stays in the profile's pages but connects nowhere. An HTTP proxy cannot carry UDP: there too WebRTC stays present and connects nowhere, the guard holding the profile to its proxy. The relay carries UDP only: WebRTC over TCP (TURN/TCP) is not supported. To know a profile's connections, the filter sees the start of every new connection of this Mac — its address and app; none of it is recorded or sent anywhere.";
 "guard.state.proving" = "Being checked on this Mac…";
 "guard.todo.proving" = "Lumen checks that the guard sees the connections WebKit opens for a profile: a helper process with no profile's data sends one WebRTC request to an address that leads nowhere, and the guard must drop it. About 10 seconds.";
 "guard.todo.proofFailed" = "The check failed: the guard did not see the connection WebKit opened for a profile — it would have nothing to hold the profile to its proxy with. So WebRTC is off in profiles with a proxy. Click Check Again; after an update of macOS or Safari the check runs again by itself.";
@@ -2782,6 +2778,7 @@
 "vm.signIn.note" = "Virtual machines are added after you sign in to your account.";
 "vm.unavailable.intel" = "Virtual machines need a Mac with Apple silicon: macOS runs as a guest only there.";
 "vm.unavailable.build" = "This build of Lumen carries no virtual machines.";
+"vm.unavailable.insideVM" = "Lumen is running in a virtual machine itself, and macOS does not run a virtual machine inside another. Virtual machines work in Lumen on the Mac itself, with Apple silicon.";
 "vm.intro.title" = "A profile that is\na whole Mac";
 "vm.intro.text" = "A separate macOS with its own Safari, disk and serial number. Sites see a real Mac — because it is one.";
 "vm.requirement.disk" = "Not enough free disk space: %1$@ is needed, %2$@ is free.";
@@ -2797,6 +2794,7 @@
 "vm.setup.progress.of" = "%1$@ of %2$@";
 "vm.setup.speed" = "%@/s";
 "vm.setup.connections" = "connections: %d";
+"vm.setup.waiting" = "waiting for the network — the download goes on by itself when it is back";
 "vm.setup.remaining.minutes" = "about %d min left";
 "vm.setup.remaining.hours" = "about %1$d h %2$d min left";
 "vm.setup.install.note" = "10–20 minutes. Keep Lumen open.";
@@ -2810,6 +2808,7 @@
 "vm.setup.guest.startOver" = "Start Over";
 "vm.empty" = "The base system is ready. Each machine you create is a new Mac, made from it in seconds.";
 "vm.limit.reached" = "Machines running: %d — Apple's limit for macOS in virtual machines on one Mac. Shut one down to start another.";
+"vm.memory.tight" = "This Mac has %1$@ of memory, and the machines running now take %2$@ of it: macOS keeps too little for itself, so the Mac and the machines slow down. Shut one down, or give the machines less memory (Edit…).";
 "vm.note.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder, as a Mac's disk is a disk. To have them encrypted, turn on FileVault on this Mac.";
 "vm.base.line" = "Base system: macOS %1$@ · %2$@ on disk";
 "vm.base.open" = "Open the Base System…";
@@ -2848,8 +2847,17 @@
 "vm.row.trouble.proxyUnreachable" = "No internet in this machine: the proxy in this Mac's network settings does not answer. A VPN tool that was quit may have left its setting behind — switch the tool on, or the proxy off in System Settings → Network.";
 "vm.row.trouble.proxyRefused" = "No internet in this machine: the proxy in this Mac's network settings refuses its connections.";
 "vm.row.trouble.proxyConfigurationFile" = "No internet in this machine: the Mac's proxy is set by a configuration file (PAC or automatic discovery), which a machine cannot follow — and it does not go out past the proxy instead. Choose a proxy for the machine in its profile, or name the proxy in System Settings → Network → Proxies.";
+"vm.row.trouble.ownProxyUnreachable" = "No internet in this machine: its proxy does not answer — it is down, or no longer at its address and port. Nothing goes out past it. The machine connects again by itself once the proxy answers; check the proxy in the Proxies section.";
+"vm.row.trouble.ownProxyLogin" = "No internet in this machine: its proxy refuses the user name and password. Nothing goes out past it. Correct them in the Proxies section — the machine takes them from there — then shut the machine down and start it again.";
+"vm.row.trouble.ownProxyNotUnderstood" = "No internet in this machine: its proxy does not answer as a proxy of the kind its entry names (SOCKS5 or HTTP). Nothing goes out past it. Check the proxy's kind in the Proxies section, then start the machine again.";
 "vm.row.trouble.detail" = "Technical detail: %@";
 "vm.row.viaSystemProxy" = "Goes through the proxy in this Mac's network settings";
+"vm.row.udp.throughProxy" = "HTTP/3 and WebRTC (UDP) go through the proxy: sites see the proxy's address in WebRTC.";
+"vm.row.udp.httpProxy" = "HTTP/3 and WebRTC are off in this machine: an HTTP proxy does not carry UDP. They need a SOCKS5 proxy with UDP.";
+"vm.row.udp.notCarried" = "HTTP/3 and WebRTC are off in this machine: this proxy does not carry UDP (it refused UDP ASSOCIATE, or nothing came back through it).";
+"vm.row.udp.elsewhere" = "HTTP/3 and WebRTC are off in this machine: this proxy sends UDP out from another address than its pages, and a site would see two addresses.";
+"vm.row.udp.unknown" = "HTTP/3 and WebRTC are off in this machine: whether its proxy carries UDP could not be found out before the start. Start the machine again to check anew.";
+"vm.row.udp.directViaSystemProxy" = "HTTP/3 and WebRTC are off while this Mac's network settings name a proxy: that proxy is not asked for UDP.";
 "vm.row.tools.old" = "This machine was made with Lumen's first tools: the wallpaper, the appearance, the accent colour and the computer's name are not applied in it. Update the tools in the base system (⋯ → Open the Base System → Install Lumen Tools) and make the machine again.";
 "vm.row.wallpaper.failed" = "Lumen's wallpaper was not set in this machine. What its macOS said: %@";
 "vm.window.trouble" = "no internet — Lumen's list of machines says why";
@@ -2864,6 +2872,12 @@
 "vm.editor.proxy.note" = "Everything the machine sends goes through this proxy, and nothing any other way.";
 "vm.editor.proxy.direct.note" = "Without a proxy, sites see this Mac's own address — or its VPN's, if one is on.";
 "vm.editor.proxy.empty" = "Proxies are added in the Proxies section. A machine takes a SOCKS5 or an HTTP proxy; one reached over TLS (https://) is not supported yet.";
+"vm.editor.udp.throughProxy" = "HTTP/3 and WebRTC (UDP): this proxy carried UDP at its last check, so they go through it. It is checked again at every start.";
+"vm.editor.udp.httpProxy" = "HTTP/3 and WebRTC (UDP): off with an HTTP proxy, which carries TCP only. They need a SOCKS5 proxy with UDP.";
+"vm.editor.udp.notCarried" = "HTTP/3 and WebRTC (UDP): this proxy did not carry UDP at its last check, so they are off in the machine. It is checked again at every start.";
+"vm.editor.udp.elsewhere" = "HTTP/3 and WebRTC (UDP): at its last check this proxy sent UDP out from another address than its pages, so they stay off.";
+"vm.editor.udp.unknown" = "HTTP/3 and WebRTC (UDP) are checked at every start: they go through this proxy if it carries UDP, and are off if it does not — never around it.";
+"vm.editor.udp.direct" = "HTTP/3 and WebRTC (UDP) go out as this Mac's own, as the machine's pages do — not while this Mac's network settings name a proxy.";
 "vm.editor.follow" = "Time zone and language follow the proxy";
 "vm.editor.follow.detail" = "Checked at every start: the machine's macOS gets the time zone and the language of the country the proxy comes out in.";
 "vm.editor.locale" = "Time zone and language";
@@ -2885,7 +2899,7 @@
 "vm.editor.error.start" = "The start page must be a web address (https://…).";
 "vm.error.noHelper" = "This build of Lumen carries no virtual machines.";
 "vm.error.unknown" = "The virtual machine stopped without saying why.";
-"vm.error.helperEnded" = "The virtual machine ended unexpectedly (code %d).";
+"vm.error.helperEnded" = "The virtual machine's helper ended unexpectedly. Start the machine again; if it happens again, restart this Mac.";
 "vm.error.limit" = "Two machines are running already — Apple's limit for macOS in virtual machines on one Mac. Shut one down first.";
 "vm.error.baseOpen" = "The base system is open. Shut it down first: a new machine is made from its disk.";
 "vm.error.proxyDown" = "The proxy does not answer, so the machine was not started: it would reach nothing. Check the proxy in the Proxies section.";
@@ -2901,6 +2915,8 @@
 "vm.failure.image" = "The restore image does not load: the file is damaged, cut short, or not Apple's restore image for a Mac. Download it again (Disk Space… removes what was fetched) or choose another file.";
 "vm.failure.needsUpdate" = "This Mac needs a software update before it can install this macOS in a virtual machine. Open System Settings → General → Software Update, install what it offers, and continue: nothing is downloaded again.";
 "vm.failure.installation" = "The installation of macOS did not finish. Continue starts it over; the downloaded image is still here.";
+"vm.failure.noVirtualization" = "This Mac does not let apps run virtual machines. If Lumen itself runs in a virtual machine, open it on the Mac itself: macOS does not run a virtual machine inside another. Otherwise restart this Mac and try again.";
+"vm.failure.other" = "Something went wrong; macOS's own words for it are below. Try again — if it happens again, restart this Mac, and send us the technical detail.";
 "vm.row.notKept" = "Shut down instead of kept as it was: macOS could not save this machine's state. What was open in it is closed, and its next start is an ordinary one.";
 "vm.row.notKept.noRoom" = "Shut down instead of kept as it was: this Mac's disk has no room for the machine's state, which takes about as much as its memory. Free some space (Disk Space…) and instant wake works again.";
 "vm.error.diskFull" = "Not started: this Mac's disk has %1$@ free, and a machine is started with at least %2$@ — its macOS writes to its disk all the time, and breaks when the disk is full. Free some space; Disk Space… shows what the machines take.";
@@ -2910,10 +2926,13 @@
 "vm.error.listUnreadable" = "The list of virtual machines could not be read, so nothing is written over it.";
 "vm.error.load" = "The list of virtual machines could not be read (%@). The machines' disks are untouched.";
 "vm.error.deleteRunning" = "Shut the machine down before deleting it.";
-"vm.download.error.refused" = "Apple's server refused the download (HTTP %d). Try again later.";
+"vm.download.error.refused" = "Apple's server refused the download. Try again later — or download the file another way (“Copy Apple's link”) and choose it with “I have the file…”.";
 "vm.download.error.incomplete" = "The download broke off. Press Continue: it goes on from where it stopped.";
 "vm.download.error.notFetchable" = "Apple gave an address that cannot be downloaded from.";
 "vm.download.error.keepsChanging" = "Apple's file changed several times while it was being downloaded. Try again later.";
+"vm.download.error.noRoom" = "This Mac's disk is full, so the download stopped. What was downloaded is kept: free some space and press Continue — it goes on from where it stopped.";
+"vm.download.error.network" = "The download stopped: the connection to Apple's servers was lost again and again. What was downloaded is kept: check this Mac's internet connection (a VPN or a filter can be in the way) and press Continue.";
+"vm.download.error.other" = "The download stopped. What was downloaded is kept: press Continue to go on from where it stopped.";
 "vm.window.stop" = "Shut Down the Virtual Machine…";
 "vm.window.stopQuestion" = "Shut down this virtual machine?";
 "vm.window.stopDetail" = "Its macOS shuts down as a Mac does; what is open in it is closed.";
@@ -2944,9 +2963,10 @@
 "help.vm.costs.memory" = "Memory: 3–8 GB per running machine (in its settings), taken only while it runs. A new machine gets what this Mac can spare — 8 GB on a Mac with 24 GB or more, 6 with 16, otherwise 4. With 4 GB, macOS in the machine stutters once a few pages are open.";
 "help.vm.costs.limit" = "Two machines at once: Apple's limit for macOS in virtual machines on one Mac.";
 "help.vm.costs.start" = "A machine starts in 20–40 seconds, as a Mac does; Shut Down closes its macOS properly.";
+"help.vm.costs.hidden" = "A machine's macOS draws its screen even while its window is hidden. Screen off while hidden (in a machine's settings, under Device) puts its display to sleep once the window has been out of sight for half a minute, which spares this Mac; it wakes a second or two after the window is seen again. Meanwhile pages in the machine are hidden, as on a Mac whose display slept.";
 "help.vm.know" = "Good to know";
 "help.vm.know.disks" = "The machines' disks are not encrypted by Lumen's vault: they are files in the vault's folder. Turn on FileVault on your Mac to have them encrypted. Names, proxies and their passwords are in the vault.";
-"help.vm.know.udp" = "A machine has TCP only: QUIC and WebRTC over UDP do not leave it, so WebRTC cannot show your address.";
+"help.vm.know.udp" = "UDP — HTTP/3 (QUIC) and WebRTC — goes through the machine's proxy when the proxy carries it: a SOCKS5 proxy with UDP, checked before every start; WebRTC then shows the proxy's address. With an HTTP proxy, or one that does not carry UDP, they are off: UDP never goes around the proxy. Without a proxy it goes out as this Mac's own, as the machine's pages do. DNS and the time are always answered inside Lumen.";
 "help.vm.know.updates" = "Automatic macOS updates are off in the machines: each would download gigabytes. To move to a newer macOS, remove the base system (⋯) and add it again; the machines you have keep theirs.";
 "help.vm.know.speed" = "The download's speed is that of the way between your connection and Apple's servers; a VPN or proxy on this Mac slows it, since the download goes through them. If it is slow: turn the VPN off while it downloads, or try another network. Or use a file you have: \"I have the file…\" takes macOS's restore image (.ipsw) downloaded on another Mac, by a download manager (\"Copy Apple's link\" while it downloads gives the address), or given by a colleague — Apple checks it when it installs, and your file is not moved or changed.";
 "help.vm.know.base" = "⋯ → Open the Base System starts the base itself, to change what every new machine should have. Machines made before keep what they had.";
@@ -3121,6 +3141,9 @@
 "vm.editor.cores.fewer" = "Lighter on this Mac, but a page sees fewer cores than any Mac of today has. For a machine where that does not matter.";
 "vm.editor.sound" = "Sound from the machine";
 "vm.editor.sound.detail" = "What plays in the machine is heard on this Mac. Off: the machine keeps its speakers, silent.";
+"vm.editor.screenSleep" = "Screen off while hidden";
+"vm.editor.screenSleep.detail" = "Once the machine's window has been out of sight for half a minute — minimised, under other windows, on another desktop, or with this Mac's screen off — the machine's display goes to sleep, as a Mac's does, and wakes a second or two after the window is seen again. This spares this Mac's processor and graphics, most of all with two machines open. Meanwhile the pages in the machine are hidden and stop drawing, as on a Mac whose display slept, and a site can notice that. Off unless you choose it.";
+"vm.editor.screenSleep.locks" = "When it was last asked, this machine left its display on: its screen lock is on, and waking the display would ask for the account's password. Lumen's tools turn the lock off; to turn it off yourself, in the machine: System Settings → Lock Screen → require a password after the display is turned off → Never.";
 "vm.editor.asBase" = "As in the base";
 "vm.editor.appearance" = "Appearance";
 "vm.editor.appearance.light" = "Light";
@@ -3379,8 +3402,11 @@
 "scenarios.import.subtitle" = "A scenario does in a profile whatever a person can. Add one only from someone you trust.";
 "scenarios.import.sites" = "Sites it names";
 "scenarios.import.sites.none" = "none written out";
+"scenarios.import.sites.built" = "%@ — and addresses its code builds";
+"scenarios.import.sites.builtOnly" = "none written out — its code builds the addresses it opens";
 "scenarios.import.values" = "Profile's values it reads";
 "scenarios.import.add" = "Add";
+"scenarios.import.more" = "…and %d more steps";
 "scenarios.import.refused.notAScenario" = "This file is not a Lumen scenario.";
 "scenarios.import.refused.newer" = "This scenario was saved by a newer Lumen. Update Lumen.";
 "scenarios.editor.steps" = "Steps";

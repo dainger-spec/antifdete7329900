@@ -92,12 +92,16 @@ public struct ScenarioValues: Codable, Equatable, Sendable {
         return profiles.count != count
     }
 
-    /// A run's parameters as JSON text: profile `id`'s values, each as text, under what the run was
-    /// given itself (`given`: a JSON object's text — the API's `params` — whose names win). What
+    /// A run's parameters as JSON text: of profile `id`'s values, those the scenario's text names
+    /// (`namesRead(by: source)`), each as text, under what the run was given itself (`given`: a
+    /// JSON object's text — the API's `params` — whose names win). A value the text does not name
+    /// is not given, whatever its code does with `params` (`readsByBuiltNames`): what the import's
+    /// review, the list and the editor say a scenario reads is all of the profile's it gets. What
     /// is not an object's text counts as none.
-    public func parametersJSON(for id: UUID, over given: String = "{}") -> String {
+    public func parametersJSON(for id: UUID, readBy source: String, over given: String = "{}") -> String {
+        let named = Set(Self.namesRead(by: source))
         var merged: [String: Any] = [:]
-        for value in values(of: id) { merged[value.name] = value.value }
+        for value in values(of: id) where named.contains(value.name) { merged[value.name] = value.value }
         if let own = (try? JSONSerialization.jsonObject(with: Data(given.utf8))) as? [String: Any] {
             for (name, value) in own { merged[name] = value }
         }
@@ -122,6 +126,17 @@ public struct ScenarioValues: Codable, Equatable, Sendable {
             }
         }
         return names
+    }
+
+    /// Whether a scenario's text reads `params` otherwise than by a name written out after it
+    /// (`params.name`, `params['name']`): as a whole (`JSON.stringify(params)`, `{...params}`,
+    /// `const { login } = params`), by a name its code builds (`params[key]`), or through `eval`.
+    /// What it reads that way is none of the profile's values but those its text names
+    /// (`parametersJSON`), and the import's review, the list and the editor say so. Comments are
+    /// not read; quoted texts are (a word "params" in one is taken for a read).
+    public static func readsByBuiltNames(_ source: String) -> Bool {
+        let pattern = #"(?<![A-Za-z0-9_$])params(?![A-Za-z0-9_$])(?!\s*(?:\.\s*[A-Za-z_$]|\[\s*(?:'[A-Za-z_][A-Za-z0-9_]*'|"[A-Za-z_][A-Za-z0-9_]*")\s*\]))|(?<![A-Za-z0-9_$])eval(?![A-Za-z0-9_$])"#
+        return ScenarioSteps.firstMatch(pattern, ScenarioSteps.withoutComments(source)) != nil
     }
 
     /// Of `names` (what a scenario reads), those profile `id` has no text for: none written, or an

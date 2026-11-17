@@ -31,6 +31,9 @@ final class RangeServer: @unchecked Sendable {
     private var _cuts = 0
     private var _cutAfter = 0
     private var _status: Int?
+    private var _stalls = 0
+    private var _stallAfter = 0
+    private var _stallSeconds = 0.0
     private var _asked: [Asked] = []
     private var _servedBytes = 0
     private var _servedFirsts: [Int] = []
@@ -62,6 +65,11 @@ final class RangeServer: @unchecked Sendable {
     func noRanges() { locked { _ranges = false } }
     func cut(_ count: Int, after bytes: Int) { locked { _cuts = count; _cutAfter = bytes } }
     func answer(_ status: Int?) { locked { _status = status } }
+    /// The next `count` answers stop for `seconds` after `bytes` — a network that drops for a while
+    /// and comes back — then go on to their end.
+    func stall(_ count: Int, after bytes: Int, for seconds: Double) {
+        locked { _stalls = count; _stallAfter = bytes; _stallSeconds = seconds }
+    }
 
     func start() {
         let descriptor = socket(AF_INET, Self.stream, 0)
@@ -141,6 +149,11 @@ final class RangeServer: @unchecked Sendable {
             }
             return (_body, _etag, _ranges, _status, cut)
         }
+        let stall: (after: Int, seconds: Double)? = locked {
+            guard _stalls > 0 else { return nil }
+            _stalls -= 1
+            return (_stallAfter, _stallSeconds)
+        }
         defer { locked { _concurrent -= 1 } }
         if let status {
             send(client, "HTTP/1.1 \(status) No\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
@@ -165,7 +178,12 @@ final class RangeServer: @unchecked Sendable {
         locked { _servedFirsts.append(first) }
         var offset = first
         let end = cutAfter.map { min(last + 1, first + $0) } ?? last + 1
+        var stalled = false
         while offset < end {
+            if let stall, !stalled, offset - first >= stall.after {
+                stalled = true
+                usleep(useconds_t(stall.seconds * 1_000_000))
+            }
             let count = min(piece, end - offset)
             let sent = body[offset..<(offset + count)].withUnsafeBytes { Glue.send(client, $0.baseAddress, count, Self.sendFlags) }
             guard sent > 0 else { return }
@@ -320,6 +338,92 @@ final class VMImageFetchTests: XCTestCase {
         guard case .success = run(server) else { return XCTFail() }
         XCTAssertEqual(try downloaded(), body)
         XCTAssertEqual(server.asked.count, 1)
+    }
+
+    // MARK: - A network that drops for a while
+
+    /// Nothing comes for a while (Wi-Fi gone, a VPN reconnecting): the setup is told the download
+    /// waits — no speed, no time left — instead of the last speed for as long as that lasts; and
+    /// once bytes come again it goes on by itself to the whole file.
+    func testADownloadThatGetsNothingForAWhileSaysItWaitsAndGoesOn() throws {
+        let body = Self.bytes(Int(Self.chunk) * 3, seed: 21)
+        let server = serve(body)
+        server.piece = 4 << 10
+        server.pause = 2_000
+        server.stall(1, after: 16 << 10, for: 2.5)
+        let seen = Seen()
+        let done = expectation(description: "the download ends")
+        let fetch = VMImageFetch(library: library, image: image(server), connections: 1, chunkSize: Self.chunk,
+                                 configuration: {
+                                     let configuration = URLSessionConfiguration.ephemeral
+                                     configuration.timeoutIntervalForRequest = 20
+                                     configuration.connectionProxyDictionary = [:]
+                                     return configuration
+                                 },
+                                 onProgress: { progress in
+                                     seen.lock.lock()
+                                     seen.progress.append(progress)
+                                     seen.lock.unlock()
+                                 },
+                                 onFinish: { result in
+                                     seen.lock.lock()
+                                     seen.result = result
+                                     seen.lock.unlock()
+                                     done.fulfill()
+                                 })
+        fetch.acceptsLoopbackHTTP = true
+        fetch.stallAfter = 0.8
+        fetch.tickInterval = 0.2
+        fetch.start()
+        wait(for: [done], timeout: 60)
+        guard case .success = seen.result else { return XCTFail("\(String(describing: seen.result))") }
+        XCTAssertEqual(try downloaded(), body)
+        seen.lock.lock()
+        let progress = seen.progress
+        seen.lock.unlock()
+        // Said while nothing came, and with no speed then.
+        let waiting = progress.filter(\.stalled)
+        XCTAssertFalse(waiting.isEmpty, "the wait was never said")
+        XCTAssertTrue(waiting.allSatisfy { ($0.speed ?? 0) == 0 }, "a speed while nothing comes")
+        // And no longer once the bytes came again.
+        XCTAssertEqual(progress.last?.stalled, false)
+        XCTAssertEqual(progress.last?.have, Int64(body.count))
+    }
+
+    /// A download that goes as it should never says it waits.
+    func testADownloadThatGoesOnNeverSaysItWaits() throws {
+        let body = Self.bytes(Int(Self.chunk) * 6, seed: 22)
+        let server = serve(body)
+        let seen = Seen()
+        let done = expectation(description: "the download ends")
+        let fetch = self.fetch(server, seen: seen, done: done)
+        wait(for: [done], timeout: 60)
+        _ = fetch
+        guard case .success = seen.result else { return XCTFail() }
+        seen.lock.lock()
+        XCTAssertFalse(seen.progress.contains(where: \.stalled))
+        seen.lock.unlock()
+    }
+
+    // MARK: - What a download that stopped is said as
+
+    /// The setup's words for a download that stopped, by what stopped it: a full disk under
+    /// whatever error is over it, the network, Apple's own refusal — never the system's sentence
+    /// alone, in the system's language, with a domain and a number.
+    func testADownloadThatStoppedIsSaidByWhatStoppedIt() {
+        XCTAssertEqual(VMDownloadFailure.of(VMImageFetch.Failure.refused(403)), .refused(403))
+        XCTAssertEqual(VMDownloadFailure.of(VMImageFetch.Failure.incomplete), .incomplete)
+        XCTAssertEqual(VMDownloadFailure.of(VMImageFetch.Failure.keepsChanging), .keepsChanging)
+        XCTAssertEqual(VMDownloadFailure.of(VMImageFetch.Failure.notFetchable), .notFetchable)
+        XCTAssertEqual(VMDownloadFailure.of(NSError(domain: NSPOSIXErrorDomain, code: 28)), .noRoom)
+        XCTAssertEqual(VMDownloadFailure.of(NSError(domain: NSCocoaErrorDomain, code: 640)), .noRoom)
+        let underWrite = NSError(domain: NSCocoaErrorDomain, code: 512,
+                                 userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: 28)])
+        XCTAssertEqual(VMDownloadFailure.of(underWrite), .noRoom)
+        XCTAssertEqual(VMDownloadFailure.of(URLError(.notConnectedToInternet)), .network)
+        XCTAssertEqual(VMDownloadFailure.of(URLError(.networkConnectionLost)), .network)
+        XCTAssertEqual(VMDownloadFailure.of(URLError(.timedOut)), .network)
+        XCTAssertEqual(VMDownloadFailure.of(NSError(domain: "Elsewhere", code: 1)), .other)
     }
 
     // MARK: - Going on where it stopped

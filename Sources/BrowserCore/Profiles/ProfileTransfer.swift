@@ -286,6 +286,7 @@ public enum ProfileTransfer {
         // What was learnt about the proxy on the other Mac is not this one's to trust.
         configuration.lastProxyLocation?.exitIP = nil
         configuration.webRTCRelay = nil
+        configuration.webRTCSilent = false
         if !keepingTheirMac {
             withoutThisMac(&configuration)
             documents.passwords = withoutThisMac(documents.passwords)
