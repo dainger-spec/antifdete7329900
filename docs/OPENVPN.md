@@ -7,6 +7,17 @@ anything of this Mac's network.
 
 ## Status (17 November 2026): works end to end on macOS 26, and on Linux
 
+- **With links, through the one launch step (0.1.18's tree), scratch run 44034707092 on macOS
+  26.7.2** (`claude/features-check`, the OpenVPN job as `full.yml` runs it): every step below passed
+  again with the tunnel started, handed over and held as a link's relay is (`LocalRelays`; the
+  profile's process held to the port by "tcp-relay-only"): the wrong password refused and said, both
+  pages seen from 10.8.0.2, the port's credentials, the server killed (nothing loaded, the profile
+  stopped and said so, nothing left), and a capture of 1898 packets outside loopback with none of the
+  profile's process, of LumenTunnel or of openvpn around the tunnel (65 of the forwarder to the
+  server, the question inside the tunnel). The same run made the release dry run with OpenVPN built by
+  `scripts/build-openvpn.sh` from Xcode's tools alone (PATH cut to `/usr/bin:/bin:/usr/sbin:/sbin`:
+  no CMake, pkg-config or Homebrew), and run 44040505149 built it so again once its version stopped
+  naming Lumen's git checkout.
 - **macOS 26.7.2, CI run 44011508202** (`scripts/openvpn_macos_e2e.sh`, the app built for release
   with `OVPN=1`): a wrong password refused and said ("The VPN server refused the user name or
   password"), nothing left running; a page named only by the tunnel's DNS server, and one by address,

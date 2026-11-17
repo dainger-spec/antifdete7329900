@@ -796,7 +796,9 @@ encryption, Trojan, VMess with its cipher off) is said so under the field.
   app asks on purpose, seen and named after the app; each relay's packets counted for its pid — must be
   seen. The page's requests to this Mac's own loopback, which the capture leaves out, are seen by the
   self-test proxy's canary there, which must take none. Passed on macOS 26.7.2 and 27.0.1 in run
-  44024780666 (the first that knocked on the relay's sandbox from outside found its loopback rule too
+  44024780666, and again with OpenVPN connections merged in and the launch step shared
+  (`LocalRelays`), the relay built with the Go `build-xray.sh` fetches and checks itself, in scratch
+  run 44034707092 on both (the first that knocked on the relay's sandbox from outside found its loopback rule too
   wide, run 44020981433; the first runs found the CI-only faults the commits name, and an Xcode 26
   build's SDK fetching the AIA canary, run 44012119541).
 
