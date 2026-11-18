@@ -32,8 +32,8 @@ final class VMHelperProcess {
     private let onEvent: (VMHelperEvent) -> Void
     /// The helper has ended; `failure` is what it said went wrong (a `failed` event), or that it
     /// ended without saying how.
-    private let onEnd: (_ failure: String?) -> Void
-    private var failure: String?
+    private let onEnd: (_ failure: VMProblem?) -> Void
+    private var failure: VMProblem?
     /// The helper said how its work ended: `stopped`, `installed`, `catalog` — or `failed`.
     private var concluded = false
     private(set) var hasEnded = false
@@ -41,7 +41,7 @@ final class VMHelperProcess {
     private var endedOnPurpose = false
     private let log = Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
 
-    init(onEvent: @escaping (VMHelperEvent) -> Void, onEnd: @escaping (_ failure: String?) -> Void) {
+    init(onEvent: @escaping (VMHelperEvent) -> Void, onEnd: @escaping (_ failure: VMProblem?) -> Void) {
         self.onEvent = onEvent
         self.onEnd = onEnd
     }
@@ -139,7 +139,7 @@ final class VMHelperProcess {
         if !concluded, failure == nil, !endedOnPurpose {
             // Ended without a word (killed, or it crashed): never taken for a clean end. Said in the
             // person's words, the status as a technical detail.
-            failure = L("vm.error.helperEnded") + "\n" + String(format: L("vm.row.trouble.detail"), "status \(Int(status))")
+            failure = .keyed("vm.error.helperEnded")
             log.error("The machines' helper ended without saying how: status \(Int(status), privacy: .public)")
         }
         onEnd(failure)

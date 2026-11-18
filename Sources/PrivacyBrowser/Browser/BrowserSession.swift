@@ -117,9 +117,7 @@ final class BrowserSession {
         self.autoFillScript = PasswordAutoFill.script(testHooks: CommandLine.arguments.contains("--self-test"))
         self.storeChallenges = StoreChallenges(policy: ProfileChallengePolicy(
             hasProxy: configuration.proxy != nil,
-            proxyCredential: configuration.proxy.flatMap { proxy in
-                proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
-            }))
+            proxyCredential: ProxyConfigurationFactory.credential(for: configuration.proxy)))
         passwordHandler.session = self
         PasswordAutoFill.install(in: userContentController, handler: passwordHandler, script: autoFillScript)
         if configuration.proxy != nil {
@@ -155,9 +153,7 @@ final class BrowserSession {
         BrowserTabContext(profileName: profileName, userAgent: configuration.userAgent(hostSafariVersion: HostSafari.version),
                           passwordVault: passwordVault, passwordSettings: passwordSettings, library: library,
                           hasProxy: configuration.proxy != nil,
-                          proxyCredential: configuration.proxy.flatMap { proxy in
-                              proxy.username.map { URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession) }
-                          },
+                          proxyCredential: ProxyConfigurationFactory.credential(for: configuration.proxy),
                           refusesCamera: cameraIsTheScripts)
     }
 

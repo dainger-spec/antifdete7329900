@@ -124,7 +124,11 @@ struct PrivacyBrowserApp: App {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    weak var model: AppModel?
+    weak var model: AppModel? {
+        didSet { openPendingFiles() }
+    }
+    /// `.ovpn` files opened before the model was there (Lumen started by the open).
+    private var pendingFiles: [URL] = []
     private lazy var quitCoordinator = QuitCoordinator(
         hasActivity: { [weak self] in self?.model?.hasActivity ?? false },
         lockForQuit: { [weak self] in await self?.model?.lock(forQuit: true) },
@@ -166,8 +170,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // and web content keeps following the system's setting, as in Safari (see
         // docs/ISOLATION_AND_LIMITATIONS §11).
         NSApp.activate(ignoringOtherApps: true)
+        // Relays an earlier run of the app left when it crashed: links' Xray and OpenVPN's
+        // processes (`LocalRelays`).
+        LocalRelays.endLeftovers()
         // `--settings-window-check` (CI): nothing otherwise.
         SettingsWindowCheck.start()
+    }
+
+    /// A `.ovpn` opened with Lumen in the Finder (Info.plist's document type): Proxies › Add ›
+    /// OpenVPN with the file read — after the vault's password, when it is locked. Nothing else is
+    /// opened this way; one file at a time (the last, when several are opened together).
+    func application(_ application: NSApplication, open urls: [URL]) {
+        let files = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() == "ovpn" } // l10n: not text
+        guard !files.isEmpty else { return }
+        pendingFiles = files
+        openPendingFiles()
+    }
+
+    private func openPendingFiles() {
+        guard let model, let file = pendingFiles.last else { return }
+        pendingFiles = []
+        model.requestProxyAdd(ProxyAddRequest(choice: .openVPN, file: file))
     }
 
     /// Closing a profile window (or any window) must never quit the app — only ⌘Q or Lock do.
@@ -177,6 +200,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// too: a quit with no profile running does not lock first (`QuitCoordinator`).
     func applicationWillTerminate(_ notification: Notification) {
         CameraPreview.discardAll()
+        // Every relay still running (a check's, a machine's): the profiles' stopped with them.
+        LocalRelays.stopAll()
     }
 
     /// Clicking the dock icon with no visible window brings the Profiles window back.
@@ -293,14 +318,13 @@ private struct AccountMenuButton: View {
     }
 }
 
-/// The app menu's Check for Updates…: Settings › Updates, with a check started.
+/// The app menu's Check for Updates…: the update's window, with a check started.
 private struct CheckForUpdatesMenuButton: View {
     @ObservedObject var model: AppModel
-    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Button(L("menu.checkForUpdates")) {
-            AppCommands.checkForUpdates(model, openSettings: { openSettings() })
+            AppCommands.checkForUpdates(model)
         }
     }
 }

@@ -13,8 +13,10 @@ import WebKit
 /// launch: unwrap profile key → decrypt config, passwords, history, bookmarks
 ///         → decrypt WebKit data (webdata.pbsa → WebKit dirs)
 ///         → create WKWebsiteDataStore(forIdentifier:) + proxy
+///         → cookies the store lost put back from their snapshot (cookie-snapshots.bin)
 ///         → synced cookies (cookies.bin) and queued imported cookies into the store → open window(s)
-/// stop:   write cookies to disk → record them for sync → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
+/// run:    the store's cookies copied when they change (CookieSnapshotKeeper)
+/// stop:   write cookies to disk → record them for sync → last snapshot → close windows/tabs → flush history → release data store → archive + encrypt WebKit dirs
 ///         → WKWebsiteDataStore.remove(forIdentifier:) → drop profile key
 /// ```
 /// Any number of profiles can run at once; each has its own data store and proxy.
@@ -84,6 +86,8 @@ final class ProfileManager: ObservableObject {
     var onSealed: ((UUID, ProfileSealReport) -> Void)?
     /// A step of the menu walk a profile's process was asked for (`walkMenu`; `--menu-walk`).
     var onMenuWalk: ((UUID, String) -> Void)?
+    /// A line of the sweep a profile's process was asked for (`sweep`; `--sweep`).
+    var onSweep: ((UUID, String) -> Void)?
     /// What a profile's History window showed when the self-test asked (`lookAtHistory`).
     var onHistoryLook: ((UUID, HistoryWindowLook) -> Void)?
     /// What a profile's window showed after the self-test acted on it (`lookAtWindow`).
@@ -96,6 +100,9 @@ final class ProfileManager: ObservableObject {
     var onChildStopped: ((UUID, Int32) -> Void)?
     /// A profile's process told how it sealed its data, just before it exited (the self-test).
     var onChildSealed: ((UUID, ProfileSealReport) -> Void)?
+    /// A launch put back cookies the profile's store had lost (docs/COOKIE_RECOVERY.md), here or in
+    /// the profile's own process: told once per launch, for the profile's journal.
+    var onCookiesRecovered: ((UUID, CookieSnapshotKeeper.Report) -> Void)?
     /// Profiles whose proxy's exit no geolocation service could tell at their last launch (they
     /// are blocked often): said once when it happens, and shown in the profile's row and editor
     /// until its next launch.
@@ -120,6 +127,8 @@ final class ProfileManager: ObservableObject {
 
     private let repository: ProfileRepository
     private let webDataVault: WebDataStoreVault
+    /// The cookie snapshots of the profiles run in this process, and what their launches put back.
+    let cookieSnapshots: CookieSnapshotKeeper
     /// The directory Safari's frameworks use as their home in a profile's own process, encrypted
     /// between runs like everything else (`SafariHomeVault`).
     private let safariHomeVault: SafariHomeVault
@@ -195,11 +204,20 @@ final class ProfileManager: ObservableObject {
         /// A process of the profile that an earlier run of the app left behind is still sealing
         /// its data (`launch`).
         case stillSealing(name: String)
+        /// The profile's OpenVPN connection did not come up (docs/OPENVPN.md): why, in words.
+        case openVPN(name: String, reason: String)
+        /// The profile's proxy is a share link, and this build has no relay for it (`XrayRelays`).
+        case relayNotInBuild(name: String)
+        /// The profile's proxy is a share link, and its relay did not start.
+        case relayDidNotStart(name: String)
         var errorDescription: String? {
             switch self {
             case .invalidProxy(let host): return String(format: L("launch.error.proxyInvalid"), host)
             case .proxyNeedsCredentials(let host): return String(format: L("launch.error.proxyNeedsCredentials"), host)
             case .stillSealing(let name): return String(format: L("launch.error.stillSealing"), name)
+            case .openVPN(let name, let reason): return String(format: L("launch.error.openVPN"), name, reason)
+            case .relayNotInBuild(let name): return String(format: L("launch.error.relayNotInBuild"), name)
+            case .relayDidNotStart(let name): return String(format: L("launch.error.relayDidNotStart"), name)
             }
         }
     }
@@ -207,6 +225,7 @@ final class ProfileManager: ObservableObject {
     init(repository: ProfileRepository) {
         self.repository = repository
         self.webDataVault = WebDataStoreVault(repository: repository)
+        self.cookieSnapshots = CookieSnapshotKeeper(repository: repository)
         self.safariHomeVault = SafariHomeVault(repository: repository)
         // The guard stopped answering for processes it held: their relays stop at once, and their
         // profiles stop — nothing of theirs runs on without it.
@@ -314,6 +333,7 @@ final class ProfileManager: ObservableObject {
                 if !SafariChromeHost.open(session: session, url: session.configuration.startURL, restoring: tabs) {
                     session.openFirstWindows(restoring: tabs, startURL: session.configuration.startURL)
                 }
+                presentCookieRecovery(id)
             }
             session.bringToFront()
             return
@@ -345,6 +365,21 @@ final class ProfileManager: ObservableObject {
         let summary = try repository.summary(for: id)
         let key = try repository.profileKey(for: id)
         let stored = try repository.loadConfiguration(id, key: key)
+        // A proxy that a relay of the app's carries — a share link's, an OpenVPN connection — is
+        // reached through that relay alone (`LocalRelays`, docs/TUNNEL.md, "Relays"): it is started
+        // here, before anything asks the proxy — the probe, the lookup, the process — and the
+        // profile's proxy stays what is stored; whatever connects through it is given the relay
+        // (`ProxyRoutes`). A launch that ends without a process of the profile running stops it
+        // again. A profile's own process starts none: its manager's route is handed to it with its
+        // grant (`ProfileSessionHost`).
+        var relayStarted = false
+        if let proxy = stored.proxy, proxy.localRelay != nil, !runsInProfileProcess {
+            try await startRelay(for: id, proxy: proxy, name: summary.name)
+            relayStarted = true
+        }
+        defer {
+            if relayStarted, children[id] == nil, sessions[id] == nil { LocalRelays.stop(owner: id) }
+        }
         // Settings → Proxies → "Do not start it": the proxy is asked before anything is decrypted,
         // and a profile whose proxy does not work stays stopped; the Profiles window says why.
         var probedBeforeLaunch = false
@@ -423,9 +458,13 @@ final class ProfileManager: ObservableObject {
         // A warm-up that spares traffic needs its tab's list as it starts (`openOffscreenWindow`).
         if !stored.ephemeral { await ContentRules.prepareWarmUp() }
         var restored = WebDataStoreVault.Restored.nothing
+        var storeState = (state: CookieRecovery.StoreState.present, note: "")
         if !stored.ephemeral {
             // Must happen before WKWebsiteDataStore(forIdentifier:) is created.
             restored = try await webDataVault.prepareForLaunch(profileID: id, key: key)
+            // What cookie recovery needs of the disk: before the store exists, and CFNetwork reads
+            // (and rewrites) its cookie file.
+            if stored.keepsCookieSnapshots { storeState = CookieSnapshotKeeper.storeState(for: id, restored: restored) }
         }
         // The proxy's time zone and language should apply from the first page: the launch waits
         // a little for the lookup (briefly when a location is remembered for this proxy, which is
@@ -514,9 +553,10 @@ final class ProfileManager: ObservableObject {
             if !configuration.ephemeral { _ = try? await webDataVault.seal(profileID: id, key: key, activeStore: false) }
             throw error
         }
-        // Synced cookies, and cookies imported while the profile was stopped: into its store
-        // before the first page loads.
-        await prepareCookies(of: id, summary: summary, syncs: stored.syncsCookies, storeRestored: restored != .nothing, session: session)
+        // Cookies the store lost, synced cookies, and cookies imported while the profile was
+        // stopped: into its store before the first page loads.
+        await prepareCookies(of: id, summary: summary, stored: stored, storeRestored: restored != .nothing,
+                             storeState: storeState, session: session)
         // Attribution reports a page set up before Private Click Measurement was off for proxied
         // profiles would still be sent by WebKit, later, outside the page's session: removed.
         if configuration.proxy != nil, let store = session.dataStore {
@@ -529,6 +569,7 @@ final class ProfileManager: ObservableObject {
             self?.onReturnToProfiles?()
             Task { @MainActor in await self?.stopReportingErrors(id) }
         }
+        // A profile in this process keeps its relay until it stops (`stop`).
         sessions[id] = session
         // Before any web view of this process exists: in a profile's own process every web view is
         // built with this session's data store, which is what carries its proxy (ProfileNetworkGuard).
@@ -553,6 +594,8 @@ final class ProfileManager: ObservableObject {
                 session.openFirstWindows(restoring: tabs, startURL: configuration.startURL)
             }
         }
+        // Cookies put back at this launch: said in its window, or told for the journal when it has none.
+        presentCookieRecovery(id)
         try? repository.markLaunched(id)
         if lookup == nil, let lookupTask {
             let runningZone = configuration.timeZoneIdentifier
@@ -624,7 +667,8 @@ final class ProfileManager: ObservableObject {
             preferences: BrowsingPreferences.current.forProfileProcess,
             menusInAppLanguage: stored.menusInAppLanguage,
             cameraAllowed: cameraAllowed(),
-            systemCameraActive: systemCameraActive)
+            systemCameraActive: systemCameraActive,
+            routes: LocalRelays.routes(for: stored.proxy, owner: id))
         // The process object is held by `children` and, until its exit has been handled, by its own
         // termination handler — never by what it calls: each of these held it, and it and its
         // pipes were never freed (`ProfileProcess.didExit`).
@@ -687,11 +731,16 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .proxyLocationUnknown:
                 self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
+            case .cookiesRecovered(let report):
+                self.log.notice("Profile \(id.uuidString, privacy: .public)'s process put back \(report.restored) cookies its store had lost (\(report.cause.rawValue, privacy: .public)); notice shown: \(report.noticeShown, privacy: .public)")
+                self.onCookiesRecovered?(id, report)
             case .sealed(let report):
                 self.log.notice("Profile \(id.uuidString, privacy: .public) sealed its data in \(Int(report.seconds), privacy: .public) s, attempts \(report.attempts, privacy: .public), forced \(report.forced, privacy: .public), pages closed \(report.pagesClosed, privacy: .public), archived \(Int(report.archivePasses ?? -1), privacy: .public) time(s), unchanged at \(Int(report.archivePassesSkipped ?? -1), privacy: .public) more attempt(s)")
                 self.onChildSealed?(id, report)
             case .menuWalk(let line):
                 self.onMenuWalk?(id, line)
+            case .sweep(let line):
+                self.onSweep?(id, line)
             case .historyLook(let look):
                 self.onHistoryLook?(id, look)
             case .windowLook(let look):
@@ -711,6 +760,8 @@ final class ProfileManager: ObservableObject {
             self.children[id] = nil
             self.endWebDriver(of: id)
             self.releaseWebRTC(of: id, pid: child.processIdentifier)
+            // Its relay, once nothing of the process is left to use it.
+            LocalRelays.stop(owner: id)
             self.windowsUp.remove(id)
             self.resumeWindowWaiters(of: id, up: false)
             self.runningProfileIDs.remove(id)
@@ -765,10 +816,18 @@ final class ProfileManager: ObservableObject {
     /// that must not connect: kept in the pages, connecting nowhere, once the guard holds the process
     /// to its proxy (`WebRTCGate.silence`), and otherwise off in the engine — said once, where there
     /// is something to say (`WebRTCGate.tells`).
-    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy: ProxySettings, policy: WebRTCPolicy,
+    private func decideWebRTC(for id: UUID, name: String, child: ProfileProcess, proxy storedProxy: ProxySettings, policy: WebRTCPolicy,
                               automatic: Bool = false, userAgent: String) async {
         // Once asking macOS is over (the app just started, the guard was just installed).
         let guardState = await NetworkGuard.shared.settledState()
+        // What the process is held to and the relay sends through: the relay of a share link or an
+        // OpenVPN connection, as the SOCKS5 proxy it is to this Mac (`LocalRelays`); any other proxy
+        // as it is. A relay that does not run leaves nothing to hold to: WebRTC is off.
+        guard let reach = LocalRelays.reach(of: storedProxy, owner: id) else {
+            child.send(.webRTC(WebRTCLaunchMessage(relay: nil, refusal: .notRegistered)))
+            return
+        }
+        let proxy = reach
         // The proxy is asked about UDP only when nothing else rules the relay out.
         var udp = ProxyUDPSupport.unknown
         var exit: IPAddr?
@@ -864,6 +923,43 @@ final class ProfileManager: ObservableObject {
         }
         return (.supported, exit)
     }
+
+    // MARK: The relay of a link or an OpenVPN connection
+
+    /// Starts the relay `id`'s proxy needs for this launch (`LocalRelays`): a share link's or an
+    /// OpenVPN connection's, refused with why when it does not start. Should it go for good while the
+    /// profile runs, the profile stops and the person is told (`relayLost`): its pages fail
+    /// meanwhile, never going another way.
+    private func startRelay(for id: UUID, proxy: ProxySettings, name: String) async throws {
+        // OpenVPN is for a profile in its own process, held there by the kernel (docs/OPENVPN.md).
+        if proxy.localRelay == .openVPN, !ProfileProcess.isEnabled {
+            throw LaunchError.openVPN(name: name, reason: OpenVPNTunnels.Failure.needsOwnProcess.text)
+        }
+        do {
+            try await LocalRelays.start(for: proxy, owner: id, name: name) { [weak self] message in
+                self?.relayLost(id, message: message)
+            }
+        } catch let failure as LocalRelays.Failure {
+            throw failure.launchError(name: name)
+        }
+    }
+
+    /// `id`'s relay went and did not come back: the profile stops, and says why. Its pages failed
+    /// meanwhile; none went another way.
+    private func relayLost(_ id: UUID, message: String) {
+        guard !runsInProfileProcess, isRunning(id) || busyProfileIDs.contains(id) else { return }
+        log.error("The relay of \(id.uuidString, privacy: .public) is gone and did not come back: the profile stops")
+        onError?(message)
+        let grace = Self.relayDeathGrace
+        Task {
+            if grace > 0 { try? await Task.sleep(nanoseconds: UInt64(grace * 1_000_000_000)) }
+            try? await self.stop(id)
+        }
+    }
+
+    /// How long a profile whose relay died runs on before it is stopped: none. The check of links
+    /// (`XrayCheck`) leaves it a few seconds, to see its pages fail meanwhile, never going around.
+    static var relayDeathGrace: TimeInterval = 0
 
     /// The relay and the guard's hold of a profile whose process ended or was stopped.
     private func releaseWebRTC(of id: UUID, pid: pid_t) {
@@ -1200,13 +1296,23 @@ final class ProfileManager: ObservableObject {
         }
         do {
             let executor = try await webDriverExecutor(for: id, session)
-            return WebDriverAnswer(id: call.id, value: try await executor.perform(call), error: nil)
+            let value = try await executor.perform(call)
+            // Cookies set or deleted through WebDriver are Lumen's own change: on disk and copied at once,
+            // so that a crash right after neither loses them nor brings back the ones deleted.
+            if Self.webDriverCookieCommands.contains(call.command), let store = session.dataStore?.httpCookieStore {
+                await CookieStoreImport.flush(store)
+                await cookieSnapshots.snapshot(id, store: store, trigger: .change)
+            }
+            return WebDriverAnswer(id: call.id, value: value, error: nil)
         } catch let error as WebDriverError {
             return refused(error)
         } catch {
             return refused(.unknown(String(describing: error)))
         }
     }
+
+    /// The WebDriver commands that change the profile's cookies.
+    static let webDriverCookieCommands: Set<String> = ["addCookie", "deleteCookie", "deleteCookies"]
 
     /// The profile's process is gone, or its session here: calls still waiting for it get their
     /// answer now — the window is closed — and the page it had is forgotten.
@@ -1311,6 +1417,16 @@ final class ProfileManager: ObservableObject {
     func walkMenu(_ id: UUID, from: Int) -> Bool {
         guard let child = children[id] else { return false }
         child.send(.walkMenu(from: from))
+        return true
+    }
+
+    /// Asks a profile running in its own process to drive its window with real input from step
+    /// `from`, unit `sub` on (`SafariSweep`); each line comes back through `onSweep`. The `--sweep`
+    /// check's only. False when it does not run in a process of its own.
+    @discardableResult
+    func sweep(_ id: UUID, from: Int, sub: Int, phases: [String]) -> Bool {
+        guard let child = children[id] else { return false }
+        child.send(.sweep(from: from, sub: sub, phases: phases))
         return true
     }
 
@@ -1425,6 +1541,8 @@ final class ProfileManager: ObservableObject {
             child.onExit = nil
             child.terminate()
             await child.waitUntilExit(timeout: 30)
+            // Its relay: only now, with nothing of the process left to send to its port.
+            LocalRelays.stop(owner: id)
             if let status = child.terminationStatus { onChildStopped?(id, status) }
             if let key = try? repository.profileKey(for: id) {
                 try safariHomeVault.seal(profileID: id, key: key)
@@ -1459,8 +1577,13 @@ final class ProfileManager: ObservableObject {
             if let key, (try? repository.loadConfiguration(id, key: key))?.syncsCookies == true {
                 await recordSyncedCookies(of: id, in: store.httpCookieStore)
             }
+            // A clean stop: the last snapshot of its cookies, and its running mark gone
+            // (docs/COOKIE_RECOVERY.md). After the cookies are on disk, before the seal.
+            await cookieSnapshots.close(id, store: store.httpCookieStore)
         }
+        cookieSnapshots.stopWatching(id)
         session.shutDown()
+        LocalRelays.stop(owner: id)
         rememberOpenTabs(of: id, session.lastOpenTabs, configuration: session.configuration,
                          emptyForgets: SafariChromeHost.isHosting)
         // `session` is now the last reference; it is released when this scope ends, but its
@@ -1820,6 +1943,9 @@ final class ProfileManager: ObservableObject {
         if let store = sessions[id]?.dataStore {
             let result = await CookieStoreImport.apply(cookies, to: store.httpCookieStore)
             log.notice("Imported \(result.stored) cookies into a running profile, \(result.refused.count) refused")
+            // Lumen's own change: copied at once — a crash right after neither loses the imported
+            // cookies nor takes those they replaced for ones to put back (docs/COOKIE_RECOVERY.md).
+            await cookieSnapshots.snapshot(id, store: store.httpCookieStore, trigger: .change)
             return .applied(stored: result.stored, refused: result.refused)
         }
         // Starting or being encrypted: its store is about to exist or to go.
@@ -1867,43 +1993,90 @@ final class ProfileManager: ObservableObject {
 
     // MARK: Synced cookies
 
-    /// At launch, before the first page loads. With cookie sync on: what the store changed since
-    /// it was last recorded (a run that ended without a stop) is recorded as changes of that
-    /// time, the earliest they can be — with nothing recorded yet (sync just turned on), as old
-    /// as can be: they fill in what the synced cookies lack, and any synced change wins over
-    /// them — unless the store came up with nothing (`storeRestored` false: no archive, no
-    /// plaintext), which is not every cookie deleted (CookieJarDocument.atLaunch). Then the
-    /// document (with what sync brought from the other devices) is applied to the store, then the
-    /// cookies imported while the profile was stopped go in and are recorded as changes of now.
-    /// With sync off, the profile keeps no synced cookies (`clearSyncedCookies`).
-    private func prepareCookies(of id: UUID, summary: ProfileSummary, syncs: Bool, storeRestored: Bool, session: BrowserSession) async {
-        guard syncs else {
+    /// At launch, before the first page loads. First cookie recovery (docs/COOKIE_RECOVERY.md): a
+    /// store that lost the profile's cookies — missing website data, a damaged cookie file, far
+    /// fewer than its newest snapshot after a run that did not stop cleanly — gets back from that
+    /// snapshot the cookies it lacks, before anything reads it as the person's.
+    ///
+    /// Then, with cookie sync on: what the store changed since it was last recorded (a run that
+    /// ended without a stop) is recorded as changes of that time, the earliest they can be — with
+    /// nothing recorded yet (sync just turned on), as old as can be: they fill in what the synced
+    /// cookies lack, and any synced change wins over them — unless the store came up with nothing
+    /// (`storeRestored` false: no archive, no plaintext), which is not every cookie deleted
+    /// (CookieJarDocument.atLaunch); a store that lost cookies records no deletion either, but for
+    /// what the newest snapshot says was deleted since the baseline (`atLaunch(afterLoss:)`). Then the
+    /// document (with what sync brought from the other devices)
+    /// is applied to the store, then the cookies imported while the profile was stopped go in and
+    /// are recorded as changes of now. With sync off, the profile keeps no synced cookies
+    /// (`clearSyncedCookies`).
+    ///
+    /// Last, what the launch changed is copied, the run is marked as begun, and its store is looked
+    /// at from now on (`CookieSnapshotKeeper.begin`).
+    private func prepareCookies(of id: UUID, summary: ProfileSummary, stored: ProfileConfiguration, storeRestored: Bool,
+                                storeState: (state: CookieRecovery.StoreState, note: String), session: BrowserSession) async {
+        var finding = CookieSnapshotKeeper.LaunchFinding()
+        if stored.keepsCookieSnapshots, let store = session.dataStore?.httpCookieStore {
+            finding = await cookieSnapshots.recover(id, store: store, state: storeState.state, note: storeState.note)
+        } else {
+            // Turned off, or an ephemeral profile: no copy of its cookies is kept.
+            cookieSnapshots.forget(id)
+        }
+        // Cookies put back are the profile's state now; none put back (WebKit kept none of them) is
+        // tried again at the next launch — unless a clean stop copies the store first.
+        var changedAtLaunch = (finding.report?.restored ?? 0) > 0
+        if !stored.syncsCookies {
             try? repository.clearSyncedCookies(for: id)
-            await applyQueuedCookies(of: id, name: summary.name, to: session)
-            return
+            if await applyQueuedCookies(of: id, name: summary.name, to: session) > 0 { changedAtLaunch = true }
+        } else if let store = session.dataStore?.httpCookieStore {
+            var synced: (loaded: CookieJarDocument, jar: CookieJarDocument, baseline: [ImportedCookie])?
+            do {
+                let loaded = try repository.cookieJar(for: id)
+                let baseline = try repository.cookieBaseline(for: id)
+                // A store that came up with nothing (its website data lost) records no deletions, nor one
+                // that lost cookies — but for what this Mac's newest snapshot, at least as new as the
+                // baseline, says was deleted since (`atLaunch(afterLoss:)`); nor one whose cookie file
+                // was damaged.
+                let found = await CookieStoreSync.persistentCookies(in: store)
+                let jar: CookieJarDocument
+                if finding.lost {
+                    jar = loaded.atLaunch(afterLoss: found, snapshot: finding.latest, baseline: baseline)
+                } else {
+                    let came: CookieJarDocument.LaunchStore = finding.damaged ? .recovered : (storeRestored ? .asLeft : .withNothing)
+                    jar = loaded.atLaunch(store: found, baseline: baseline, came: came)
+                }
+                let applied = await CookieStoreSync.apply(jar, to: store)
+                log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
+                if applied.set + applied.deleted > 0 { changedAtLaunch = true }
+                synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
+            } catch {
+                log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
+                onError?(String(format: L("cookies.sync.unreadable"), summary.name))
+            }
+            if await applyQueuedCookies(of: id, name: summary.name, to: session) > 0 { changedAtLaunch = true }
+            if let synced {
+                let now = Date()
+                let current = await CookieStoreSync.persistentCookies(in: store)
+                saveSyncedCookies(of: id, name: summary.name, loaded: synced.loaded,
+                                  jar: synced.jar.recording(store: current, baseline: synced.baseline, at: now),
+                                  baseline: CookieBaseline(cookies: current, savedAt: now))
+            }
         }
-        guard let store = session.dataStore?.httpCookieStore else { return }
-        var synced: (loaded: CookieJarDocument, jar: CookieJarDocument, baseline: [ImportedCookie])?
-        do {
-            let loaded = try repository.cookieJar(for: id)
-            let baseline = try repository.cookieBaseline(for: id)
-            // A store that came up with nothing (its website data lost) records no deletions.
-            let jar = loaded.atLaunch(store: await CookieStoreSync.persistentCookies(in: store), baseline: baseline,
-                                      storeRestored: storeRestored)
-            let applied = await CookieStoreSync.apply(jar, to: store)
-            log.notice("Synced cookies at launch: \(applied.set) set, \(applied.deleted) deleted, \(applied.refused.count) refused")
-            synced = (loaded, jar, await CookieStoreSync.persistentCookies(in: store))
-        } catch {
-            log.error("Could not read the synced cookies of \(id.uuidString, privacy: .public): \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
-            onError?(String(format: L("cookies.sync.unreadable"), summary.name))
+        if stored.keepsCookieSnapshots, let store = session.dataStore?.httpCookieStore {
+            await cookieSnapshots.begin(id, store: store, changedAtLaunch: changedAtLaunch) { [weak session] in
+                session?.dataStore?.httpCookieStore
+            }
         }
-        await applyQueuedCookies(of: id, name: summary.name, to: session)
-        guard let synced else { return }
-        let now = Date()
-        let current = await CookieStoreSync.persistentCookies(in: store)
-        saveSyncedCookies(of: id, name: summary.name, loaded: synced.loaded,
-                          jar: synced.jar.recording(store: current, baseline: synced.baseline, at: now),
-                          baseline: CookieBaseline(cookies: current, savedAt: now))
+    }
+
+    /// Cookies put back at this launch (`CookieSnapshotKeeper.recover`), shown in the profile's window
+    /// once it has one (`CookieRecoveryNotice`), and told once for the profile's journal — at once, with
+    /// or without a window. Called when the launch opened its window, and again when a profile that
+    /// had none gets one.
+    func presentCookieRecovery(_ id: UUID) {
+        guard let session = sessions[id], let pending = cookieSnapshots.untoldReport(id) else { return }
+        let shown = CookieRecoveryNotice.present(pending, in: session)
+        guard let taken = cookieSnapshots.takeUntold(id, shown: shown), taken.firstTime else { return }
+        onCookiesRecovered?(id, taken.report)
     }
 
     /// At stop: what the run changed, as changes of now.
@@ -1935,7 +2108,11 @@ final class ProfileManager: ObservableObject {
         }
     }
 
-    private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async {
+    /// The cookies imported while the profile was stopped, into its store; returns how many it kept.
+    /// One that expired while it waited is not set: setting it would delete the profile's own cookie
+    /// of that name (a restore from a snapshot, queued for days, as an import).
+    @discardableResult
+    private func applyQueuedCookies(of id: UUID, name: String, to session: BrowserSession) async -> Int {
         let queued: [ImportedCookie]
         do {
             queued = try repository.importedCookiesForLaunch(id)
@@ -1949,16 +2126,19 @@ final class ProfileManager: ObservableObject {
                 let aside = try? repository.moveUnreadableImportedCookiesAside(id)
                 onError?(String(format: L("cookies.launch.unreadable"), name, aside?.lastPathComponent ?? "cookies-import.bin"))
             }
-            return
+            return 0
         }
-        guard !queued.isEmpty, let store = session.dataStore else { return }
-        let result = await CookieStoreImport.apply(queued, to: store.httpCookieStore)
+        guard !queued.isEmpty, let store = session.dataStore else { return 0 }
+        let now = Date()
+        let live = queued.filter { ($0.expires ?? .distantFuture) > now }
+        let result = await CookieStoreImport.apply(live, to: store.httpCookieStore)
         repository.clearImportedCookies(id)
-        log.notice("Applied \(result.stored) imported cookies at launch, \(result.refused.count) refused")
+        log.notice("Applied \(result.stored) imported cookies at launch, \(result.refused.count) refused, \(queued.count - live.count) expired while they waited")
         if !result.refused.isEmpty {
             onError?(String(format: L("cookies.launch.refused"), result.refused.count, name,
                             result.refused.prefix(5).map { "\($0.name) (\($0.domain))" }.joined(separator: ", ")))
         }
+        return result.stored
     }
 
     // MARK: Passwords

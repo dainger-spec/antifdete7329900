@@ -27,7 +27,8 @@ final class ProxyProbeTests: XCTestCase {
     func testTodaysCaseAPortThatTakesTheConnectionAndSaysNothingIsSilent() throws {
         let server = try FakeProxyServer(.silent)
         defer { server.stop() }
-        for kind in ProxySettings.Kind.allCases {
+        // A share link's proxy is never probed at its address: only through its relay (XrayLinkProxyTests).
+        for kind in ProxySettings.Kind.allCases where kind != .xray {
             let diagnosis = probe.runNow(proxy(kind, server, user: "u", password: "p"))
             XCTAssertEqual(diagnosis.verdict, .silent, "\(kind)")
             XCTAssertEqual(diagnosis.failedStep, 3)

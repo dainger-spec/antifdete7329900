@@ -31,7 +31,8 @@ Fast (`ci.yml`):
   checks of the code — localization complete, log privacy, no quiet skip in the self-test,
   SystemOpen only, deletion paths, the account's key, a release's publication, download.json, the
   site's minimum macOS, no secret in the repository, this split, the release gate's own tests.
-- macOS 26, one runner: `swift test`; both builds; the release's dry run; the release gate where
+- macOS 26, one runner: `swift test`; both builds; the release's dry run (without OpenVPN and the
+  links' relay, `OVPN=0 XRAY=0`: their builds are the full pipeline's); the release gate where
   Safari's chrome is not hosted; download.json and the minimum macOS; the release gate reads every
   line; a relaxation beside the network extension's right is refused; the interface's language at
   start; a profile's data through signing out, into other accounts and back (with its control);
@@ -47,6 +48,9 @@ Full only (`full.yml`), and why:
 | check | why not fast |
 |---|---|
 | the license's renewals (9.9 min) | can stop a release; does not fit in 20 min |
+| the release's dry run as a release is made: `OVPN=1 XRAY=1` (release.sh's default), OpenVPN and Xray built from their pinned sources with PATH cut to `/usr/bin:/bin:/usr/sbin:/sbin` — Xcode's tools and nothing from Homebrew or the runner's Go, as on the owner's Mac — and openvpn, LumenTunnel and LumenXray read back from the app | builds two programs from source |
+| links — VLESS, VMess, Trojan, Shadowsocks (`xray-tunnels.yml`, called by the job `links`; also on a push to `claude/xray-*`): the relay's reproducible build (with the Go it fetches and checks itself), every kind against a real Xray server, the leak test in a capture | can stop a release; does not fit in 20 min |
+| OpenVPN end to end (job `openvpn`, `scripts/openvpn_macos_e2e.sh`): the app with `OVPN=1`, a server on the runner, a profile through a `.ovpn` driven over WebDriver — a wrong password, pages and DNS through the tunnel, the port's credentials, fail closed — inside a pktap capture | can stop a release; does not fit in 20 min |
 | the product's rename (9.3 min) | can stop a release; does not fit |
 | updates end to end (3.4 min), its result | can stop a release; does not fit |
 | Safari's menu walk (4.5 min), macOS 26 and 27 | an inventory compared with docs/menu-walk |

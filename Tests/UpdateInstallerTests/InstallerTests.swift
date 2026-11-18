@@ -89,6 +89,18 @@ final class InstallerTests: XCTestCase {
         return item
     }
 
+    /// The steps the installer said, in order (called from its task).
+    final class StepLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var steps: [UpdateInstallStep] = []
+        func append(_ step: UpdateInstallStep) { lock.lock(); steps.append(step); lock.unlock() }
+        /// Each step once, in the order first said.
+        var unique: [UpdateInstallStep] {
+            lock.lock(); defer { lock.unlock() }
+            return steps.reduce(into: []) { if $0.last != $1 { $0.append($1) } }
+        }
+    }
+
     private func installer(patience: TimeInterval = 600) -> Installer {
         Installer(app: installed, staging: staging, environment: Installer.Environment(
             processes: { [unowned self] bundle in
@@ -162,37 +174,66 @@ final class InstallerTests: XCTestCase {
                       "kept for the next quit")
     }
 
-    /// Started again after the quit that asked: that quit is over; the next one asks again.
-    func testAnAppStartedAgainEndsTheRequest() async throws {
+    /// Started again after the quit that asked, and left open: the person is using Lumen, that quit
+    /// is over; the next one asks again. It is given the step-aside grace first.
+    func testAnAppStartedAgainAndLeftOpenEndsTheRequest() async throws {
         try stage()
-        processLists = [[BundleProcess(pid: 4343, startedAt: start.addingTimeInterval(30))]]
+        processLists = Array(repeating: [BundleProcess(pid: 4343, startedAt: start.addingTimeInterval(30))], count: 200)
         let outcome = await installer().run()
         XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
+        XCTAssertEqual(outcome.kind, .startedAgain)
         XCTAssertEqual(build(of: installed), "1")
+        XCTAssertGreaterThanOrEqual(clock.timeIntervalSince(start), 15, "the grace was given")
+        XCTAssertLessThan(clock.timeIntervalSince(start), 20)
+        XCTAssertNil(UpdateInstallMarker.read(from: staging), "no marker is left behind")
+    }
+
+    /// A Lumen opened during the wait that steps aside (`UpdateStepAside`) — it ends by itself
+    /// within the grace — does not end the request: the release is installed and started.
+    func testALumenThatStepsAsideDuringTheWaitDoesNotEndTheRequest() async throws {
+        try stage()
+        let reopened = BundleProcess(pid: 4343, startedAt: start.addingTimeInterval(5))
+        processLists = [[reopened], [reopened], []]
+        let outcome = await installer().run()
+        XCTAssertEqual(outcome.result, .installed, outcome.detail)
+        XCTAssertEqual(build(of: installed), "2")
+        XCTAssertEqual(launched, [installed.standardizedFileURL])
     }
 
     /// Opened again after the wait, while the release was being checked (seconds of hashing,
-    /// extracting and checking signatures): the request ends as it does during the wait, nothing is
-    /// swapped, and the archive is kept for the next quit. The reopened app ran on from a bundle
-    /// swapped away and deleted (audit 3, #27).
+    /// extracting and checking signatures), and left open: the request ends as it does during the
+    /// wait, nothing is swapped, and the archive is kept for the next quit. The reopened app ran on
+    /// from a bundle swapped away and deleted (audit 3, #27).
     func testAnAppStartedAgainWhileTheReleaseIsCheckedEndsTheRequest() async throws {
         try stage()
-        processLists = [[], [BundleProcess(pid: 4444, startedAt: start.addingTimeInterval(5))]]
+        processLists = [[]] + Array(repeating: [BundleProcess(pid: 4444, startedAt: start.addingTimeInterval(5))], count: 200)
         let outcome = await installer().run()
         XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
+        XCTAssertEqual(outcome.kind, .startedAgain)
         XCTAssertEqual(build(of: installed), "1")
         XCTAssertTrue(launched.isEmpty)
         XCTAssertEqual(try leftovers(), [], "the extracted release went with the work folder")
         XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("PrivacyBrowser-2.zip").path),
                       "kept for the next quit")
-        XCTAssertEqual(askedAbout, [installed.standardizedFileURL, installed.standardizedFileURL])
+        XCTAssertTrue(askedAbout.allSatisfy { $0 == installed.standardizedFileURL })
     }
 
-    /// Opened again in the moment between that last look and the swap: it runs from the old app at
-    /// its new place, which is looked at too, and goes back where it was.
+    /// One that steps aside while the release is checked: installed all the same.
+    func testALumenThatStepsAsideWhileTheReleaseIsCheckedDoesNotEndTheRequest() async throws {
+        try stage()
+        let reopened = BundleProcess(pid: 4444, startedAt: start.addingTimeInterval(5))
+        processLists = [[], [reopened], [reopened], []]
+        let outcome = await installer().run()
+        XCTAssertEqual(outcome.result, .installed, outcome.detail)
+        XCTAssertEqual(build(of: installed), "2")
+        XCTAssertEqual(launched, [installed.standardizedFileURL])
+    }
+
+    /// Opened again in the moment between that last look and the swap, and left open: it runs from
+    /// the old app at its new place, which is looked at too, and goes back where it was.
     func testAnAppStartedAgainAsItIsSwappedGetsItsAppBack() async throws {
         try stage()
-        processLists = [[], [], [BundleProcess(pid: 4545, startedAt: start.addingTimeInterval(5))]]
+        processLists = [[], []] + Array(repeating: [BundleProcess(pid: 4545, startedAt: start.addingTimeInterval(5))], count: 200)
         let outcome = await installer().run()
         XCTAssertEqual(outcome.result, .gaveUp, outcome.detail)
         XCTAssertEqual(build(of: installed), "1", "the previous app is back")
@@ -200,9 +241,63 @@ final class InstallerTests: XCTestCase {
         XCTAssertTrue(launched.isEmpty)
         XCTAssertEqual(try leftovers(), [])
         XCTAssertTrue(FileManager.default.fileExists(atPath: staging.appendingPathComponent("PrivacyBrowser-2.zip").path))
-        XCTAssertEqual(askedAbout.count, 3)
         XCTAssertNotEqual(askedAbout.last, installed.standardizedFileURL, "the last look is at the old app's new place")
         XCTAssertEqual(askedAbout.last?.lastPathComponent, installed.lastPathComponent)
+    }
+
+    // MARK: The marker, the steps, the relaunch wish
+
+    /// While it works the installer keeps its marker for this app, with its pid; the steps go
+    /// checking → installing → relaunching; the marker is gone before the new app is started.
+    func testTheMarkerAndTheStepsOfAnInstall() async throws {
+        try stage()
+        let app = BundleProcess(pid: 4242, startedAt: start.addingTimeInterval(-3600))
+        processLists = [[app], [app], []]
+        var markers: [UpdateInstallMarker?] = []
+        var markerAtLaunch: UpdateInstallMarker??
+        let steps = StepLog()
+        var environment = installer().environment
+        let staging = staging!
+        environment.processes = { [unowned self] bundle in
+            markers.append(UpdateInstallMarker.read(from: staging))
+            return self.processLists.isEmpty ? [] : self.processLists.removeFirst()
+        }
+        environment.launch = { [unowned self] url in
+            markerAtLaunch = .some(UpdateInstallMarker.read(from: staging))
+            self.launched.append(url)
+        }
+        environment.progress = { steps.append($0) }
+        environment.pid = 777
+        let outcome = await Installer(app: installed, staging: staging, environment: environment).run()
+        XCTAssertEqual(outcome.result, .installed, outcome.detail)
+        let first = try XCTUnwrap(markers.first ?? nil)
+        XCTAssertEqual(first.pid, 777)
+        XCTAssertEqual(first.appPath, installed.standardizedFileURL.path)
+        XCTAssertEqual(first.version, "0.2.0")
+        XCTAssertEqual(first.step, .checking)
+        XCTAssertEqual(markerAtLaunch, .some(nil), "no marker when the new app starts: it must not step aside")
+        XCTAssertNil(UpdateInstallMarker.read(from: staging))
+        XCTAssertEqual(steps.unique, [.checking, .installing, .relaunching])
+    }
+
+    /// A Lumen that stepped aside asked for Lumen: when nothing is installed it gets the version
+    /// there was; the wish is used up.
+    func testARelaunchWishIsHonouredWhenNothingIsInstalled() async throws {
+        try stage(privateKey: UpdateSigner.newKey().privateKey)
+        try UpdateRelaunchWish(at: start.addingTimeInterval(1)).write(to: staging)
+        let outcome = await installer().run()
+        XCTAssertEqual(outcome.result, .refused, outcome.detail)
+        XCTAssertEqual(launched, [installed.standardizedFileURL], "the version there was, started")
+        XCTAssertNil(UpdateRelaunchWish.read(from: staging))
+    }
+
+    /// An old wish (another install's) starts nothing.
+    func testAnOldRelaunchWishStartsNothing() async throws {
+        try stage(privateKey: UpdateSigner.newKey().privateKey)
+        try UpdateRelaunchWish(at: start.addingTimeInterval(-3600)).write(to: staging)
+        _ = await installer().run()
+        XCTAssertTrue(launched.isEmpty)
+        XCTAssertNil(UpdateRelaunchWish.read(from: staging))
     }
 
     // MARK: Refusals: nothing replaced

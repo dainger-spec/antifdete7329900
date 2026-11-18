@@ -71,6 +71,7 @@ enum ProxyState: Equatable {
             case .credentialsNeeded, .credentialsRejected: return "lock.fill"
             case .refusedByProxy: return "hand.raised.fill"
             case .noUpstream: return "exclamationmark.triangle.fill"
+            case .relayNotStarted: return "xmark.circle.fill"
             case .reachable, .works: return "checkmark.circle.fill"
             }
         }
@@ -117,6 +118,7 @@ enum ProxyState: Equatable {
             case .credentialsRejected: return L("proxies.state.credentialsRejected")
             case .refusedByProxy: return L("proxies.state.refusedByProxy")
             case .noUpstream: return L("proxies.state.noUpstream")
+            case .relayNotStarted: return L("proxies.state.relayNotStarted")
             case .reachable, .works: return L("proxies.status.alive")
             }
         }
@@ -146,6 +148,7 @@ enum ProxyState: Equatable {
             case .credentialsRejected: return L("proxies.title.credentialsRejected")
             case .refusedByProxy: return L("proxies.title.refusedByProxy")
             case .noUpstream: return L("proxies.title.noUpstream")
+            case .relayNotStarted: return L("proxies.title.relayNotStarted")
             case .reachable, .works: return L("proxies.title.works")
             }
         }
@@ -247,6 +250,9 @@ struct ProxyReport {
                 return (String(format: L("proxies.explain.refusedByProxy"), answer), L("proxies.advice.refusedByProxy"))
             case .noUpstream:
                 return (String(format: L("proxies.explain.noUpstream"), answer), L("proxies.advice.noUpstream"))
+            case .relayNotStarted:
+                return (L(XrayRelays.isAvailable ? "proxies.explain.relayNotStarted" : "proxies.explain.relayNotInBuild"),
+                        L("proxies.advice.relayNotStarted"))
             case .reachable, .works:
                 return (nil, nil)
             }
@@ -258,7 +264,16 @@ struct ProxyReport {
         switch kind {
         case .socks5: return "SOCKS5" // l10n: not text
         case .httpConnect: return tls ? "HTTPS" : "HTTP" // l10n: not text
+        case .xray: return "Xray" // l10n: not text
         }
+    }
+
+    /// The proxy's type as the person knows it: a link's protocol ("VLESS", "Trojan", …) or
+    /// "OpenVPN" rather than the relay it goes through, which answers as SOCKS5.
+    static func kindName(of proxy: ProxySettings) -> String {
+        if proxy.kind == .xray, let link = proxy.shareLink { return link.scheme.displayName }
+        if proxy.isOpenVPN { return "OpenVPN" } // l10n: not text
+        return kindName(proxy.kind, tls: proxy.tlsToProxy)
     }
 
     // MARK: Steps

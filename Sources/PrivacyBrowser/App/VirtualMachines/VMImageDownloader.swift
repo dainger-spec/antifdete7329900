@@ -1,5 +1,6 @@
 import BrowserCore
 import Foundation
+import os
 
 /// Fetches Apple's restore image — the macOS a virtual machine is installed from — from Apple's
 /// own servers into the machines' library, so that none of it is in the app's download. The work
@@ -26,20 +27,28 @@ final class VMImageDownloader: @unchecked Sendable {
             }
         }
 
-        var errorDescription: String? {
-            let words: String
+        /// What the setup says: a short line and what to do. The system's words, or the server's
+        /// status, go to the log, never to the screen.
+        var problem: VMProblem {
+            let key: String
             switch reason {
-            case .refused: words = L("vm.download.error.refused")
-            case .incomplete: words = L("vm.download.error.incomplete")
-            case .notFetchable: words = L("vm.download.error.notFetchable")
-            case .keepsChanging: words = L("vm.download.error.keepsChanging")
-            case .noRoom: words = L("vm.download.error.noRoom")
-            case .network: words = L("vm.download.error.network")
-            case .other: words = L("vm.download.error.other")
+            case .refused: key = "vm.download.error.refused"
+            case .incomplete: key = "vm.download.error.incomplete"
+            case .notFetchable: key = "vm.download.error.notFetchable"
+            case .keepsChanging: key = "vm.download.error.keepsChanging"
+            case .noRoom: key = "vm.download.error.noRoom"
+            case .network: key = "vm.download.error.network"
+            case .other: key = "vm.download.error.other"
             }
-            let said = detail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return said.isEmpty ? words : words + "\n" + String(format: L("vm.row.trouble.detail"), said)
+            if let detail, !detail.isEmpty {
+                Logger(subsystem: "PrivacyBrowser", category: "VirtualMachines")
+                    .error("The download of macOS stopped: \(detail, privacy: .private)")
+            }
+            if case .noRoom = reason { return .keyed(key, action: .storage) }
+            return .keyed(key)
         }
+
+        var errorDescription: String? { problem.text }
     }
 
     private let fetch: VMImageFetch

@@ -200,12 +200,18 @@ struct WarmUpScreen: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 if tab == .profiles, fits, let item = selectedItem {
-                    WarmUpInspector(item: item, templates: templates, actions: actions,
-                                    openReport: { run in report = WarmUpReportRequest(profile: item, run: run) },
-                                    warmUp: { starting = WarmUpNewRequest(profiles: [item.id]) },
-                                    close: { selected = nil })
-                        .id(item.id)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                    inspector(item)
+                }
+            }
+            // A window too narrow for the inspector beside the list has it over the list's end: a
+            // click on a row there selected it and showed nothing (the run, its report, Warm Up
+            // Again were then only on a right click).
+            .overlay(alignment: .trailing) {
+                if tab == .profiles, !fits, let item = selectedItem {
+                    // Opaque over the list: the inspector's frost is drawn for a panel beside it.
+                    inspector(item)
+                        .background(Theme.surface)
+                        .shadow(color: .black.opacity(0.45), radius: 18, x: -6)
                 }
             }
             .animation(Motion.isReduced(reduceMotion) ? nil : Theme.appearAnimation, value: selectedItem?.id)
@@ -222,6 +228,15 @@ struct WarmUpScreen: View {
     }
 
     private var selectedItem: WarmUpProfileItem? { profiles.first { $0.id == selected } }
+
+    private func inspector(_ item: WarmUpProfileItem) -> some View {
+        WarmUpInspector(item: item, templates: templates, actions: actions,
+                        openReport: { run in report = WarmUpReportRequest(profile: item, run: run) },
+                        warmUp: { starting = WarmUpNewRequest(profiles: [item.id]) },
+                        close: { selected = nil })
+            .id(item.id)
+            .transition(.move(edge: .trailing).combined(with: .opacity))
+    }
 
     private func takeIncoming() {
         guard let request = incoming.wrappedValue else { return }
@@ -370,6 +385,7 @@ struct WarmUpReportRequest: Identifiable {
 private struct WarmUpQueueBar: View {
     let queue: WarmUpQueueSummary
     let actions: WarmUpActions
+    @State private var confirmingStop = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -403,10 +419,15 @@ private struct WarmUpQueueBar: View {
             }
             Button(queue.paused ? L("warm.queue.continue") : L("warm.queue.pause")) { actions.setPaused(!queue.paused) }
                 .buttonStyle(.lumenSecondary)
-            Button(L("warm.queue.stop")) { actions.stopAll() }
+            Button(L("warm.queue.stop")) { confirmingStop = true }
                 .buttonStyle(.lumenGhost)
         }
         .padding(.vertical, 10)
+        .confirmationDialog(L("warm.queue.stop.title"), isPresented: $confirmingStop, titleVisibility: .visible) {
+            Button(L("warm.queue.stop.confirm"), role: .destructive) { actions.stopAll() }
+        } message: {
+            Text(String(format: L("warm.queue.stop.message"), max(0, queue.total - queue.done)))
+        }
         .overlay(alignment: .bottom) { Rectangle().fill(Theme.divider).frame(height: 1) }
     }
 

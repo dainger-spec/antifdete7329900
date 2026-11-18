@@ -71,7 +71,8 @@ final class LicenseModel: ObservableObject {
     /// The effective time's floor as it moves (§8.3): kept out of `record`, so that the minute's
     /// tick redraws nothing; written with it to `account.json`.
     private var floor: EffectiveClock?
-    private var refreshing = false
+    /// A renewal is under way: what asks for one says so (Check Now, Refresh) — it said nothing.
+    @Published private(set) var refreshing = false
     /// A renewal of this run reached the server and left this Mac signed in: sync through the account
     /// waits for one (`renewForSync`, CONTRACT §16.1).
     private var renewedThisRun = false

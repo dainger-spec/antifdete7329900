@@ -153,6 +153,22 @@ enum TouchIDUnlock {
         case recordRefused
     }
 
+    /// Asks Touch ID once — the system's own question, with `reason` after the app's name — before
+    /// turning it on at the first run (`AppModel.turnTouchIDOnAtFirstRun`): the person sees the
+    /// finger work before anything is kept. True: recognised; false: not; nil: cancelled.
+    static func confirm(reason: String, cancelTitle: String) async -> Bool? {
+        let context = LAContext()
+        context.localizedFallbackTitle = ""
+        context.localizedCancelTitle = cancelTitle
+        do {
+            return try await context.evaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, localizedReason: reason)
+        } catch let error as LAError where error.code == .userCancel || error.code == .appCancel || error.code == .systemCancel {
+            return nil
+        } catch {
+            return false
+        }
+    }
+
     /// Asks Touch ID — the system's own question, with `reason` after the app's name — and opens
     /// the vault in `root` with the key it releases. Off the main thread: the call waits for the
     /// finger. The key is used here and nowhere else, and its bytes are cleared after.

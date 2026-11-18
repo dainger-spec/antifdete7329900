@@ -3,6 +3,9 @@ import AppKit
 import BrowserCore
 import CFNetwork
 import Foundation
+import MachineCover
+import Network
+import SwiftUI
 import Virtualization
 import VMNetCore
 
@@ -107,6 +110,9 @@ final class MachineNetwork {
                 switch proxy.kind {
                 case .socks5: upstream = .socks5(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
                 case .httpConnect: upstream = .httpConnect(host: proxy.host, port: proxy.port, username: proxy.username, password: proxy.password)
+                // The app gives a link's machine its relay, a SOCKS5 proxy; a link itself reaches
+                // nothing from here: no way out at all.
+                case .xray: upstream = .none
                 }
             }
         case .closed, .absent:
@@ -200,6 +206,52 @@ private final class GuideDocument: NSView {
 
 /// Runs a profile's machine (or the base, while it is being set up) in a window, until its macOS
 /// has shut down.
+/// How long a proxy takes to take a TCP connection: one connection, closed as soon as it is made,
+/// to the proxy alone — never through a proxy of this Mac's settings. Nil after five seconds
+/// without one.
+enum ProxyLatency {
+    private static let queue = DispatchQueue(label: "LumenVM.proxy-latency")
+
+    static func measure(host: String, port: NWEndpoint.Port, done: @escaping @Sendable (Int?) -> Void) {
+        let parameters = NWParameters.tcp
+        parameters.preferNoProxies = true
+        let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: parameters)
+        let started = DispatchTime.now()
+        let once = Once()
+        let finish: @Sendable (Int?) -> Void = { milliseconds in
+            guard once.take() else { return }
+            connection.cancel()
+            done(milliseconds)
+        }
+        connection.stateUpdateHandler = { state in
+            switch state {
+            case .ready:
+                finish(Int((DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000))
+            case .failed, .waiting:
+                finish(nil)
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+        queue.asyncAfter(deadline: .now() + 5) { finish(nil) }
+    }
+
+    /// The first of the answers is the one: the connection's, or the time limit's.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var taken = false
+
+        func take() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if taken { return false }
+            taken = true
+            return true
+        }
+    }
+}
+
 final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate {
     private let request: VMHelperRequest
     private var files: VMLibrary.MachineFiles!
@@ -250,6 +302,14 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     private var screenSleep: VMScreenSleep
     private var screenSleepCheck: DispatchWorkItem?
     private var screenSleepAskedAt: Date?
+    /// The dark bar at the top of a profile's machine's window (`MachineTitleBar`), its height —
+    /// the window's own title bar's, which it is drawn under — and the constraint that takes it
+    /// away in full screen; the timer that times the proxy's answer for it.
+    private var titleBar: MachineTitleBarModel?
+    private var titleBarHeight: CGFloat = 0
+    private var titleBarConstraint: NSLayoutConstraint?
+    private var titleBarView: NSView?
+    private var latencyTimer: Timer?
 
     init(request: VMHelperRequest) {
         self.request = request
@@ -434,6 +494,51 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             // What is left to do in this machine, said in its own window: the app's window, which
             // has the same words, is behind this one.
             window.contentView = Self.content(of: view, under: hint)
+        } else if let bar = request.windowBar {
+            // A profile's machine, under a bar of Lumen's (`MachineTitleBar`): the window's
+            // content takes its whole frame, the title bar's height is the bar's, and the screen
+            // keeps its own size and shape under it — so a window kept before (`VMWindowPlacement`)
+            // has the same frame.
+            let titleHeight = max(28, window.frame.height - window.contentLayoutRect.height)
+            window.styleMask.insert(.fullSizeContentView)
+            window.titlebarAppearsTransparent = true
+            window.titleVisibility = .hidden
+            window.appearance = NSAppearance(named: .darkAqua)
+            window.backgroundColor = NSColor(red: 11.0 / 255, green: 12.0 / 255, blue: 15.0 / 255, alpha: 1)
+            titleBarHeight = titleHeight
+            window.setContentSize(NSSize(width: size.width, height: size.height + titleHeight))
+            window.contentMinSize = NSSize(width: 480, height: 480 * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide) + titleHeight)
+            let model = MachineTitleBarModel(name: request.windowTitle, bar: bar, texts: request.texts)
+            titleBar = model
+            let host = NSHostingView(rootView: MachineTitleBar(model: model))
+            host.translatesAutoresizingMaskIntoConstraints = false
+            let screen = MachineScreen()
+            screen.translatesAutoresizingMaskIntoConstraints = false
+            view.translatesAutoresizingMaskIntoConstraints = false
+            screen.addSubview(view)
+            let content = NSView()
+            content.addSubview(screen)
+            content.addSubview(host)
+            let height = host.heightAnchor.constraint(equalToConstant: titleHeight)
+            NSLayoutConstraint.activate([
+                view.topAnchor.constraint(equalTo: screen.topAnchor),
+                view.bottomAnchor.constraint(equalTo: screen.bottomAnchor),
+                view.leadingAnchor.constraint(equalTo: screen.leadingAnchor),
+                view.trailingAnchor.constraint(equalTo: screen.trailingAnchor),
+                host.topAnchor.constraint(equalTo: content.topAnchor),
+                host.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                host.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+                height,
+                screen.topAnchor.constraint(equalTo: host.bottomAnchor),
+                screen.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+                screen.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                screen.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            ])
+            titleBarConstraint = height
+            titleBarView = host
+            window.contentView = content
+            self.screen = screen
+            startTimingTheProxy()
         } else {
             // A profile's machine: its screen, in a view a start's cover is put over
             // (`putUpCover`).
@@ -521,10 +626,56 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
 
     func windowDidMove(_ notification: Notification) { windowPlacementChanged() }
     func windowDidResize(_ notification: Notification) { windowPlacementChanged() }
-    func windowWillEnterFullScreen(_ notification: Notification) { fullScreenBusy = true }
+    func windowWillEnterFullScreen(_ notification: Notification) {
+        fullScreenBusy = true
+        showTitleBar(false)
+    }
+    func windowWillExitFullScreen(_ notification: Notification) { showTitleBar(true) }
     func windowDidExitFullScreen(_ notification: Notification) { fullScreenBusy = false }
     /// Full screen that did not come about: the window is a window again.
-    func windowDidFailToEnterFullScreen(_ window: NSWindow) { fullScreenBusy = false }
+    func windowDidFailToEnterFullScreen(_ window: NSWindow) {
+        fullScreenBusy = false
+        showTitleBar(true)
+    }
+
+    /// Under Lumen's bar the screen keeps its shape as the window is resized: the window's content
+    /// is its whole frame there, so AppKit's aspect ratio would take the bar for part of the screen.
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        guard titleBar != nil, !sender.styleMask.contains(.fullScreen), !fullScreenBusy else { return frameSize }
+        let display = request.display
+        let height = (frameSize.width * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide)).rounded() + titleBarHeight
+        return NSSize(width: frameSize.width, height: height)
+    }
+
+    /// The bar takes no height from the machine's screen in full screen: it goes, and comes back
+    /// with the window.
+    private func showTitleBar(_ shown: Bool) {
+        guard titleBar != nil else { return }
+        titleBarConstraint?.constant = shown ? titleBarHeight : 0
+        titleBarView?.isHidden = !shown
+    }
+
+    // MARK: The proxy's answer time
+
+    /// The bar's figure for the proxy: how long it takes to take a TCP connection, timed now and
+    /// every fifteen seconds. Only the proxy (or a link's server) is connected to — nothing that
+    /// leaves this Mac goes anywhere else — and the connection is closed as soon as it is made.
+    private func startTimingTheProxy() {
+        guard let bar = titleBar?.bar, let host = bar.pingHost, let port = bar.pingPort,
+              let endpointPort = NWEndpoint.Port(rawValue: UInt16(clamping: port)), port > 0 else { return }
+        let time = { [weak self] in
+            ProxyLatency.measure(host: host, port: endpointPort) { milliseconds in
+                DispatchQueue.main.async {
+                    guard let self, let model = self.titleBar else { return }
+                    model.latency = milliseconds
+                    model.latencyFailed = milliseconds == nil
+                }
+            }
+        }
+        time()
+        latencyTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { _ in time() }
+        latencyTimer?.tolerance = 3
+    }
 
     // MARK: Out of sight
 
@@ -1001,6 +1152,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             guard !sleepAfterWake else { return }
             sleepAfterWake = true
             window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
+            titleBar?.status = text("sleeping", "saving…")
             HelperIO.log("sleep: asked for while the machine is being woken; it is put to sleep once it is awake")
             DispatchQueue.main.asyncAfter(deadline: .now() + Self.wakePatience) { [weak self] in
                 guard let self, self.waking, !self.stopping, !self.finished else { return }
@@ -1012,6 +1164,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         stopping = true
         haltCover()
         window?.title = request.windowTitle + " — " + text("sleeping", "saving…")
+        titleBar?.status = text("sleeping", "saving…")
         let giveUp: (String, Error?) -> Void = { [weak self] why, error in
             HelperIO.log("sleep: the state was not saved (\(why)); the machine is shut down instead")
             guard let self, !self.finished else { return }
@@ -1098,6 +1251,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         stopping = true
         haltCover()
         window?.title = request.windowTitle + " — " + text("stopping", "shutting down…")
+        titleBar?.status = text("stopping", "shutting down…")
         // The guest writes the share too: a link left in the request's place goes, itself, first.
         if !VMShareFile.isRegularFile(shutdownRequestURL) { try? FileManager.default.removeItem(at: shutdownRequestURL) }
         FileManager.default.createFile(atPath: shutdownRequestURL.path, contents: Data())
@@ -1175,8 +1329,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         if trouble != lastTrouble {
             HelperIO.log(trouble.map { "way out: the machine's connections are not being made (\($0))" } ?? "way out: connections are made again")
             window?.subtitle = trouble.map { text("trouble." + $0, "No internet in this machine") } ?? ""
+            titleBar?.trouble = trouble.map { text("trouble." + $0, "No internet in this machine") }
         }
         lastTraffic = counters
+        titleBar?.bytesUp = counters.bytesFromGuest &+ counters.udpBytesFromGuest
+        titleBar?.bytesDown = counters.bytesToGuest &+ counters.udpBytesToGuest
         lastTrouble = trouble
         lastTroubleDetail = troubleDetail
         lastViaSystemProxy = viaSystemProxy
@@ -1209,6 +1366,7 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         keepWindowPlacement()
         finished = true
         trafficTimer?.invalidate()
+        latencyTimer?.invalidate()
         reportTraffic()
         network?.stop()
         try? FileManager.default.removeItem(at: shutdownRequestURL)

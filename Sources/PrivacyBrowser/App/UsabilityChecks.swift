@@ -72,13 +72,25 @@ enum UsabilityChecks {
             ("en", "download folder", .downloads, nil),
             ("en", "token", .automation, "automation.token"),
             ("en", "updates", .updates, nil),
-            ("en", "welcome every start", .appearance, "settings.appearance.welcome"),
+            ("en", "greeting every start", .appearance, "settings.appearance.welcome"),
             ("ru", "масштаб", .behavior, "settings.behavior.zoom"),
             ("ru", "выход", .startup, "settings.startup.confirmQuit"),
             ("ru", "мастер-пароль", .security, "settings.security.password"),
             ("ru", "загрузок", .downloads, nil),
             ("ru", "обновления", .updates, nil),
-            ("ru", "welcome при каждом запуске", .appearance, "settings.appearance.welcome"),
+            ("ru", "приветствие при каждом запуске", .appearance, "settings.appearance.welcome"),
+            // What can be added to the proxy list, by name (the owner did not find OpenVPN or the
+            // links in 0.1.18).
+            ("en", "openvpn", .proxies, "settings.proxies.add"),
+            ("en", "vless", .proxies, "settings.proxies.add"),
+            ("en", "vmess", .proxies, "settings.proxies.add"),
+            ("en", "trojan", .proxies, "settings.proxies.add"),
+            ("en", "shadowsocks", .proxies, "settings.proxies.add"),
+            ("ru", "OpenVPN", .proxies, "settings.proxies.add"),
+            ("ru", "vless", .proxies, "settings.proxies.add"),
+            ("ru", "Shadowsocks", .proxies, "settings.proxies.add"),
+            ("ru", "trojan", .proxies, "settings.proxies.add"),
+            ("ru", "vmess", .proxies, "settings.proxies.add"),
         ]
         var wrong: [String] = []
         for item in wanted {
@@ -95,7 +107,7 @@ enum UsabilityChecks {
                 wrong.append("\(item.language) “\(item.query)”: Return opens \(SettingsSearch.best(hits)?.section.rawValue ?? "nothing")")
             }
         }
-        checks.check("settings search: “zoom”, “dock”, “quit”, «масштаб», «выход» and the like find their page and name the setting",
+        checks.check("settings search: “zoom”, “dock”, “quit”, “OpenVPN”, “VLESS”, «масштаб», «выход» and the like find their page and name the setting",
               !tables.isEmpty && wrong.isEmpty, wrong.joined(separator: " | "))
 
         // The control: what is nowhere finds nothing, and nothing typed lists every page.

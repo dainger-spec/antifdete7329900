@@ -69,6 +69,10 @@ public struct ProxyProbe: Sendable {
 
     /// The diagnosis, on this thread (it waits on the network: never call it on the main thread).
     public func runNow(_ proxy: ProxySettings) -> ProxyDiagnosis {
+        // A share link's proxy is asked through its relay, and only through it: with none running,
+        // nothing is (`ProxyRoutes`). What answers is the relay; the link's server shows in whether
+        // anything comes back through it (the checker's next step).
+        guard let proxy = ProxyRoutes.shared.connectable(proxy) else { return ProxyDiagnosis(verdict: .relayNotStarted) }
         // 1. The name.
         let addresses: [ProbeSocket.Address]
         switch ProbeSocket.resolve(proxy.host, port: proxy.port, timeout: timeouts.resolve) {

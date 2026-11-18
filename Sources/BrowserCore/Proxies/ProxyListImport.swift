@@ -13,6 +13,11 @@ import Foundation
 ///     socks5 1.2.3.4 1080 user pass
 ///     1.2.3.4;1080;user;pass                   (also "," and "|")
 ///     1.2.3.4:1080:user:pass https://provider.example/changeip?key=…
+///     vless://uuid@server.example:443?security=reality&…#Name   (vmess://, trojan://, ss:// too)
+///
+/// A share link (`ShareLink`) is read whole as the link it is — its fragment is its label — and
+/// what is wrong with one is said as a link's problem, without its secret. A provider's
+/// subscription pasted as it is served (base64 of its links, one per line) is read as those links.
 ///
 /// Each line is taken apart as the editor's Host field takes a pasted proxy apart
 /// (`ProxyHostField`), so a line the list accepts is one the editor would accept too. A line with a
@@ -61,6 +66,8 @@ public enum ProxyListImport {
     public enum Reason: Equatable, Sendable {
         /// Not a proxy address; `ProxyHostField.Problem` says what is wrong with it.
         case unreadable(ProxyHostField.Problem)
+        /// A share link (vless://, vmess://, trojan://, ss://) the relay cannot use, and why.
+        case shareLink(ShareLinkError)
         /// A host without a port: a proxy is always a host and a port.
         case missingPort
         /// The same proxy (`ProxyList.identity(of:)`) as an earlier line, which is the one read.
@@ -106,7 +113,7 @@ public enum ProxyListImport {
         var report = Report(proxies: [], problems: [], linesRead: 0)
         var firstLine: [String: Int] = [:]
         // Character.isNewline: \n, \r\n (one Character), \r and the Unicode line separators.
-        let lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let lines = subscriptionLinks(in: text).split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         for (index, raw) in lines.enumerated() {
             let number = index + 1
             let trimmed = raw.trimmingCharacters(in: Self.junk)
@@ -118,6 +125,23 @@ public enum ProxyListImport {
                 break
             }
             let (written, label) = splitLabel(trimmed)
+            if ShareLink.looksLikeLink(written) {
+                do {
+                    let proxy = try ProxySettings(shareLink: written)
+                    let identity = ProxyList.identity(of: proxy)
+                    if let first = firstLine[identity] {
+                        report.problems.append(Problem(line: number, text: ShareLink.masked(written), reason: .duplicate(ofLine: first)))
+                        continue
+                    }
+                    firstLine[identity] = number
+                    let name = label.isEmpty ? (proxy.shareLink?.name ?? "") : label
+                    report.proxies.append(Line(line: number, proxy: proxy, label: ProxyList.cleanLabel(name), kindGiven: true))
+                } catch {
+                    let reason = (error as? ShareLinkError).map(Reason.shareLink) ?? .shareLink(.invalidBase64)
+                    report.problems.append(Problem(line: number, text: ShareLink.masked(written), reason: reason))
+                }
+                continue
+            }
             let (address, bracketLink) = splitChangeLink(written)
             var link = bracketLink
             var result = proxy(in: address, defaultKind: defaultKind)
@@ -175,6 +199,8 @@ public enum ProxyListImport {
     /// (`kindKnown` false), the user name and password percent-encoded where they hold `:`, `@`,
     /// `#`, `%` or spaces, an IPv6 host in brackets. The password is in it in plaintext.
     public static func line(for proxy: ProxySettings, kindKnown: Bool = true) -> String {
+        // A share link is written back as it was given: it holds its secret in plaintext too.
+        if proxy.kind == .xray { return proxy.link ?? "" }
         var line = ""
         if kindKnown {
             line += proxy.kind == .socks5 ? "socks5://" : (proxy.tlsToProxy ? "https://" : "http://")
@@ -189,6 +215,8 @@ public enum ProxyListImport {
     /// while it is not being edited. Nil when the text is not one proxy, has no password, or the
     /// password is not found where `readField` read it from (the caller then shows none of it).
     public static func passwordRange(in text: String) -> Range<String.Index>? {
+        // A share link's secret: its id or password, or the whole of a form that is base64.
+        if case .proxy(let read) = readField(text), read.proxy.kind == .xray { return ShareLink.secretRange(in: text) }
         guard case .proxy(let read) = readField(text), let password = read.proxy.password, !password.isEmpty else { return nil }
         // The line `read` took: the first that is neither blank nor a comment.
         var start = text.startIndex
@@ -370,6 +398,17 @@ public enum ProxyListImport {
             return false
         }
         return components.path.count > 1 || components.query != nil
+    }
+
+    /// A provider's subscription as it is served — base64 of its share links, one per line — as
+    /// those lines; any other text as it is. Only a text that is one block of base64 and decodes to
+    /// lines that hold share links is taken for one.
+    static func subscriptionLinks(in text: String) -> String {
+        let trimmed = text.trimmingCharacters(in: junk)
+        guard !trimmed.isEmpty, !trimmed.contains("://"), trimmed.count <= ProxyList.maximumEntries * ShareLink.maximumLength,
+              let decoded = ShareLink.base64Text(trimmed) else { return text }
+        let holdsLinks = decoded.split(whereSeparator: \.isNewline).contains { ShareLink.looksLikeLink(String($0)) }
+        return holdsLinks ? decoded : text
     }
 
     /// Whitespace, control characters and the invisible ones copied with text (BOM, zero-width).

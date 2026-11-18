@@ -37,9 +37,7 @@ enum ProxyExitLookup {
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         configuration.httpAdditionalHeaders = ["User-Agent": userAgent, "Accept": "text/plain"]
         configuration.waitsForConnectivity = false
-        let challenges = ProxyChallengeObserver(credential: proxy.username.map {
-            URLCredential(user: $0, password: proxy.password ?? "", persistence: .forSession)
-        })
+        let challenges = ProxyChallengeObserver(credential: ProxyConfigurationFactory.credential(for: proxy))
         let session = URLSession(configuration: configuration, delegate: challenges, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let deadline = Date().addingTimeInterval(timeout)

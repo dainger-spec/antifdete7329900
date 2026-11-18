@@ -252,7 +252,16 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// type; a new password is the same proxy). Another user name is another proxy: gateway
     /// providers pick the exit — the country, the session — from it.
     public static func identity(of proxy: ProxySettings) -> String {
-        [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
+        // A share link's server is its account on it: the protocol, the server and the user's id or
+        // password (another id on the same server is another proxy, as another user name is).
+        if proxy.kind == .xray {
+            return "xray\u{0}" + (proxy.shareLink?.identity ?? proxy.link ?? "")
+        }
+        let base = [proxy.host.lowercased(), String(proxy.port), proxy.username ?? ""].joined(separator: "\u{0}")
+        // Two OpenVPN configurations of the same server and login are two connections (other
+        // certificates, keys, transports): told apart by their configuration.
+        guard let openVPN = proxy.openVPN else { return base }
+        return base + "\u{0}openvpn:" + openVPN.fingerprint
     }
 
     /// `entries` by what makes each one's proxy the proxy it is (`identity(of:)`): for every
@@ -334,7 +343,9 @@ public struct ProxyList: Codable, Equatable, Sendable {
         var result = result
         let before = entries[index].proxy
         let kinds = result.diagnosis?.kinds ?? []
-        if let found = kinds.first, !entries[index].kindKnown || !kinds.contains(before.kind) {
+        // A proxy a relay carries (a link, an OpenVPN connection) is checked through its relay, which
+        // answers as SOCKS5: that is not its type.
+        if let found = kinds.first, before.localRelay == nil, !entries[index].kindKnown || !kinds.contains(before.kind) {
             result.kindFinding = entries[index].kindKnown ? .corrected(from: before.kind) : .found
             entries[index].proxy.kind = found
             if found == .socks5 { entries[index].proxy.tlsToProxy = false }
@@ -424,7 +435,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// changed in the profile's editor — and the one never overwrites the other.
     public static func sameConnection(_ a: ProxySettings, _ b: ProxySettings) -> Bool {
         identity(of: a) == identity(of: b) && a.kind == b.kind && a.tlsToProxy == b.tlsToProxy
-            && (a.password ?? "") == (b.password ?? "")
+            && (a.password ?? "") == (b.password ?? "") && a.openVPN == b.openVPN && a.link == b.link
     }
 
     /// The entries as text, one per line, in the form the import reads back
@@ -433,6 +444,13 @@ public struct ProxyList: Codable, Equatable, Sendable {
     public static func exportText(_ entries: [ProxyListEntry]) -> String {
         var lines = ["# Lumen proxies. The user names and passwords below are in plaintext."]
         for entry in entries {
+            // An OpenVPN connection is its .ovpn, not a line: written as one, it would read back as
+            // SOCKS5 at the VPN server. Said by a comment instead.
+            if entry.proxy.isOpenVPN {
+                let label = Self.cleanLabel(entry.label)
+                lines.append("# OpenVPN connection, not exported as a line: \(entry.address)" + (label.isEmpty ? "" : "  (\(label))"))
+                continue
+            }
             var line = ProxyListImport.line(for: entry.proxy, kindKnown: entry.kindKnown)
             // As providers and other browsers write it: the link in brackets right after the proxy.
             if let link = entry.changeIPURL { line += "[" + link.absoluteString + "]" }
@@ -498,7 +516,7 @@ public struct ProxyList: Codable, Equatable, Sendable {
     }
 
     /// The newest format of the file this version reads and writes.
-    static let supportedFormat = 3
+    static let supportedFormat = 4
 
     /// The format this list is written in.
     var format: Int { Self.format(for: entries) }
@@ -508,8 +526,12 @@ public struct ProxyList: Codable, Equatable, Sendable {
     /// link (or changes its IP at launch). A version from before origins would read a service's
     /// proxy as the user's and write it back without its origin, and one from before IP changes
     /// would write a proxy back without its link: each is to refuse the file instead
-    /// (docs/UPDATES.md, R4).
+    /// (docs/UPDATES.md, R4). 4 once one is reached through a relay the app runs
+    /// (`ProxySettings.localRelay`): a version from before OpenVPN connections would read one as
+    /// SOCKS5 at the VPN server and drop its configuration when it saves the list, and one from before
+    /// share links skips a link's entry and would drop it the same way.
     static func format(for entries: [ProxyListEntry]) -> Int {
+        if entries.contains(where: { $0.proxy.localRelay != nil }) { return 4 }
         if entries.contains(where: \.hasIPChange) { return 3 }
         return entries.contains { $0.origin != .user } ? 2 : 1
     }

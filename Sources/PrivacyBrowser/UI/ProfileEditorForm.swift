@@ -71,6 +71,9 @@ struct ProfileEditorForm: View {
     /// A check run from the editor (Check, or Save finding a type) is under way.
     var checkingProxy = false
     var onCheckProxy: () -> Void = {}
+    /// Add to the list, beside the connection's choice — a proxy, a link, OpenVPN — the profile
+    /// then using what was added (`ProfileEditorView`).
+    var onAddProxy: (ProxyAddChoice) -> Void = { _ in }
     /// The tags of the other profiles, offered under the tag field.
     var knownTags: [String] = []
     /// This Mac's screen less its menu bar and Dock: a window size larger than it is said to be.
@@ -87,6 +90,8 @@ struct ProfileEditorForm: View {
     /// Whether the plan opens camera substitution (pro and team). When false the camera section shows
     /// only that it is a paid feature, and nothing of it can be set (docs/CAMERA.md).
     var cameraAllowed: Bool = true
+    /// Settings › Account, from the camera's "a plan's feature" (nil: no way there, the snapshots).
+    var onOpenAccount: (() -> Void)?
     /// Saved, and its cookies being imported: Save waits.
     var isSaving = false
     /// The profile's settings could not be read: Save would put the form's defaults in their place.
@@ -269,35 +274,42 @@ struct ProfileEditorForm: View {
             Rectangle().fill(Theme.divider).frame(height: 1)
             HStack(spacing: 8) {
                 if let error {
+                    // Up to four lines: the longer reasons (a proxy whose type no check found) were
+                    // cut at two, mid-sentence.
                     Label(error, systemImage: "exclamationmark.triangle.fill")
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.danger)
-                        .lineLimit(2)
+                        .lineLimit(4)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
-                } else if checkingProxy {
+                } else if checkingProxy || isSaving {
+                    // Save waits for a check, or for the pasted cookies to go in: said, not a dead button.
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
-                        Text(L("editor.footer.checking"))
+                        Text(L(isSaving ? "editor.footer.savingCookies" : "editor.footer.checking"))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.textSecondary)
                     }
                 } else {
-                    Text(L("editor.footer.note"))
+                    // A new profile has no "next launch" to wait for: where it goes once made.
+                    Text(L(isNew ? "editor.footer.note.new" : "editor.footer.note"))
                         .font(.lumenSecondary)
                         .foregroundStyle(Theme.textTertiary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 12)
                 Button(L("common.cancel"), action: onCancel)
                     .buttonStyle(.lumenGhost)
                     .keyboardShortcut(.cancelAction)
-                Button(L("common.save"), action: onSave)
+                // What the button does: a new profile is created, an existing one saved.
+                Button(L(isNew ? "editor.create" : "common.save"), action: onSave)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
                     .disabled(checkingProxy || isSaving || saveRefused)
             }
             .padding(.horizontal, 24)
-            .frame(height: 60)
+            .padding(.vertical, 10)
+            .frame(minHeight: 60)
         }
     }
 
@@ -430,7 +442,6 @@ struct ProfileEditorForm: View {
                         .background(RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous).fill(Theme.field))
                 }
             }
-            EditorNote(L("editor.generation.footer"))
         }
     }
 
@@ -517,10 +528,16 @@ struct ProfileEditorForm: View {
     private var connection: some View {
         VStack(alignment: .leading, spacing: 14) {
             EditorField(L("editor.proxy.connection")) {
-                LumenSegmented(selection: $draft.proxyMode,
-                               options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
-                    .accessibilityElement(children: .contain)
-                    .accessibilityLabel(L("editor.proxy.connection"))
+                HStack(spacing: 10) {
+                    LumenSegmented(selection: $draft.proxyMode,
+                                   options: ProfileDraft.ProxyMode.allCases.map { (value: $0, title: L($0.labelKey)) })
+                        .accessibilityElement(children: .contain)
+                        .accessibilityLabel(L("editor.proxy.connection"))
+                    Spacer(minLength: 8)
+                    // A proxy, a link (VLESS, VMess, Trojan, Shadowsocks) or OpenVPN — the same
+                    // choices as the Proxies section's Add; what is added is this profile's.
+                    ProxyAddButton(title: L("editor.proxy.add"), prominent: false, choose: onAddProxy)
+                }
             }
             switch draft.proxyMode {
             case .direct:
@@ -755,9 +772,10 @@ struct ProfileEditorForm: View {
         return chosen.isEmpty || all.contains(chosen) ? all : all + [chosen]
     }
 
-    /// "Deutsch (Deutschland) — de-DE" in the app's language.
+    /// "Deutsch (Deutschland) — de-DE" in the app's language — the interface's, not the Mac's: with
+    /// `Locale.current` a Russian editor on a Mac set to English listed "German (Germany)".
     static func languageName(_ tag: String) -> String {
-        let name = Locale.current.localizedString(forIdentifier: tag) ?? tag
+        let name = Localization.locale.localizedString(forIdentifier: tag) ?? tag
         return name == tag ? tag : "\(name) — \(tag)"
     }
 
@@ -776,9 +794,6 @@ struct ProfileEditorForm: View {
                 EditorNote(L("editor.local.allowedWarning"), tone: .warning)
             }
             EditorNote(L("editor.local.note"))
-            if draft.hasProxy {
-                EditorNote(L("editor.local.proxy"))
-            }
             EditorDivider()
             EditorToggle(L("editor.safeBrowsing"), isOn: $draft.safeBrowsing)
             EditorNote(L("editor.privacy.footer"))
@@ -822,6 +837,12 @@ struct ProfileEditorForm: View {
         VStack(alignment: .leading, spacing: 10) {
             EditorGroupTitle(L("editor.camera.plan.title"))
             EditorNote(L("editor.camera.plan.note"))
+            // Where the plan is seen and changed, one click away: the note alone left the person
+            // to find it.
+            if let onOpenAccount {
+                Button(L("editor.camera.plan.open"), action: onOpenAccount)
+                    .buttonStyle(.lumenSecondary)
+            }
         }
     }
 
@@ -849,7 +870,6 @@ struct ProfileEditorForm: View {
             if draft.camera.delivery == .systemCamera { systemCameraSection }
             cameraCropAndFilters
             cameraPlaybackSection
-            EditorNote(L("editor.camera.secure.note"))
         }
     }
 
@@ -1240,6 +1260,9 @@ struct ProfileEditorForm: View {
             EditorGroupTitle(L("editor.cookies"))
             CookiePaste(draft: $draft, onChooseFile: onChooseCookieFile, onDropFile: onDropCookieFile)
             EditorNote(L(isNew ? "editor.cookies.note.new" : "editor.cookies.note.existing"))
+            EditorToggle(L("editor.cookies.snapshots"), isOn: $draft.cookieRecovery)
+                .disabled(draft.ephemeral)
+            EditorNote(L(draft.ephemeral ? "editor.cookies.snapshots.footer.ephemeral" : "editor.cookies.snapshots.footer"))
             EditorDivider()
             EditorGroupTitle(L("editor.section.history"))
             EditorToggle(L("editor.history.record"), isOn: $draft.historyEnabled)

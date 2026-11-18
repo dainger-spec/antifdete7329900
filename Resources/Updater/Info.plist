@@ -17,8 +17,10 @@
 	<string>1</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
-	<!-- No Dock icon, no menu, no window: it waits for the app to quit, checks, swaps, starts it. -->
-	<key>LSBackgroundOnly</key>
+	<!-- No Dock icon, no menu: it waits for the app to quit, checks, swaps, starts it, and shows the
+	     update's progress window meanwhile (UpdateProgress) — an agent, not a background-only app,
+	     so that it may. -->
+	<key>LSUIElement</key>
 	<true/>
 </dict>
 </plist>

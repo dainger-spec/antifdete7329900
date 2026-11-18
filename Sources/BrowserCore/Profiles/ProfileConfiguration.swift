@@ -98,6 +98,12 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// ephemeral profile. Default on; older configurations decode as on.
     public var syncCookies: Bool
 
+    /// Keep snapshots of the profile's persistent cookies while it runs and as it stops, and put
+    /// back what its cookie store lost at the next launch (docs/COOKIE_RECOVERY.md). Never for an
+    /// ephemeral profile. Default on; older configurations decode as on, and it is written only when
+    /// it is off, so a profile that keeps it on is stored as before.
+    public var cookieRecovery: Bool
+
     /// When the user last changed these settings (the editor, "Never for This Website", the
     /// passwords' excluded websites); not what the browser keeps for itself (the proxy location).
     /// When two devices changed a profile's settings, sync keeps the newer ones and the other
@@ -196,6 +202,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
                 passwordAutoFill: Bool = true,
                 passwordNeverSaveSites: [String] = [],
                 syncCookies: Bool = true,
+                cookieRecovery: Bool = true,
                 settingsModifiedAt: Date? = nil,
                 searchEngine: SearchEngine? = nil,
                 tags: [String] = [],
@@ -226,6 +233,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         self.passwordAutoFill = passwordAutoFill
         self.passwordNeverSaveSites = passwordNeverSaveSites
         self.syncCookies = syncCookies
+        self.cookieRecovery = cookieRecovery
         self.settingsModifiedAt = settingsModifiedAt
         self.searchEngine = searchEngine
         self.tags = ProfileTags.normalized(tags)
@@ -242,6 +250,9 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
 
     /// Whether this profile's cookies take part in sync (never for an ephemeral profile).
     public var syncsCookies: Bool { syncCookies && !ephemeral }
+
+    /// Whether this profile's cookies are copied and recovered (never for an ephemeral profile).
+    public var keepsCookieSnapshots: Bool { cookieRecovery && !ephemeral }
 
     /// A new profile seeded from a generation: the generation supplies the UA (by reference,
     /// via `deviceGenerationID`) and its suggested defaults.
@@ -286,7 +297,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         let policy = webRTCLaunchPolicy
         if policy == .disabled { return proxy == nil || webRTCSilent ? .silent : .off }
         guard let proxy else { return .native(policy) }
-        if proxy.kind == .socks5, let webRTCRelay { return .relay(webRTCRelay) }
+        if proxy.carriesUDP, let webRTCRelay { return .relay(webRTCRelay) }
         return webRTCSilent ? .silent : .off
     }
 
@@ -398,10 +409,19 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         case startURL, userAgent, proxy, geolocation, timeZoneIdentifier, webRTCPolicy, webRTCAutomatic, ephemeral,
              safeBrowsingEnabled, historyEnabled, historyRetentionDays, deviceGenerationID,
              matchProxyLocation, lastProxyLocation, warnOnProxyIPChange, passwordAutoFill, passwordNeverSaveSites,
-             syncCookies, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
+             syncCookies, cookieRecovery, settingsModifiedAt, searchEngine, tags, notes, avatar, windowSize, safariVersion,
              localRequests, languageOverride, localeSource, menusInAppLanguage,
-             cameraSubstitution
+             cameraSubstitution, format
     }
+
+    /// The format `config.bin` is written in (docs/UPDATES.md §4): 2 while the proxy is reached
+    /// through a relay the app runs (`ProxySettings.localRelay`) — an OpenVPN connection
+    /// (`ProxySettings.openVPN`), which a version from before them would read as SOCKS5 at the VPN
+    /// server's address and could write back without its configuration, or a share link's
+    /// (`ProxySettings.Kind.xray`), which a version from before links cannot decode. Such a version
+    /// refuses the whole file as a newer version's rather than take it for damaged, start the profile
+    /// without it, or write it back. 1 otherwise, written as before (no key).
+    public var format: Int { proxy?.localRelay != nil ? 2 : 1 }
 
     /// Tolerant decoding: fields added in later versions fall back to their defaults, so
     /// configurations written by older builds keep decrypting and decoding.
@@ -431,6 +451,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         passwordAutoFill = try c.decodeIfPresent(Bool.self, forKey: .passwordAutoFill) ?? defaults.passwordAutoFill
         passwordNeverSaveSites = try c.decodeIfPresent([String].self, forKey: .passwordNeverSaveSites) ?? defaults.passwordNeverSaveSites
         syncCookies = try c.decodeIfPresent(Bool.self, forKey: .syncCookies) ?? defaults.syncCookies
+        cookieRecovery = (try? c.decodeIfPresent(Bool.self, forKey: .cookieRecovery)) ?? defaults.cookieRecovery
         settingsModifiedAt = try? c.decodeIfPresent(Date.self, forKey: .settingsModifiedAt)
         // One a later build knows and this one does not is the standard one here, not a failure.
         searchEngine = try? c.decodeIfPresent(SearchEngine.self, forKey: .searchEngine)
@@ -460,6 +481,7 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
     /// and not confused with "field absent" (→ default) when decoding.
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        if format > 1 { try c.encode(format, forKey: .format) }
         try c.encodeIfPresent(startURL, forKey: .startURL)
         try c.encodeIfPresent(userAgent, forKey: .userAgent)
         try c.encodeIfPresent(proxy, forKey: .proxy)
@@ -479,6 +501,8 @@ public struct ProfileConfiguration: Codable, Equatable, Sendable {
         try c.encode(passwordAutoFill, forKey: .passwordAutoFill)
         try c.encode(passwordNeverSaveSites, forKey: .passwordNeverSaveSites)
         try c.encode(syncCookies, forKey: .syncCookies)
+        // Written only when it is off: a profile that keeps snapshots is written as before.
+        if !cookieRecovery { try c.encode(false, forKey: .cookieRecovery) }
         try c.encodeIfPresent(settingsModifiedAt, forKey: .settingsModifiedAt)
         try c.encodeIfPresent(searchEngine, forKey: .searchEngine)
         // Written only when there is something: a profile without them is written as before.
@@ -539,6 +563,11 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         /// HTTP CONNECT tunnel. Used for both http:// and https:// traffic.
         case httpConnect
         case socks5
+        /// A VLESS, VMess, Trojan or Shadowsocks server, named by its share link (`link`). No page
+        /// talks to it: the app runs a relay for the profile (Xray), and the profile goes through
+        /// that relay as through a SOCKS5 proxy on 127.0.0.1 (`ProxyRoutes`, docs/TUNNEL.md, "Links").
+        /// `host` and `port` are the link's server, for showing and comparing.
+        case xray
     }
 
     public var kind: Kind
@@ -550,9 +579,19 @@ public struct ProxySettings: Codable, Equatable, Sendable {
     public var tlsToProxy: Bool
     /// Domains that bypass the proxy. Empty by default: everything goes via the proxy.
     public var excludedDomains: [String]
+    /// An OpenVPN connection instead of a proxy server (docs/OPENVPN.md): `host` and `port` are then
+    /// its first server's, `kind` SOCKS5 — what the profile is given at a launch, the tunnel's local
+    /// port — and `username`/`password` its auth-user-pass. Nil for every other proxy, and not
+    /// written then: a version without it reads the settings as before.
+    public var openVPN: OpenVPNSettings?
+    /// `.xray` only: the share link as it was pasted (`ShareLink`). It holds the server's secret — a
+    /// user id or a password — so it is kept as `password` is: in the encrypted settings and proxy
+    /// list, never logged, and given to the relay alone.
+    public var link: String?
 
     public init(kind: Kind, host: String, port: Int, username: String? = nil, password: String? = nil,
-                tlsToProxy: Bool = false, excludedDomains: [String] = []) {
+                tlsToProxy: Bool = false, excludedDomains: [String] = [], openVPN: OpenVPNSettings? = nil,
+                link: String? = nil) {
         self.kind = kind
         self.host = host
         self.port = port
@@ -560,6 +599,51 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         self.password = password
         self.tlsToProxy = tlsToProxy
         self.excludedDomains = excludedDomains
+        self.openVPN = openVPN
+        self.link = link
+    }
+
+    /// The proxy a share link names: its server as `host` and `port`, the link itself kept whole.
+    public init(shareLink text: String, excludedDomains: [String] = []) throws {
+        let parsed = try ShareLink.parse(text)
+        self.init(kind: .xray, host: parsed.host, port: parsed.port, excludedDomains: excludedDomains,
+                  link: ShareLink.trimmed(text))
+    }
+
+    /// `.xray`: the link, read. Nil for the other kinds, and for a link that does not read.
+    public var shareLink: ShareLink? {
+        guard kind == .xray, let link else { return nil }
+        return try? ShareLink.parse(link)
+    }
+
+    /// A proxy that can carry UDP (SOCKS5's UDP ASSOCIATE): a SOCKS5 proxy, and a share link's, whose
+    /// relay is one (`XrayConfig`). The launch still asks whether it does (`ProxyUDPCheck`).
+    public var carriesUDP: Bool { kind == .socks5 || kind == .xray }
+
+    /// What may be shown and logged of the proxy: "VLESS host:port" for a link — never its secret —
+    /// and "host:port" for the others.
+    public var redactedAddress: String {
+        let address = (host.contains(":") ? "[\(host)]" : host) + ":\(port)"
+        guard kind == .xray else { return address }
+        return (shareLink?.scheme.displayName ?? "Xray") + " " + address
+    }
+
+    /// The relays the app runs on this Mac for a proxy a profile does not reach as it is.
+    public enum LocalRelay: String, CaseIterable, Sendable {
+        /// A share link's (`Kind.xray`): Xray, in a sandbox that lets it reach the link's server alone.
+        case xray
+        /// An OpenVPN connection's (`openVPN`): OpenVPN and its tun program, loopback only.
+        case openVPN
+    }
+
+    /// The relay a launch starts for this proxy before anything asks it, or nil for a proxy reached
+    /// as it is. Either relay is, to the profile, SOCKS5 on 127.0.0.1 with a login made for the launch
+    /// (`ProxyRoutes`); with none running, nothing reaches such a proxy at all
+    /// (`ProxyRoutes.connectable` is nil). It is also what a version from before them cannot read
+    /// (`ProfileConfiguration.format`, docs/UPDATES.md R4).
+    public var localRelay: LocalRelay? {
+        if kind == .xray { return .xray }
+        return openVPN != nil ? .openVPN : nil
     }
 
     public func validate() throws {
@@ -574,6 +658,21 @@ public struct ProxySettings: Codable, Equatable, Sendable {
         }
         if (username == nil) != (password == nil) {
             throw CoreError.invalidConfiguration("proxy username and password must both be set or both empty")
+        }
+        try validateOpenVPN()
+        guard kind == .xray else {
+            if link != nil { throw CoreError.invalidConfiguration("only a VLESS, VMess, Trojan or Shadowsocks proxy has a link") }
+            return
+        }
+        // The link is the proxy: what it names is what the relay connects to, and host and port only
+        // show it. A link that does not read, or names another server, is never half used.
+        guard let link else { throw CoreError.invalidConfiguration("a VLESS, VMess, Trojan or Shadowsocks proxy needs its link") }
+        let parsed = try ShareLink.parse(link)
+        guard parsed.host.lowercased() == host.lowercased(), parsed.port == port else {
+            throw CoreError.invalidConfiguration("the proxy's server is not the one its link names")
+        }
+        guard username == nil, password == nil, !tlsToProxy else {
+            throw CoreError.invalidConfiguration("a link's proxy has its credentials in the link")
         }
     }
 }

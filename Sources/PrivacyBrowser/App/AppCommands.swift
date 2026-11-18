@@ -99,13 +99,10 @@ enum AppCommands {
         L("quit.confirm.message") + "\n" + running.map { "• " + $0 }.joined(separator: "\n")
     }
 
-    /// The app menu's Check for Updates…: Settings › Updates, and a check started there — its
-    /// state, the release's notes and Install are on that page. In a build without an update feed
-    /// the page says so.
-    static func checkForUpdates(_ model: AppModel, openSettings: () -> Void) {
-        model.settingsSection = .updates
-        openSettings()
-        Task { await model.updater?.checkNow() }
+    /// The app menu's Check for Updates…: the update's window, and a check started in it — what it
+    /// finds, its notes, Update and Restart. In a build without an update feed the window says so.
+    static func checkForUpdates(_ model: AppModel) {
+        model.checkForUpdatesInWindow()
     }
 }
 
@@ -127,7 +124,7 @@ enum AppPalette {
         // Among the actions, before the first of the settings: the list is shown by group.
         let firstSetting = commands.firstIndex { $0.group == .settings } ?? commands.endIndex
         commands.insert(Command(id: "updates", title: L("menu.checkForUpdates"), symbol: "arrow.down.to.line",
-                                run: { AppCommands.checkForUpdates(model, openSettings: openSettings) }),
+                                run: { AppCommands.checkForUpdates(model) }),
                         at: firstSetting)
         return commands + SettingsSearch.paletteCommands { section, title in
             model.settingsReveal = title

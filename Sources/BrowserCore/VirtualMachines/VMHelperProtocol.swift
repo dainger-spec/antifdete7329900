@@ -116,6 +116,41 @@ public struct VMHelperRequest: Codable, Equatable, Sendable {
     /// left to do in the base).
     public var windowTitle: String
     public var texts: [String: String]
+    /// What the bar at the top of a profile's machine's window says of where the machine goes
+    /// out (`WindowBar`); nil: the system's title bar, with the title alone (the base system).
+    public var windowBar: WindowBar?
+
+    /// The top of a profile's machine's window: where it goes out, as the app knows it at the
+    /// start — the exit's country, the proxy, the exit's address, whether UDP (WebRTC, HTTP/3)
+    /// goes through — and where to time the proxy's answer from (`pingHost`, `pingPort`: the proxy
+    /// itself, or a link's server; nil for a machine without one). Words in the person's language,
+    /// as the app sends every word of the helper's.
+    public struct WindowBar: Codable, Equatable, Sendable {
+        public var countryCode: String?
+        public var country: String?
+        /// The proxy as the person knows it ("de.proxy.example", "VLESS edge.example"), or the
+        /// interface's word for no proxy.
+        public var route: String
+        public var exitIP: String?
+        /// Whether UDP goes through in this run; nil: not said.
+        public var udp: Bool?
+        /// The words for it, in the bar's tooltip.
+        public var udpText: String?
+        public var pingHost: String?
+        public var pingPort: Int?
+
+        public init(countryCode: String? = nil, country: String? = nil, route: String, exitIP: String? = nil,
+                    udp: Bool? = nil, udpText: String? = nil, pingHost: String? = nil, pingPort: Int? = nil) {
+            self.countryCode = countryCode
+            self.country = country
+            self.route = route
+            self.exitIP = exitIP
+            self.udp = udp
+            self.udpText = udpText
+            self.pingHost = pingHost
+            self.pingPort = pingPort
+        }
+    }
 
     public init(mode: Mode, restoreImagePath: String? = nil, machineDirectory: String? = nil, baseDirectory: String? = nil,
                 cores: Int = 4, memoryBytes: Int64 = 4 << 30, diskBytes: Int64 = VMRequirements.diskImageBytes,

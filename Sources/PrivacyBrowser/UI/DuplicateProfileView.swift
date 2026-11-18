@@ -14,6 +14,8 @@ struct DuplicateProfileView: View {
     /// "": any country.
     @State private var country = ""
     @State private var error: String?
+    /// The copies are being made: said, and the buttons wait.
+    @State private var working = false
 
     enum Source: Hashable { case same, list, none }
 
@@ -55,10 +57,19 @@ struct DuplicateProfileView: View {
             SheetHeader(title: String(format: L("duplicate.title"), profile.name), subtitle: L("duplicate.explanation"))
             VStack(alignment: .leading, spacing: 14) {
                 EditorField(L("duplicate.count")) {
-                    Stepper(value: $count, in: 1...ProfileClone.maximumCopies) {
-                        Text(String(count)).font(.lumenBody).monospacedDigit()
+                    // Typed as well as stepped: fifty copies were fifty clicks on the arrows.
+                    HStack(spacing: 8) {
+                        TextField(L("duplicate.count"), text: countText, prompt: Text(verbatim: ""))
+                            .lumenField()
+                            .monospacedDigit()
+                            .frame(width: 64)
+                        Stepper(L("duplicate.count"), value: $count, in: 1...ProfileClone.maximumCopies)
+                            .labelsHidden()
+                        Text(String(format: L("duplicate.count.range"), ProfileClone.maximumCopies))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textTertiary)
                     }
-                    .fixedSize()
+                    .disabled(working)
                 }
                 EditorField(L("duplicate.proxy")) {
                     LumenSegmented(selection: $source, options: [
@@ -93,15 +104,26 @@ struct DuplicateProfileView: View {
             }
             .padding(.horizontal, 24)
             .padding(.bottom, 18)
-            SheetFooter {
+            SheetFooter(leading: {
+                if working {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text(String(format: L("duplicate.working"), count))
+                            .font(.lumenSecondary)
+                            .foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }, buttons: {
                 Button(L("common.cancel")) { dismiss() }
                     .buttonStyle(LumenButtonStyle(kind: .ghost, height: Theme.buttonHeight))
                     .keyboardShortcut(.cancelAction)
-                Button(L("duplicate.action"), action: duplicate)
+                    .disabled(working)
+                // How many it makes, on the button that makes them.
+                Button(count == 1 ? L("duplicate.action") : String(format: L("duplicate.action.count"), count), action: duplicate)
                     .buttonStyle(.lumenPrimary)
                     .keyboardShortcut(.defaultAction)
-                    .disabled(plan.isEmpty)
-            }
+                    .disabled(plan.isEmpty || working)
+            })
         }
         .sheetFrame(width: 520)
         .background(Theme.raised)
@@ -139,12 +161,29 @@ struct DuplicateProfileView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The count as typed: digits only, held to 1…the most copies.
+    private var countText: Binding<String> {
+        Binding(get: { String(count) },
+                set: { text in
+                    let digits = text.filter(\.isNumber).prefix(3)
+                    count = min(max(Int(digits) ?? 1, 1), ProfileClone.maximumCopies)
+                })
+    }
+
     private func duplicate() {
-        let result = model.duplicateProfile(profile.id, count: count, proxies: choice)
-        if let problem = result.problem {
-            error = result.made.isEmpty ? problem : String(format: L("duplicate.partly"), result.made.count, problem)
-            return
+        guard !working else { return }
+        working = true
+        error = nil
+        // A moment for "Making copies…" to show before the copies are written.
+        Task { @MainActor in
+            await Task.yield()
+            let result = model.duplicateProfile(profile.id, count: count, proxies: choice)
+            working = false
+            if let problem = result.problem {
+                error = result.made.isEmpty ? problem : String(format: L("duplicate.partly"), result.made.count, problem)
+                return
+            }
+            dismiss()
         }
-        dismiss()
     }
 }

@@ -61,7 +61,7 @@ struct RootView: View {
         // Every sheet of the window takes the size it asks for, but never more than this room.
         .providesSheetRoom()
         .tint(Theme.accentFill)
-        .alert(L("common.error"), isPresented: Binding(get: { model.errorMessage != nil },
+        .alert(model.errorAlertTitle, isPresented: Binding(get: { model.errorMessage != nil },
                                                        set: { if !$0 { model.errorMessage = nil } })) {
             Button(L("common.ok"), role: .cancel) {}
         } message: {
@@ -71,7 +71,7 @@ struct RootView: View {
 
     /// The launch screen of this start, before the window's screens or over them.
     private func welcomeSplash(_ welcome: WelcomeLaunch.Decision) -> some View {
-        WelcomeSplash(greeting: welcome.greeting, firstLaunch: welcome.firstLaunch,
+        WelcomeSplash(firstLaunch: welcome.firstLaunch,
                       opening: { openFromWelcome() }, finished: { model.welcomeFinished = true },
                       overScreens: !welcome.firstLaunch)
             // Its window closed meanwhile: a window opened again starts at the first screen.
@@ -103,7 +103,7 @@ struct RootView: View {
     /// The window's screens: the first launch's, the lock screen, "Vault open", the profiles.
     private var screens: some View {
         ZStack {
-            if model.phase == .unlocked && showsProfiles {
+            if model.phase == .unlocked && showsProfiles && model.firstRunSteps.isEmpty {
                 ProfileListView().transition(.opacity)
             } else {
                 // One backdrop for setup, unlock and "open": its eclipses close in while the
@@ -118,19 +118,22 @@ struct RootView: View {
                             .transition(.opacity)
                     case .setup: SetupView().transition(.opacity)
                     case .locked: UnlockView().transition(.opacity)
+                    // The first run's Touch ID and protection steps, before the profiles (FirstRun).
+                    case .unlocked where !model.firstRunSteps.isEmpty: FirstRunView().transition(.opacity)
                     case .unlocked: VaultOpenView().transition(.opacity)
                     }
                 }
                 .transition(.opacity)
                 .overlay {
                     // "Vault open": a key or a click goes on to the profiles at once.
-                    if model.phase == .unlocked && !showsProfiles {
+                    if model.phase == .unlocked && !showsProfiles && model.firstRunSteps.isEmpty {
                         SkipLayer(skip: { showProfiles() })
                     }
                 }
             }
         }
         .animation(Theme.appearAnimation, value: model.phase)
+        .animation(Theme.appearAnimation, value: model.firstRunSteps)
         .animation(.easeOut(duration: 0.25), value: showsProfiles)
     }
 
@@ -190,6 +193,8 @@ struct ProfileListView: View {
     @State private var whatSitesSeeFor: ProfileSummary?
     @State private var exporting: ProfileSummary?
     @State private var exportingCookies: ProfileSummary?
+    /// "Restore Cookies from a Snapshot…" (`CookieSnapshotsView`).
+    @State private var cookieSnapshotsFor: ProfileSummary?
     @State private var importingProfile = false
     @State private var pendingDelete: ProfileSummary?
     /// A kept deleted profile (R3) the person asked to remove for good: confirmed first.
@@ -243,6 +248,7 @@ struct ProfileListView: View {
             }
             .sheet(item: $exporting) { profile in ProfileExportView(profile: profile) }
             .sheet(item: $exportingCookies) { profile in CookieExportView(profile: profile) }
+            .sheet(item: $cookieSnapshotsFor) { profile in CookieSnapshotsView(profile: profile) }
             .sheet(isPresented: $importingProfile) { ProfileImportView() }
             // "Passwords…" in a browser window's AutoFill list.
             .onReceive(model.$passwordsRequest.compactMap { $0 }) { profile in
@@ -271,6 +277,7 @@ struct ProfileListView: View {
             .sheet(isPresented: $showingAutomation) { AutomationSettingsView() }
             .confirmationDialog(String(format: L("profiles.delete.title"), pendingDelete?.name ?? ""),
                                 isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
+                                titleVisibility: .visible,
                                 presenting: pendingDelete) { profile in
                 Button(L("profiles.delete.confirm"), role: .destructive) {
                     Task { await model.deleteProfile(profile.id) }
@@ -280,6 +287,7 @@ struct ProfileListView: View {
             }
             .confirmationDialog(removingDeleted.map(KeptDeletedBox.removeTitle) ?? "",
                                 isPresented: Binding(get: { removingDeleted != nil }, set: { if !$0 { removingDeleted = nil } }),
+                                titleVisibility: .visible,
                                 presenting: removingDeleted) { profile in
                 Button(profile.broughtBack ? L("profiles.kept.removeOld") : L("profiles.kept.removeConfirm"), role: .destructive) {
                     model.removeDeletedProfileForGood(profile.id)
@@ -304,6 +312,11 @@ struct ProfileListView: View {
             .onReceive(model.$proxiesRequest) { requested in
                 guard requested else { return }
                 model.proxiesRequest = false
+                showProxies(selecting: [])
+            }
+            // Add, from Settings or a .ovpn opened in the Finder: the section, which takes it.
+            .onReceive(model.$proxyAddRequest) { request in
+                guard request != nil, model.proxyList != nil else { return }
                 showProxies(selecting: [])
             }
             // File › Scenarios, from any window: this one's section.
@@ -359,6 +372,8 @@ struct ProfileListView: View {
                                     detail: detail, symbol: "key", group: .profiles, run: { actions.passwords(row.id) }))
         }
         commands.append(Command(id: "proxies", title: L("palette.proxies"), symbol: "network", run: actions.openProxies))
+        // A .pbprofile from another Mac or a backup: it was only in the header's ⋯ menu and the empty list.
+        commands.append(Command(id: "import", title: L("profiles.menu.import"), symbol: "square.and.arrow.down", run: actions.importProfile))
         commands.append(Command(id: "warmQueue", title: L("profiles.menu.warmUpSeveral"), symbol: "flame", run: actions.warmUpQueue))
         commands.append(Command(id: "scenarios", title: L("palette.scenarios"), detail: L("palette.scenarios.detail"),
                                 symbol: "play.rectangle", shortcut: "⇧⌘E", run: actions.openScenarios))
@@ -461,7 +476,9 @@ struct ProfileListView: View {
                        },
                        guardNotice: model.guardNoticeHidden ? nil : WebRTCProtectionNotice.notice(
                            state: networkGuard.state, checking: networkGuard.checking,
-                           profilesWantingIt: model.details.values.contains(where: \.wantsNetworkGuard)),
+                           // Also before any profile wants it (area A, the owner: a fresh Mac was
+                           // never asked); never in a virtual machine (`AppModel.guardReminderWanted`).
+                           profilesWantingIt: model.guardReminderWanted),
                        openGuardSettings: {
                            model.settingsSection = .webRTC
                            openSettings()
@@ -473,15 +490,18 @@ struct ProfileListView: View {
                            openSettings()
                        },
                        dismissEngineWarning: { model.engineWarningSeen() },
-                       updateOffer: model.updateOffer,
+                       // A release found is said by the update's window and the sidebar's row
+                       // (`UpdateSidebarRow`), which stays while it waits; the first launch of a
+                       // new version by the update's window over the lock screen (`UpdateInstalledPanel`).
+                       updateOffer: nil,
                        dismissUpdateOffer: { model.updateOfferSeen() },
                        updatedTo: model.updatedTo,
                        openUpdates: {
                            model.updatedNoticeSeen()
-                           model.settingsSection = .updates
-                           openSettings()
+                           model.showUpdateWindow(.updater, focus: true)
                        },
-                       dismissUpdated: { model.updatedNoticeSeen() })
+                       dismissUpdated: { model.updatedNoticeSeen() },
+                       pendingUpdate: model.pendingUpdate)
     }
 
     /// The window's Proxies section; with `ids`, those proxies selected (else the selection it had).
@@ -580,6 +600,7 @@ struct ProfileListView: View {
                 lastUsed: profile.lastLaunchedAt,
                 warmUp: warmUp.flatMap { $0.isRunning ? $0 : nil },
                 warmUpQueued: model.warmUps?.isWaiting(profile.id) ?? false,
+                launchQueued: !running && model.launchQueued.contains(profile.id),
                 warmedAt: warmth.flatMap { $0.isWarmed ? $0.date : nil },
                 neverWarmed: warmth == .never,
                 exitUnconfirmed: lookupFailed,
@@ -635,6 +656,7 @@ struct ProfileListView: View {
             passwords: { id in passwordsFor = summary(id) },
             importCookies: { id in importingCookiesFor = summary(id) },
             exportCookies: { id in exportingCookies = summary(id) },
+            cookieSnapshots: { id in cookieSnapshotsFor = summary(id) },
             warmUp: { id in warmUpSeveral([id]) },
             restorePoints: { id in restoringFor = summary(id) },
             duplicate: { id in duplicating = summary(id) },
@@ -653,6 +675,7 @@ struct ProfileListView: View {
                 model.settingsSection = .account
                 openSettings()
             },
+            openUpdate: { model.showUpdateWindow(.updater, focus: true) },
             changePassword: { changingPassword = true },
             warmUpQueue: { withAnimation(Theme.appearAnimation) { section = .warmUp } },
             openProxies: { showProxies(selecting: []) },
@@ -721,6 +744,8 @@ struct ProfileRowItem: Identifiable {
     var warmUp: WarmUpStatus?
     /// Waiting in the warm-up queue for its turn (`WarmUpCoordinator`).
     var warmUpQueued = false
+    /// Waiting for its turn in a selection's Launch (`AppModel.launchQueued`).
+    var launchQueued = false
     /// When its last warm-up went through; nil: never warmed up, or not wholly (`WarmUpWarmth`).
     var warmedAt: Date?
     /// Never warmed up on this Mac: the sidebar's "Not warmed up" gathers such profiles.
@@ -898,6 +923,8 @@ struct ProfileActions {
     var passwords: (UUID) -> Void = { _ in }
     var importCookies: (UUID) -> Void = { _ in }
     var exportCookies: (UUID) -> Void = { _ in }
+    /// The profile's cookie snapshots, to restore one (`CookieSnapshotsView`).
+    var cookieSnapshots: (UUID) -> Void = { _ in }
     var warmUp: (UUID) -> Void = { _ in }
     /// The profile's restore points and journal (`RestorePointsView`).
     var restorePoints: (UUID) -> Void = { _ in }
@@ -921,6 +948,8 @@ struct ProfileActions {
     var openSettings: () -> Void = {}
     /// Settings › Account (the sidebar's line about the rights).
     var openAccount: () -> Void = {}
+    /// The update's window (the sidebar's row while a release waits).
+    var openUpdate: () -> Void = {}
     var changePassword: () -> Void = {}
     /// Several profiles warmed up one after the other (`WarmUpQueueView`).
     var warmUpQueue: () -> Void = {}
@@ -1037,6 +1066,8 @@ struct ProfilesScreen: View {
     var updatedTo: String?
     var openUpdates: () -> Void = {}
     var dismissUpdated: () -> Void = {}
+    /// A release waiting: the sidebar's row (`UpdateSidebarRow`) while there is one.
+    var pendingUpdate: UpdateOffer?
     /// Rows selected with a click, ⌘- and ⇧-click or their checkboxes; one is what the inspector
     /// shows, with two or more `ProfileBulkBar` acts on them all.
     @State private var selection = ProfileSelection()
@@ -1075,7 +1106,7 @@ struct ProfilesScreen: View {
                 ProfilesSidebar(rows: rows, sync: sync, filter: $filter, section: section, proxyCount: proxyCount,
                                 proxyAlerts: proxyAlerts, showsVirtualMachines: virtualMachines != nil,
                                 showsScenarios: scenarios != nil, showsWarmUp: warmUp != nil,
-                                actions: actions, rights: rights)
+                                actions: actions, rights: rights, pendingUpdate: pendingUpdate)
                     .frame(width: Self.sidebarWidth)
                     .lumenFrost()
                     .overlay(alignment: .trailing) { Rectangle().fill(Theme.divider).frame(width: 1) }
@@ -1402,6 +1433,14 @@ struct ProfilesScreen: View {
             .buttonStyle(LumenIconButtonStyle(size: 32, isOn: showsInspector.wrappedValue))
             .help(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
             .accessibilityLabel(showsInspector.wrappedValue ? L("inspector.hide") : L("inspector.show"))
+            // Import beside New Profile, not only in the ⋯ menu (a tester found OpenVPN only behind
+            // one): a profile from another Mac or a backup is how a second Mac starts.
+            Button(action: actions.importProfile) {
+                Image(systemName: "square.and.arrow.down")
+            }
+            .buttonStyle(LumenIconButtonStyle(size: 32))
+            .help(L("profiles.import.help"))
+            .accessibilityLabel(L("profiles.menu.import"))
             // Only what is done rarely, in groups: import, sync, the network guard, automation and the
             // master password (they are in Settings and ⌘K too).
             MoreMenu {
@@ -1665,6 +1704,7 @@ private struct ProfilesSidebar: View {
     var showsWarmUp = false
     let actions: ProfileActions
     var rights: RightsLine?
+    var pendingUpdate: UpdateOffer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -1732,6 +1772,10 @@ private struct ProfilesSidebar: View {
             .mask(LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.9), .init(color: .clear, location: 1)],
                                  startPoint: .top, endPoint: .bottom))
             .padding(.bottom, 12)
+            if let pendingUpdate {
+                UpdateSidebarRow(offer: pendingUpdate, action: actions.openUpdate)
+                    .padding(.bottom, 8)
+            }
             SyncStatusButton(sync: sync, action: actions.openSync)
                 .padding(.bottom, rights == nil ? 8 : 2)
             if let rights {
@@ -2220,7 +2264,12 @@ private struct ProfileRow: View {
                     RunningDot()
                 }
             case .stopped:
-                Color.clear
+                if row.launchQueued {
+                    Image(systemName: "clock").font(.system(size: 10)).foregroundStyle(Theme.textSecondary)
+                        .accessibilityHidden(true)
+                } else {
+                    Color.clear
+                }
             }
         }
     }
@@ -2263,7 +2312,9 @@ private struct ProfileRow: View {
                     .lineLimit(1)
                 }
             case .stopped:
-                if row.warmUpQueued {
+                if row.launchQueued {
+                    secondaryLine(L("profiles.row.launchQueued"))
+                } else if row.warmUpQueued {
                     secondaryLine(L("profiles.row.warmUpQueued"))
                 } else {
                     Text(lastUsed)
@@ -2358,12 +2409,25 @@ struct LumenRingButtonStyle: ButtonStyle {
     }
 }
 
-/// The ⋯ menu and the row's context menu.
-private struct ProfileMenuItems: View {
+/// The ⋯ menu, the row's context menu and the inspector's ⋯.
+struct ProfileMenuItems: View {
     let row: ProfileRowItem
     let actions: ProfileActions
 
     var body: some View {
+        // What a right click on a row is most often for comes first, as in the Finder: the row's
+        // own Launch and Stop were under the pointer only, and absent from its menu.
+        switch row.activity {
+        case .stopped:
+            Button(L("profiles.row.launch")) { actions.launch(row.id) }
+                .disabled(row.exit == .unreadable)
+        case .running:
+            Button(L("profiles.row.newWindow")) { actions.newWindow(row.id) }
+            Button(L("profiles.row.stop")) { actions.stop(row.id) }
+        case .starting, .sealing:
+            EmptyView()
+        }
+        Divider()
         if row.isRunning {
             Button(L("profiles.row.library")) { actions.library(row.id) }
         }
@@ -2374,6 +2438,10 @@ private struct ProfileMenuItems: View {
         Button(L("profiles.row.passwords")) { actions.passwords(row.id) }
         Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
         Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
+        // A temporary profile keeps no copy of its cookies.
+        if !row.ephemeral {
+            Button(L("profiles.row.cookieSnapshots")) { actions.cookieSnapshots(row.id) }
+        }
         Button(L("profiles.row.warmUp")) { actions.warmUp(row.id) }
         Button(L("profiles.row.restorePoints")) { actions.restorePoints(row.id) }
         // Absent while there is no address (the API is off, or not in the plan): the inspector's
@@ -2410,6 +2478,8 @@ private struct SelectionMenuItems: View {
         .disabled(running.isEmpty)
         Divider()
         Button(L("profiles.bulk.warmUp")) { actions.warmUpSeveral(ids) }
+        // As the selection's bar has it.
+        Button(L("profiles.bulk.scenario")) { actions.scenarioSeveral(ids) }
         Button(L("profiles.bulk.assignProxy")) { actions.assignProxies(ids) }
         Button(L("profiles.bulk.tags")) { actions.tagSeveral(ids) }
         Divider()
@@ -3081,13 +3151,8 @@ private struct EmptyProfilesView: View {
                     }
                 }
                 .padding(.top, 10)
-                Text(L(onProxies == nil ? "profiles.empty.hint.import" : "profiles.empty.hint"))
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textTertiary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: 380)
-                    .padding(.top, 14)
+                // No paragraph under the buttons (the owner, 17 November): the title, its line and
+                // the three ways in say it.
             }
         }
     }
@@ -3150,6 +3215,7 @@ struct LumenSearchField: View {
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Theme.textTertiary)
+                .help(L("profiles.search.clear"))
                 .accessibilityLabel(L("profiles.search.clear"))
             } else if let shortcut {
                 KeyCap(keys: shortcut, small: true)

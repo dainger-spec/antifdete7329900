@@ -57,6 +57,9 @@ password field in view, `banner` a consent tool's banner whose accept button rep
 (`banner-consent`). `/pb-warmup/log.json` lists every `/pb-warmup/` request with its Referer, Cookie and
 User-Agent headers and the time it came.
 
+`/pb-sweep` and `/pb-sweep/two` are the pages of the sweep with real input (scripts/sweep.py): a
+link, an image (`/pb-sweep/image.png`), a download, a text field, words to find and an article for
+Reader; each page writes what it saw last (the event and its element's id) on its body.
 `/pb-download/<name>?bytes=<n>` is a file to save, `n` bytes of a known pattern (0, 1, … 255, 0, …):
 sent as an attachment of a type a browser could show (`Content-Disposition: attachment`), or with
 `attachment=0` as `application/octet-stream` with no such header — the two ways a response is a
@@ -645,6 +648,51 @@ def login_page(params: dict) -> bytes:
     return f'<!doctype html><html><head><meta charset="utf-8"><title>PB login</title></head><body>{body}{script}</body></html>'.encode()
 
 
+
+def sweep_page(second: bool) -> bytes:
+    """A page of the sweep (SafariSweep): what a person right-clicks, clicks, finds and reads."""
+    paragraphs = "".join(
+        f"<p>Paragraph {n} of the sweep's article. Tea grows on hillsides where the mornings are cool and the "
+        "afternoons are warm; the leaves are picked by hand, rolled, dried and sorted before they travel. "
+        "A good cup needs water that has just boiled, a warm pot and a few minutes of patience. "
+        "Some like it with milk, others with lemon, and many with nothing at all.</p>"
+        for n in range(1, 13))
+    other = "/pb-sweep" if second else "/pb-sweep/two"
+    title = "PB sweep two" if second else "PB sweep"
+    page = (
+        '<!doctype html><html><head><meta charset="utf-8">'
+        f'<title>{title}</title>'
+        '<style>body{font-family:-apple-system,sans-serif;margin:24px} #blank{height:120px} img{display:block}</style>'
+        '</head><body>'
+        f'<h1>{title}</h1>'
+        f'<p><a id="link" href="{other}">The other sweep page</a></p>'
+        '<p><img id="image" src="/pb-sweep/image.png" width="160" height="90" alt="A sweep picture"></p>'
+        '<p><a id="download" href="/pb-download/sweep.txt?bytes=2048">A file to download</a></p>'
+        '<p><input id="field" type="text" size="40" placeholder="type here"></p>'
+        '<p id="words">needle haystack needle hay</p>'
+        '<div id="blank"></div>'
+        f'<article><h2>An article to read</h2>{paragraphs}</article>'
+        "<script>for (const type of ['mousedown', 'contextmenu', 'click', 'keydown', 'input', 'dblclick'])"
+        " addEventListener(type, e => { const t = e.target; document.body.dataset.last = type + ':' +"
+        " ((t && t.id) || (t && t.tagName) || '?'); }, true);</script>"
+        '</body></html>')
+    return page.encode()
+
+
+def sweep_image() -> bytes:
+    """A 160×90 picture, one colour, as a PNG."""
+    import zlib
+    width, height = 160, 90
+    row = b"\x00" + bytes([40, 120, 200]) * width
+    raw = row * height
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b"")
+
+
 def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
     """Answers the (tunnelled or forwarded) HTTP request `request` for `path`."""
     accept_language = next((line.split(":", 1)[1].strip() for line in request.split("\r\n")[1:]
@@ -763,6 +811,10 @@ def answer(conn: socket.socket, via: str, path: str, request: str) -> None:
             cookie_name = "".join(c if c.isalnum() else "_" for c in name)
             extra_headers = f"Set-Cookie: pbwarm_{cookie_name}={run or 'x'}; Max-Age=86400; Path=/\r\n"
             body, content_type = warmup_page(name, run), "text/html; charset=utf-8"
+    elif plain_path == "/pb-sweep" or plain_path == "/pb-sweep/two":
+        body, content_type = sweep_page(plain_path.endswith("/two")), "text/html; charset=utf-8"
+    elif plain_path == "/pb-sweep/image.png":
+        body, content_type = sweep_image(), "image/png"
     elif plain_path.startswith("/pb-download/"):
         # A file to save (SelfTest's downloads in Safari's window): `bytes` of a known pattern, sent
         # either to be saved — an attachment of a type a browser could show — or, with

@@ -23,12 +23,16 @@
 //   ObjCExceptions  macOS only: an Objective-C `@try` around a call, for Safari's code called
 //                   from Swift tasks (PBCatchException).
 //   PrivacyBrowser  macOS app (SwiftUI + AppKit + WebKit). macOS only.
+//   lumen-xray-config  The relay's configuration for a share link (BrowserCore's XrayConfig), for
+//                   scripts/xray_relay_check.py. macOS and Linux; not in the app.
 //   pbupdate        Makes and checks the signed update feed (scripts/release.sh, docs/UPDATES.md)
 //                   with BrowserCore's own checks. macOS and Linux.
 //   UpdateInstaller macOS only: replaces the app with a checked release (code signature, process
 //                   list, the swap), tested on real bundles by UpdateInstallerTests.
 //   PrivacyBrowserUpdater  macOS only: the installer helper, Contents/Helpers/PrivacyBrowser
 //                   Updater.app, which the app starts at the end of a quit (docs/UPDATES.md §3).
+//   UpdateProgress  macOS only: the update's progress window (SwiftUI), shown by the app and by
+//                   the helper alike.
 //   LumenVM         macOS only: the virtual machines' helper (docs/VM.md) — the one executable that
 //                   loads Apple's Virtualization.framework and is signed with its right. Put into
 //                   the app only by `VM=1 scripts/build-app.sh`; CI builds it with VM=check.
@@ -89,10 +93,54 @@ var targets: [Target] = [
         dependencies: ["VMNetCore"],
         path: "Tests/VMNetCoreTests"
     ),
+    // The OpenVPN tunnel's TCP/IP stack (docs/OPENVPN.md): lwIP 2.2.1 (BSD-3-Clause, lwip/COPYING),
+    // its core vendored unchanged, behind one C file of Lumen's (include/LumenLwIP.h).
+    .target(
+        name: "CLwIP",
+        path: "Sources/CLwIP",
+        exclude: ["lwip/COPYING", "README.md"],
+        cSettings: [.headerSearchPath("lwip/src/include"), .headerSearchPath("port")]
+    ),
+    // What the app and the tunnel's program share (docs/OPENVPN.md): the local port's credential
+    // check, the loopback forwarders that are OpenVPN's only way to its servers, addresses and system
+    // calls. Platform-independent, no lwIP; tested with OpenVPNStack.
+    .target(
+        name: "OpenVPNLink",
+        dependencies: coreDependencies,
+        path: "Sources/OpenVPNLink"
+    ),
+    // The OpenVPN tunnel's own side (docs/OPENVPN.md): the authenticated SOCKS5 server on 127.0.0.1
+    // that a profile is given, its connections and its resolver through the tunnel, over CLwIP.
+    // Platform-independent, tested on Linux and macOS; run by LumenTunnel.
+    .target(
+        name: "OpenVPNStack",
+        dependencies: ["CLwIP", "OpenVPNLink"],
+        path: "Sources/OpenVPNStack"
+    ),
+    .testTarget(
+        name: "OpenVPNStackTests",
+        dependencies: ["OpenVPNStack", "OpenVPNLink"],
+        path: "Tests/OpenVPNStackTests"
+    ),
+    // The program OpenVPN starts as its tun device (`--dev-node unix:`): OpenVPNStack on the socket
+    // OpenVPN hands it. macOS and Linux (the Linux test against a real OpenVPN server).
+    .executableTarget(
+        name: "LumenTunnel",
+        dependencies: ["OpenVPNStack"],
+        path: "Sources/LumenTunnel"
+    ),
     .executableTarget(
         name: "pbupdate",
         dependencies: ["BrowserCore"],
         path: "Sources/pbupdate"
+    ),
+    // The relay's configuration for a share link, as the app gives it to Xray (docs/TUNNEL.md,
+    // "Links"): for scripts/xray_relay_check.py, which runs it against real Xray servers of every
+    // protocol. macOS and Linux; never in the app.
+    .executableTarget(
+        name: "lumen-xray-config",
+        dependencies: ["BrowserCore"],
+        path: "Sources/lumen-xray-config"
     ),
 ]
 
@@ -101,7 +149,9 @@ var products: [Product] = [
     .library(name: "TunnelCore", targets: ["TunnelCore"]),
     .library(name: "NetworkGuardCore", targets: ["NetworkGuardCore"]),
     .library(name: "VMNetCore", targets: ["VMNetCore"]),
+    .library(name: "OpenVPNLink", targets: ["OpenVPNLink"]),
     .executable(name: "pbupdate", targets: ["pbupdate"]),
+    .executable(name: "LumenTunnel", targets: ["LumenTunnel"]),
 ]
 
 #if os(Linux)
@@ -159,8 +209,15 @@ targets.append(contentsOf: [
     .executableTarget(
         name: "PrivacyBrowser",
         dependencies: ["BrowserCore", "TunnelCore", "TunnelTransport", "NetworkGuardCore", "ObjCExceptions", "CameraRendering",
-                       "MachineCover"],
+                       "MachineCover", "OpenVPNLink", "UpdateProgress"],
         path: "Sources/PrivacyBrowser"
+    ),
+    // The update's progress window (docs/UPDATES.md §7): the app shows it while it downloads and
+    // checks, the installer helper while it swaps and restarts — one window, drawn by one module.
+    .target(
+        name: "UpdateProgress",
+        dependencies: ["BrowserCore"],
+        path: "Sources/UpdateProgress"
     ),
     .target(
         name: "UpdateInstaller",
@@ -169,7 +226,7 @@ targets.append(contentsOf: [
     ),
     .executableTarget(
         name: "PrivacyBrowserUpdater",
-        dependencies: ["BrowserCore", "UpdateInstaller"],
+        dependencies: ["BrowserCore", "UpdateInstaller", "UpdateProgress"],
         path: "Sources/PrivacyBrowserUpdater"
     ),
     .testTarget(

@@ -3,6 +3,7 @@ import BrowserCore
 import CryptoKit
 import Foundation
 import os
+import UpdateProgress
 
 /// Updating, behind one boundary (docs/UPDATES.md §1): today our own mechanics (`AppUpdater`);
 /// whatever replaces them keeps the quit path, the settings and the screen as they are.
@@ -18,8 +19,36 @@ protocol Updater: AnyObject {
     /// At the end of a quit, after every profile was sealed: hands the downloaded release to the
     /// installer if `gate` passed.
     func installAtQuit(gate: UpdateGate.Verdict) async -> UpdateHandOver
-    /// Why a quit did not install the release, told at the next launch.
-    func rememberNotInstalled(_ reason: String)
+    /// Why a quit did not install the release, told at the next launch (`reasons`: the log's).
+    func rememberNotInstalled(_ why: UpdateDeferral, reasons: String)
+}
+
+/// Why a quit did not hand the release to its installer, as the next launch says it.
+enum UpdateDeferral: String {
+    /// The quit's gate did not pass: a profile still ran or was not encrypted.
+    case gate
+    /// The installer could not be started.
+    case installer
+}
+
+/// A download under way: what has come, of how much, since when.
+struct UpdateDownloadProgress: Equatable {
+    var received: Int64
+    var total: Int64
+    var startedAt: Date
+
+    /// 0…1; nil while nothing has come (or the size is not known).
+    var fraction: Double? {
+        guard total > 0, received > 0 else { return nil }
+        return min(1, Double(received) / Double(total))
+    }
+
+    /// Seconds left at the pace so far; nil for the first second, or before anything came.
+    func remaining(at now: Date = Date()) -> TimeInterval? {
+        let elapsed = now.timeIntervalSince(startedAt)
+        guard elapsed >= 1, received > 0, total > received else { return total > 0 && received >= total ? 0 : nil }
+        return Double(total - received) / (Double(received) / elapsed)
+    }
 }
 
 /// What came of handing a release to the installer at a quit.
@@ -159,6 +188,16 @@ final class AppUpdater: ObservableObject, Updater {
     /// What became of the last update, read at this launch (the app says a failure once; the
     /// Updates sheet says an installed one).
     private(set) var notice: UpdateNotice?
+    /// The download under way, for the update's window; nil when none is.
+    @Published private(set) var downloadProgress: UpdateDownloadProgress?
+    /// The release this build is, as it was downloaded before its install: its notes are "What's
+    /// new" at the first launch after it. Nil when this launch is no update's.
+    private(set) var installedItem: AppcastItem?
+    /// The release whose download failed last: Try Again downloads it again. Nil after a check
+    /// failed, or a download went through.
+    private(set) var failedRelease: AppcastItem?
+    private var downloadTask: URLSessionDownloadTask?
+    private var progressTimer: Timer?
 
     let configuration: Configuration
     private let defaults: UserDefaults
@@ -289,12 +328,13 @@ final class AppUpdater: ObservableObject, Updater {
     func download() async {
         guard !isPreview, case .available(let item) = state else { return }
         state = .downloading(item)
+        failedRelease = nil
         let name = Self.archivePrefix + "\(item.build).zip"
         do {
             try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let archive = configuration.staging.appendingPathComponent(name)
-            let downloaded = try await Self.download(item.url, expected: item.length)
+            let downloaded = try await fetchArchive(item.url, expected: item.length)
             try? FileManager.default.removeItem(at: archive)
             try FileManager.default.moveItem(at: downloaded, to: archive)
             try UpdateVerifier.checkArchive(at: archive, item: item, keys: configuration.keys)
@@ -306,9 +346,81 @@ final class AppUpdater: ObservableObject, Updater {
             log.notice("Update downloaded and checked; it installs at the next quit that seals every profile")
         } catch {
             try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
+            if (error as? URLError)?.code == .cancelled {
+                // Cancel: the release is offered again, nothing is said.
+                log.notice("Update download cancelled")
+                state = .available(item)
+                return
+            }
             log.error("Update download failed: \(error.logKind, privacy: .public) \(String(describing: error), privacy: .private)")
             lastFailure = error
+            failedRelease = item
             state = .failed(Self.describe(error))
+        }
+    }
+
+    /// Stops the download under way; the release is offered again.
+    func cancelDownload() {
+        downloadTask?.cancel()
+    }
+
+    /// Try Again after a failure: the download that failed, or the check.
+    func retry() async {
+        if case .failed = state, let item = failedRelease {
+            failedRelease = nil
+            state = .available(item)
+            await download()
+        } else {
+            await checkNow()
+        }
+    }
+
+    /// The archive, into a temporary file of this app's, with what has come said every fifth of a
+    /// second (`downloadProgress`); its length is checked against the release.
+    private func fetchArchive(_ url: URL, expected length: Int) async throws -> URL {
+        var request = URLRequest(url: url)
+        request.httpShouldHandleCookies = false
+        downloadProgress = UpdateDownloadProgress(received: 0, total: Int64(length), startedAt: Date())
+        defer {
+            progressTimer?.invalidate()
+            progressTimer = nil
+            downloadTask = nil
+            downloadProgress = nil
+        }
+        return try await withCheckedThrowingContinuation { continuation in
+            let task = Self.session.downloadTask(with: request) { file, response, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                guard let file, let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    continuation.resume(throwing: UpdateFetchError.status((response as? HTTPURLResponse)?.statusCode ?? 0))
+                    return
+                }
+                // The session's file goes when this returns: moved to one of ours first.
+                let kept = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-update-\(UUID().uuidString).zip")
+                do {
+                    try FileManager.default.moveItem(at: file, to: kept)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                let size = (try? FileManager.default.attributesOfItem(atPath: kept.path)[.size] as? Int) ?? -1
+                guard size == length else {
+                    try? FileManager.default.removeItem(at: kept)
+                    continuation.resume(throwing: UpdateError.archiveLength(expected: length, found: size))
+                    return
+                }
+                continuation.resume(returning: kept)
+            }
+            downloadTask = task
+            progressTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self, weak task] _ in
+                MainActor.assumeIsolated {
+                    guard let self, let task, self.downloadProgress != nil else { return }
+                    self.downloadProgress?.received = task.countOfBytesReceived
+                }
+            }
+            task.resume()
         }
     }
 
@@ -333,7 +445,8 @@ final class AppUpdater: ObservableObject, Updater {
             return .blocked(block)
         }
         do {
-            try UpdateRequest(appPath: configuration.app.path, archive: staged.archive, item: item, requestedAt: Date())
+            try UpdateRequest(appPath: configuration.app.path, archive: staged.archive, item: item, requestedAt: Date(),
+                              texts: Self.progressTexts)
                 .write(to: configuration.staging)
             try await SystemOpen.startUpdateInstaller(at: configuration.helper)
             helperStarted = true
@@ -346,9 +459,24 @@ final class AppUpdater: ObservableObject, Updater {
         }
     }
 
-    func rememberNotInstalled(_ reason: String) {
+    func rememberNotInstalled(_ why: UpdateDeferral, reasons: String) {
         guard !isPreview else { return }
-        defaults.set(reason, forKey: Key.deferred)
+        log.notice("Update not handed over at this quit (\(why.rawValue, privacy: .public)): \(reasons, privacy: .private)")
+        defaults.set(why.rawValue, forKey: Key.deferred)
+    }
+
+    /// The installer's window in the interface's words: it has none of its own, and reads these
+    /// from the request (`UpdateProgressTexts`).
+    static var progressTexts: [String: String] {
+        [UpdateProgressTexts.titleKey: L("updates.progress.title"),
+         UpdateProgressTexts.keepOpenKey: L("updates.progress.keepOpen"),
+         UpdateProgressTexts.versionKey: L("updates.progress.version"),
+         UpdateProgressTexts.downloadKey: L("updates.progress.download"),
+         UpdateProgressTexts.checkingKey: L("updates.progress.checking"),
+         UpdateProgressTexts.installingKey: L("updates.progress.installing"),
+         UpdateProgressTexts.relaunchingKey: L("updates.progress.relaunching"),
+         UpdateProgressTexts.cancelKey: L("updates.progress.cancel"),
+         UpdateProgressTexts.opensItselfKey: L("updates.progress.opensItself")]
     }
 
     /// Where the app is decides whether it can be replaced at all.
@@ -432,6 +560,8 @@ final class AppUpdater: ObservableObject, Updater {
         if let build = BuildVersion(staged.item.build), build > configuration.build, archiveExists(staged) {
             state = .ready(staged.item)
         } else {
+            // This build is that release: its notes are what is new.
+            if BuildVersion(staged.item.build) == configuration.build { installedItem = staged.item }
             discardStaged()
         }
     }
@@ -446,7 +576,8 @@ final class AppUpdater: ObservableObject, Updater {
         }
         if let reason = defaults.string(forKey: Key.deferred) {
             defaults.removeObject(forKey: Key.deferred)
-            notice = notice ?? .deferred(reason)
+            // An earlier build kept the gate's words here: that was the gate.
+            notice = notice ?? .deferred(UpdateDeferral(rawValue: reason) ?? .gate)
         }
         return notice
     }
@@ -480,19 +611,6 @@ final class AppUpdater: ObservableObject, Updater {
         return data
     }
 
-    /// The archive, into a temporary file of the session's; its length is checked against the release.
-    private static func download(_ url: URL, expected length: Int) async throws -> URL {
-        var request = URLRequest(url: url)
-        request.httpShouldHandleCookies = false
-        let (file, response) = try await session.download(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw UpdateFetchError.status((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-        let size = (try? FileManager.default.attributesOfItem(atPath: file.path)[.size] as? Int) ?? -1
-        guard size == length else { throw UpdateError.archiveLength(expected: length, found: size) }
-        return file
-    }
-
     private enum UpdateFetchError: Error, CustomStringConvertible {
         case status(Int)
         var description: String {
@@ -502,10 +620,21 @@ final class AppUpdater: ObservableObject, Updater {
         }
     }
 
+    /// A failure in the interface's words: the system's own (`localizedDescription`) follow the
+    /// Mac's language, not the interface's.
     private static func describe(_ error: Error) -> String {
         if let error = error as? UpdateError { return errorText(error) }
         if let error = error as? UpdateFetchError { return error.description }
-        return error.localizedDescription
+        if let error = error as? URLError {
+            switch error.code {
+            case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasBadDate,
+                 .serverCertificateNotYetValid, .serverCertificateHasUnknownRoot, .clientCertificateRejected:
+                return L("updates.error.secure")
+            default:
+                return L("updates.error.network")
+            }
+        }
+        return L("updates.error.other")
     }
 
     private static var system: BuildVersion { BuildVersion(ProcessInfo.processInfo.operatingSystemVersion) }
@@ -546,5 +675,5 @@ final class UpdateTestTrust: NSObject, URLSessionDelegate {
 enum UpdateNotice: Equatable {
     case outcome(UpdateOutcome)
     /// The last quit did not hand the update over, and why.
-    case deferred(String)
+    case deferred(UpdateDeferral)
 }

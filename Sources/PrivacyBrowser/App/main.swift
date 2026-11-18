@@ -13,6 +13,9 @@ MainActor.assumeIsolated {
     // then, on its own, and what SIGPIPE ended before it could (LumenVM/main.swift does the same).
     signal(SIGPIPE, SIG_IGN)
     let arguments = CommandLine.arguments
+    // A link's relay (XrayRelays): into its sandbox and on to Xray, before anything else of the app
+    // runs in this process.
+    if arguments.count > 1, arguments[1] == XrayRelayLauncher.argument { XrayRelayLauncher.run(arguments: arguments) }
     // A profile's process: started with the websites' languages, its interface's language fixed
     // before anything asks a bundle for its own (Localization.pinInterfaceLanguage).
     // A profile's process: Safari's menus and the browser's own words in the websites' language
@@ -87,6 +90,10 @@ MainActor.assumeIsolated {
         // A window of this profile that is not Safari's says so, and once by itself (SimplifiedModeNotice).
         SimplifiedModeNotice.presentsAutomatically = true
         ProfileSessionHost.start(arguments: arguments)
+    } else if arguments.contains("--xray-check") {
+        // Profiles on VLESS, VMess, Trojan and Shadowsocks links against real servers, inside a
+        // capture (XrayCheck.swift; scripts/xray_leak_check.py).
+        XrayCheck.start(arguments: arguments)
     } else if arguments.contains("--release-check") {
         // What scripts/release.sh runs on the app it is about to publish: a profile started the way
         // the app starts one gets a process of its own whose window is Safari's own chrome, or the
@@ -127,6 +134,12 @@ MainActor.assumeIsolated {
         // SafariMenuWalkCheck, SafariMenuWalk; scripts/menu_walk.py compares it with the record).
         Localization.applyProcessLanguage()
         SafariMenuWalkCheck.start(arguments: arguments)
+    } else if arguments.contains("--sweep") {
+        // A profile's Safari window driven with real input events — keys, clicks, the menu bar —
+        // unit by unit, and every exception, notice, hang and crash of each (CI's sweep.yml;
+        // SafariSweepCheck, SafariSweep; scripts/sweep.py starts the proxy and reads the result).
+        Localization.applyProcessLanguage()
+        SafariSweepCheck.start(arguments: arguments)
     } else if arguments.contains("--webdriver-serve") {
         // The WebDriver's listener over a temporary vault, for a real client to drive (CI;
         // WebDriverCheck; scripts/webdriver_check.sh runs Selenium against it).
@@ -226,6 +239,9 @@ MainActor.assumeIsolated {
         WebContentLanguage.decide(nil)
         SiteCapture.start(arguments: arguments)
     } else {
+        // An update being installed this moment is not ended by this start: it steps aside, and
+        // the installer opens Lumen when it is done (UpdateLaunchGuard; docs/UPDATES.md §3).
+        if !arguments.contains("--settings-window-check") { UpdateLaunchGuard.stepAsideIfInstalling() }
         if let index = arguments.firstIndex(of: "--settings-window-check") {
             // The Settings window as the person gets it: this app as it runs, Settings opened as ⌘,
             // opens it, the window server's picture read for a band (SettingsWindowCheck; CI).

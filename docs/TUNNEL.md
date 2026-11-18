@@ -616,6 +616,227 @@ the guard drops each of those flows, because they are counted for the held profi
    version, no new approval; the check runs again once.
 9. Another VPN app on (WireGuard, Tailscale): it keeps running; step 3 again.
 
+## Relays: a link's Xray and an OpenVPN tunnel, one step (0.1.18)
+
+Two kinds of proxy are not reached as they are: a VLESS, VMess, Trojan or Shadowsocks link (below,
+"Links") and an OpenVPN connection ([OPENVPN.md](OPENVPN.md)). For each the app runs a **relay** on
+this Mac — Xray for a link, OpenVPN with LumenTunnel for a connection — and the profile reaches it as
+an ordinary SOCKS5 proxy on 127.0.0.1, with a user name and password made for that launch. Each
+relay's own workings are its own (`XrayRelays`, `OpenVPNTunnels`); everything around them is one
+step, `LocalRelays`, the same for both:
+
+| | What it is | Where |
+|---|---|---|
+| Which relay | `ProxySettings.localRelay`: none (an HTTP or SOCKS5 proxy), `.xray` (`kind == .xray`), `.openVPN` (`openVPN != nil`) | BrowserCore |
+| Start | in the manager, at a launch, before anything asks the proxy — the "do not start it" probe, the location lookup, the profile's process; a launch that ends without a process of the profile stops it again. Refused with why when it does not start (`launch.error.relayNotInBuild`, `.relayDidNotStart`, `.openVPN`). OpenVPN only for a profile in its own process | `ProfileManager.startRelay`, `LocalRelays.start` |
+| The route | the relay's port and login (`ProxyRoutes.Route`), known by its proxy (`ProxyRoutes.key`: a link's text; for an OpenVPN connection a SHA-256 of its configuration and login) and by its owner. The stored proxy is never replaced: whatever connects through it — the data store (`ProxyConfigurationFactory`), the probe (`ProxyProbe`), the location and exit lookups, the check, WebRTC's relay and the network guard's hold — asks `ProxyRoutes.connectable`, which gives the relay, or nothing: a store then gets a proxy that does not exist, never `[]` (direct) and never the link's server or the VPN server. A proxy challenge is answered with the relay's login, never the link's secret or the VPN's own | BrowserCore, PrivacyBrowser |
+| Hand over | the route follows the grant on the profile's standard input (`PBR1`, `ProxyRoutes.encodeRecord`), always written, empty too; never in argv or the environment. The profile's process does not start without the route its proxy needs | `ProfileProcess.start`, `ProfileSessionHost` |
+| Held to it | the profile's sandbox closes UDP and closes TCP but to the relay's port on loopback ("tcp-relay-only"); a process whose closure did not apply does not run. The report's TCP probes (`ProfileNetworkReport.tcp`) show the relay taken, another loopback port and an outside address refused (EPERM) | `ProfileNetworkGuard` |
+| Fail closed | while a relay is down nothing serves its port — a link's Xray is started again on the same port and login (twice a minute at most), an OpenVPN tunnel reconnects behind its port (up to 45 s) — and loads fail meanwhile. One gone for good stops its profile once, with what each says (`launch.relayEnded`, `launch.openVPNLost`) | `ProfileManager.relayLost` |
+| Checked | the Proxies section's check goes through the relay of a profile running on the proxy, or one started for the check and stopped after it; never the server itself | `ProxyChecker.check` |
+| Stopped | after the profile's process has ended (never before, which would leave its port to anyone for a moment); every relay at quit; those an earlier run left when it crashed, at the start | `LocalRelays.stop`, `.stopAll`, `.endLeftovers` |
+| Formats | a profile or list holding such a proxy is written in a format 0.1.17 and earlier refuse (docs/UPDATES.md §4): `config.bin` 2, `proxies.bin` 4, `.pbprofile` 4 — one bump for both, every other file as before | `ProfileConfiguration.format`, `ProxyList.format`, `ProfileTransfer.exportFormat`; `LocalRelayTests` |
+
+Virtual machines take a link through a relay of their own (`VMCenter`, below); they are not given
+OpenVPN connections yet. A release builds both relays (`scripts/release.sh`: `OVPN=1 XRAY=1` unless
+told `OVPN=0` or `XRAY=0`), from their pinned sources, with nothing on the Mac but Xcode:
+`scripts/build-openvpn.sh` needs Xcode's command line tools alone, and `scripts/build-xray.sh` fetches
+its own pinned Go and checks it against `scripts/xray.lock`.
+
+## Links: VLESS, VMess, Trojan and Shadowsocks (the relay, November 2026)
+
+A profile's proxy can be a share link — `vless://`, `vmess://`, `trojan://` or `ss://`, as providers
+hand them out — besides an HTTP or SOCKS5 proxy (`ProxySettings.Kind.xray`). No page, and no process
+of the profile, speaks those protocols: the app runs a **relay** for the profile, Xray-core, and the
+profile uses it as an ordinary SOCKS5 proxy on 127.0.0.1. Everything this page says about a SOCKS5
+proxy — WebRTC through its UDP, the network guard's hold, the proxy check, the exit's location —
+then holds through the relay.
+
+Where a link is entered (0.1.19): the Proxies section's **Add → Link** (Add's sheet takes a proxy line
+or a link in one field, and says at once what it recognised: "Recognised: VLESS · REALITY + TCP +
+Vision · server nl1.example.com:443"), the Import's list, and a profile's proxy field under New; the
+fields' example names the links (`proxyLine.example`). Until 0.1.18 nothing said a link could go
+there, and Add was in ⋯ alone.
+
+| Traffic of a profile on a link | Path | How it is known |
+|---|---|---|
+| Pages (TCP), WebSocket, fetch, media | the data store's proxy: the relay's SOCKS5 on 127.0.0.1, with the launch's login (failover off) → the link's server | `xray_relay_check.py` (every kind against a real server); `Lumen --xray-check` (the leak page through each kind) inside a capture |
+| DNS of pages | carried as names to the far end: the relay resolves nothing (no DNS section, no sniffing, routing `AsIs`) | `.invalid` names load only if carried as names; the capture holds no question with the run's token |
+| The link server's own name | resolved by this Mac's resolver, by the relay, when it connects to its server — the one name of a link asked here, as a SOCKS5 proxy's own name is | written down, not hidden: an IP address in the link asks nothing; `xray_leak_check.py` runs two links that name their server, the relay resolving it inside its sandbox |
+| QUIC / HTTP/3 | not used: through a store's proxy WebKit sends HTTP/2 | `--xray-check` on a site that offers HTTP/3 |
+| WebRTC | the app's TURN relay → a SOCKS5 UDP association at the relay (with its login) → the link's UDP (inside the stream for VLESS, VMess and Trojan; Shadowsocks's own UDP to the server's port) | `--xray-check`: relay candidates only, at the far side's address |
+| Anything else the profile's process opens | the kernel refuses it: TCP to the relay's port only ("tcp-relay-only"), no UDP | the sandbox's closure, required at the start; the capture |
+| The relay itself | its configuration: one outbound, the link's server; its sandbox: the server's port, UDP to loopback, the resolver | the capture: every packet of the relay is to or from its server; `xray_leak_check.py` knocks on the sandbox itself, with a configuration that would go anywhere |
+
+### The relay
+
+- **Which.** Xray-core v26.10.31 (commit a4a3dff), built by `scripts/build-xray.sh` from its source at
+  the pinned commit with Go 1.27.4, reproducibly (CGO off, `-trimpath`, no VCS stamp, empty build id,
+  every variable of code generation set): the SHA-256 for arm64 and x86_64 is in `scripts/xray.lock`,
+  recorded on Linux by cross-compiling, and CI builds it again on macOS and must get the same bytes.
+  The Go is never the building Mac's: the script fetches Go's own toolchain module for the host
+  (`golang.org/toolchain`, the archive `GOTOOLCHAIN` fetches) from Go's module proxy, refuses it
+  unless its SHA-256 is the one the lock records (taken of the archive whose `h1:` Go's checksum
+  database logs, quoted there), keeps it in `build/xray-src/toolchain`, and builds with it alone
+  (`GOTOOLCHAIN=local`). So a release Mac needs git, curl and unzip — Xcode's — and nothing else.
+  `XRAY=1 scripts/build-app.sh` puts it in the app as `Contents/MacOS/LumenXray`, signed under its own
+  identifier (`$BUNDLE_ID.Xray`) with the hardened runtime and no entitlement; its licences (MPL-2.0,
+  where its source is, and the 42 Go modules the binary names) are
+  `Contents/Resources/ThirdParty/Xray/NOTICE.txt` (`Resources/Xray/NOTICE.txt`, made by
+  `scripts/xray_notices.py`), beside OpenVPN's. Nothing is downloaded at run time.
+- **One per running profile**, started by the manager (`XrayRelays`), never by the profile's process —
+  and one per check of a link in the Proxies section, and per virtual machine on one. In: SOCKS5 on
+  127.0.0.1 at a port free when it starts, with a user name and password of 32 hex characters made for
+  that launch (`XrayConfig.Inbound.random`). Out: the link's server, the only outbound
+  (`XrayConfig`). The configuration goes to Xray on its standard input (`-c stdin:`), never on disk,
+  in argv or in the environment (which another process of this user can read); Xray gets an
+  environment of `PATH` alone, so no `XRAY_*` variable can add a configuration. The relay is ready
+  once it takes the launch's login; only then is anything sent to it.
+- **Its sandbox.** The relay's process starts as the app's own executable with `--xray-relay`
+  (`XrayRelayLauncher`), puts itself in a sandbox the kernel holds it and every process it becomes to,
+  and only then becomes Xray (`execve`): no outgoing connection but TCP and UDP to the server's port,
+  UDP to loopback (the answers of the profile's UDP associations), and the system's resolver
+  (`/var/run/mDNSResponder`); no file written. The kernel's rules can name a host only as "any" or
+  "loopback": the server's address is held by the configuration, its port by the kernel. Binding is not
+  limited (Xray sends UDP from a socket it binds to any address on a port of the system's choosing);
+  what it listens on for others is its configuration's 127.0.0.1. A sandbox that does not apply is no
+  relay (exit 70), and the profile does not start. Measured, not assumed: `xray_leak_check.py` starts
+  Xray as the app starts a relay but with a configuration that would go anywhere, and it reaches the
+  server's port and nothing else — no other port of this Mac's address, of its loopback or of a host
+  outside — and writes no file, while the same Xray without the sandbox reaches all of it. (The first
+  rule for loopback named "ip", and the same check found it let TCP through to every port of this Mac's
+  own network address: it names UDP now.)
+- **Not held by the network guard.** The guard holds only processes signed as Lumen itself, and that
+  identity is also what lets a process ask the guard anything. A program of a third party that parses
+  what servers send gets neither. The relay is held by its configuration and its sandbox, and the
+  capture shows it reaching nothing but its server.
+- **Its door.** Without the login it serves nothing: SOCKS5 without it or with a wrong one is refused,
+  SOCKS4 is refused, plain HTTP gets 407. A UDP association is had only after the login, on a socket
+  of its own (Xray's `TempUDPConn`), which answers only the address that association's client sends
+  from (the TCP client's address, and the port of the first datagram). `xray_relay_check.py` knocks
+  each way, with a control that has no login and must fail it; `--xray-check` knocks on the app's own
+  relays.
+- **The profile's process.** It is given the relay's route — port and login — on its standard input
+  right after its grant (`ProxyRoutes`, a record that is always written, empty too), and nothing of the
+  link: it never sees the link's server or secret. `ProxyConfigurationFactory` makes a link's proxy its
+  relay, and with no route a proxy that does not exist — never `[]` (direct), never the server. Its
+  sandbox closes TCP but to the relay's port; a process whose closure did not apply does not run.
+- **Fail closed.** The relay ending while its profile runs — killed, crashed — is started again on its
+  port with its login, at most twice a minute; meanwhile the profile's loads fail (nothing listens,
+  failover is off). One that does not come back stops its profile, which says why
+  (`launch.relayEnded`). `--xray-check` kills a relay three times under a page fetching every 300 ms,
+  as the app runs it: after the first two it is started again on its port with its login and the
+  fetches go through again; after the third no fetch gets through, the profile stops and says so; and
+  the capture shows nothing going another way at any time. A relay is stopped after its profile's process has ended (never before,
+  which would leave its port to anyone for a moment); relays an earlier run of the app left when it
+  crashed are ended at the start (nobody knows their login), and every relay at quit.
+
+### What is read, and what is refused
+
+`ShareLink` reads, strictly — every value given to the relay is checked:
+
+- `vless://` with RAW (TCP, with its HTTP header too), WebSocket, gRPC (gun and multi), HTTPUpgrade and
+  XHTTP; TLS (`sni`, `fp`, `alpn`, `pcs`, `vcn`) and REALITY (`sni`, `fp`, `pbk`, `sid`, `spx`, `pqv`);
+  the flow `xtls-rprx-vision` (and `-udp443`), on RAW with TLS or REALITY only; `encryption=none` or
+  VLESS Encryption's `mlkem768x25519plus…`;
+- `vmess://`, V2RayN's base64 JSON (`add`, `port`, `id`, `aid` 0, `scy`, `net`, `type`, `host`,
+  `path`, `tls`, `sni`, `alpn`, `fp`), numbers and strings alike, base64 of either alphabet;
+- `trojan://` (TLS unless it says otherwise), with the same transports and REALITY;
+- `ss://`, SIP002 (base64 or percent-encoded `method:password`) and the legacy base64 form, with the
+  AEAD ciphers and the 2022 ones (whose keys must be base64 of 16 or 32 bytes);
+- a provider's subscription pasted as served (base64 of its links), as those links.
+
+Refused, each with what is wrong, in English and Russian: the transports Xray has removed (HTTP/2 —
+`type=http`/`h2` — HTTP/3, QUIC; ask the provider for XHTTP), mKCP, Shadowsocks plugins (programs of
+their own), the old stream ciphers and `none`, VMess with an alterId (its MD5 authentication is gone
+from Xray), REALITY without its key or server name, VMess over REALITY, flows other than vision, and
+every malformed value. `allowInsecure=1` is not honoured — Xray has no such switch any more: the
+certificate is checked, and the field says so; `pcs` (the certificate's SHA-256) accepts a
+self-signed one. Parameters the relay does not use are left out, and none of those that could add a
+destination is passed on (XHTTP's `extra`, which can name a second server; `ech`, which can name a
+resolver). A link without TLS or REALITY whose traffic is readable on the way (VLESS without
+encryption, Trojan, VMess with its cipher off) is said so under the field.
+
+### Where a link is kept, and who sees its secret
+
+- A link holds its server's secret (a user id or a password). It is kept as a proxy's password is: in
+  the profile's encrypted settings (`config.bin`) and the encrypted proxy list (`proxies.bin`); synced,
+  exported and shared as a profile's proxy credentials are (encrypted). Never logged: the relay's log
+  is at "error" with no access log, kept in memory and written to the system log as private data; the
+  app logs a link by its protocol alone. The field shows its secret as dots; a line of an import that
+  cannot be read is shown as `vless://…@server:port`; the automation API names `vless://server:port`.
+  The proxy list's text export writes links in plaintext, as it writes passwords — what that export is
+  for.
+- Formats (docs/UPDATES.md §4, R2 and R4): `config.bin` is format 2 while its proxy is a link's, a
+  profile export (`.pbprofile`) format 4, the proxy list format 4 — the same numbers as an OpenVPN
+  connection's, one bump for the two ("Relays", above). Versions before links (0.1.17 and
+  older) refuse them as a newer version's: such a profile does not start there, its file is not written
+  over, and that version's sync stops with "a newer version" until it is updated — rather than read a
+  profile without its proxy, or drop the link when it writes the list back. Every other file stays as
+  it was.
+
+### Verified, and how
+
+- `ShareLinkTests`, `XrayLinkProxyTests` (Linux and macOS): many real shapes of each kind and every
+  refusal; the relay's configuration (one way in with a login, one way out, nothing resolved, nothing
+  logged); a link's proxy only through its relay; the formats; the list, the import, the field's
+  secret; the routes' record.
+- `scripts/xray_relay_check.py` (Linux here, macOS in CI): the configuration Lumen's own code makes
+  (`lumen-xray-config`) against one real Xray server with an inbound per kind — VLESS REALITY vision
+  (RAW) and XHTTP, VLESS TLS vision, WebSocket and gRPC, VMess WebSocket, Trojan TLS, Shadowsocks 2022 —
+  a page and UDP by an `.invalid` name through each, the door closed, with its control.
+- `.github/workflows/xray-tunnels.yml` (macOS 26 and macOS 27): the reproducible build and the notices,
+  those tests, the relay check, the app built with `XRAY=1` — run as a release declares it, SDK 14.0
+  (on macOS 26 a copy of Xcode 26's build declaring it, as the self-test runs; a build declaring 15 or
+  newer has this Mac fetch a certificate's missing intermediate outside any proxy, docs/ISOLATION_AND_
+  LIMITATIONS.md §2, and the first run of this check saw exactly that) — and
+  `scripts/xray_leak_check.py`: a profile on each kind,
+  started as the app starts one, inside a capture of every packet of the runner (pktap: each packet
+  with its process), the servers on the runner's own address so that the relays' packets are in it;
+  two of the links name their server by a host name, which the runner's resolver is pointed at a name
+  server of the check for, so that the relay resolves it inside its sandbox, as a provider's link has
+  it. It fails on any packet of a profile's process off loopback, any of a relay to anything but its
+  server, any page's name resolved on the runner, any packet to a documentation address, any packet of
+  the app's processes (by pid and by name), of WebKit's or of Safari's services off loopback while a
+  profile runs, and a link by name whose server's name was not asked; its controls — a DNS question the
+  app asks on purpose, seen and named after the app; each relay's packets counted for its pid — must be
+  seen. The page's requests to this Mac's own loopback, which the capture leaves out, are seen by the
+  self-test proxy's canary there, which must take none. Passed on macOS 26.7.2 and 27.0.1 in run
+  44024780666, and again with OpenVPN connections merged in and the launch step shared
+  (`LocalRelays`), the relay built with the Go `build-xray.sh` fetches and checks itself, in scratch
+  run 44034707092 on both (the first that knocked on the relay's sandbox from outside found its loopback rule too
+  wide, run 44020981433; the first runs found the CI-only faults the commits name, and an Xcode 26
+  build's SDK fetching the AIA canary, run 44012119541).
+
+### Limits
+
+- **The server's own name is resolved here**, by this Mac's resolver, as a SOCKS5 or HTTP proxy's
+  name is: the network this Mac is on sees that a name was asked, and which. A link with the server's
+  IP address asks nothing.
+- **A relay per running profile**: an Xray process of some 20–40 MB each, and a link's server sees one
+  account used from as many connections as profiles run on it.
+- **The relay is ad hoc to each launch, its port on loopback.** Any process of this Mac can connect to
+  it and is refused without the login. During a restart (a relay that ended) its port is free for a
+  moment: a process of this Mac that took it then would be sent the profile's connections and login.
+  That needs a program of this user's already running against Lumen; one that does can do worse.
+- **UDP associations** are held to their client's address and the port of their first datagram (the
+  app's clients announce none): a process of this Mac that guessed an association's port and sent to
+  it first would take that association's answers — WebRTC's media is encrypted end to end, its STUN
+  and TURN control is not.
+- **xtls-rprx-vision refuses UDP to port 443** unless the link's flow is `xtls-rprx-vision-udp443`:
+  WebRTC to a peer on 443/udp through such a link does not connect (it never goes another way).
+- **What the binary could do, and does not.** Xray has features that reach out on their own — port
+  mapping (UPnP, NAT-PMP), geodata downloads, an observatory, a browser dialer — each only when its
+  configuration asks; the relay's configuration asks none, its environment holds no `XRAY_*`, and its
+  sandbox would drop such connections.
+- **Updating Xray**: change the tag, commit and Go version in `scripts/xray.lock` (for a new Go, its
+  toolchain lines from `scripts/build-xray.sh --toolchain-lines`, which checks each against
+  sum.golang.org), run `scripts/build-xray.sh --record`, read upstream's changes for anything that adds a connection or
+  changes the SOCKS inbound's door, run this page's checks, and commit the lock with the notices.
+- **A sandboxed build has no relay** (a sandboxed app's child would inherit the App Sandbox); a build
+  without `XRAY=1` has none either: a link's profile does not start there, and says why. A release
+  has it unless made with `XRAY=0`.
+
 ## History: the packet tunnel (until 2 November 2026)
 
 The first design carried WebRTC in a packet-tunnel system extension: a TURN relay per profile on a

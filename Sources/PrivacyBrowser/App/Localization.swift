@@ -135,7 +135,8 @@ enum Localization {
     /// sizes and lists in the app's own windows are written with it (`Date.shown`). The system's
     /// locale follows the Mac's language, not the interface's: a Russian interface on a Mac set to
     /// English said "yesterday" and "Oct 31" among Russian words (CI run 541's snapshots). The
-    /// system's own locale, untouched, when its language is the interface's. Only the app's own
+    /// system's own locale, untouched, when its language is the interface's; a Russian one keeps the
+    /// 24-hour clock whatever the region's. Only the app's own
     /// text uses it: what a page sees of languages and formats is WebContentLanguage's.
     static let locale: Locale = {
         let current = Locale.autoupdatingCurrent
@@ -143,6 +144,13 @@ enum Localization {
         var components = Locale.Components(locale: current)
         components.languageComponents = Locale.Language.Components(languageCode: Locale.LanguageCode(languageCode),
                                                                    script: nil, region: current.region)
+        // Russian's own conventions in a Russian interface: a Mac of the United States made it say
+        // «8:38 AM» and «41.3 МБ» (the region's 12 hours and decimal point, ru snapshots of full
+        // run 44041802860). Russian writes the time in 24 hours and a decimal comma.
+        if languageCode == "ru" {
+            components.region = Locale.Region("RU")
+            components.hourCycle = .zeroToTwentyThree
+        }
         return Locale(components: components)
     }()
 }
@@ -185,11 +193,13 @@ func translatedErrorText(_ error: Error) -> String? {
         case .wrongPassword: return L("error.core.wrongPassword")
         case .vaultAlreadyExists: return L("error.core.vaultAlreadyExists")
         case .vaultNotFound: return L("error.core.vaultNotFound")
-        case .corruptData(let detail): return String(format: L("error.core.corruptData"), detail)
-        case .cryptoFailure(let detail): return String(format: L("error.core.cryptoFailure"), detail)
-        case .invalidConfiguration(let detail): return String(format: L("error.core.invalidConfiguration"), detail)
+        // The detail is the code's, in English: said in the person's words when it is one they can
+        // act on, else left out (`ErrorDetailText`) — never an error number or a type's name.
+        case .corruptData(let detail): return detailed("error.core.corruptData", detail)
+        case .cryptoFailure(let detail): return detailed("error.core.cryptoFailure", detail)
+        case .invalidConfiguration(let detail): return ErrorDetailText.text(detail) ?? L("error.core.invalidConfiguration.plain")
         case .profileNotFound: return L("error.core.profileNotFound")
-        case .unsupportedFormat(let detail): return String(format: L("error.core.unsupportedFormat"), detail)
+        case .unsupportedFormat(let detail): return ErrorDetailText.text(detail) ?? L("error.core.unsupportedFormat.plain")
         // A file that a newer version of the app wrote, with what to do about it (docs/UPDATES.md §4).
         case .newerFormat(let what, _, _): return String(format: L("error.newerFormat"), what)
         case .unsafeArchivePath(let path): return String(format: L("error.core.unsafeArchivePath"), path)
@@ -197,8 +207,11 @@ func translatedErrorText(_ error: Error) -> String? {
         case .syncServer(let status, let message):
             if status == 401 || status == 403 { return String(format: L("error.core.syncServerToken"), status) }
             return String(format: L("error.core.syncServer"), status, message.isEmpty ? "—" : message)
-        case .io(let detail): return String(format: L("error.core.io"), detail)
-        case .notGranted(let detail): return String(format: L("error.core.notGranted"), detail)
+        case .io(let detail):
+            // A sync request the network did not carry is no file's: said alone.
+            if let network = ErrorDetailText.networkText(detail) { return network }
+            return detailed("error.core.io", detail)
+        case .notGranted: return L("error.core.notGranted.plain")
         // Settings that could not be read (R1): the profile does not start, and how to get them
         // back — a backup's copy of the file, or the server's through Sync Now (named as its menu
         // item is).
@@ -207,6 +220,8 @@ func translatedErrorText(_ error: Error) -> String? {
                           L("profiles.menu.syncNow"), L("profiles.menu.more"))
         }
     }
+    // A share link that cannot be used (`ShareLink`): what is wrong with it, never its secret.
+    if let error = error as? ShareLinkError { return shareLinkText(error) }
     // A sync server's refusal that names its code (`HTTPSyncTransport`): said as `syncServer` is, the
     // code in place of the body. Through the Lumen account the app says each in words of its own
     // (`AccountSyncText`).
@@ -236,4 +251,47 @@ func translatedErrorText(_ error: Error) -> String? {
         }
     }
     return nil
+}
+
+/// `key`'s sentence with the detail after it when the detail can be said in the person's words
+/// (`ErrorDetailText`), else the sentence alone (`key.plain`).
+private func detailed(_ key: String, _ detail: String) -> String {
+    guard let text = ErrorDetailText.text(detail) else { return L(key + ".plain") }
+    return String(format: L(key), text)
+}
+
+/// What is wrong with a share link, in the person's language (`ShareLinkError`).
+func shareLinkText(_ error: ShareLinkError) -> String {
+    switch error {
+    case .empty: return L("error.shareLink.empty")
+    case .tooLong: return String(format: L("error.shareLink.tooLong"), ShareLink.maximumLength)
+    case .containsWhitespace: return L("error.shareLink.containsWhitespace")
+    case .unsupportedScheme(let scheme): return String(format: L("error.shareLink.unsupportedScheme"), scheme)
+    case .hasPath: return L("error.shareLink.hasPath")
+    case .missingCredentials: return L("error.shareLink.missingCredentials")
+    case .invalidUserID: return L("error.shareLink.invalidUserID")
+    case .invalidPassword: return L("error.shareLink.invalidPassword")
+    case .invalidHost(let host): return String(format: L("error.shareLink.invalidHost"), host)
+    case .missingPort: return L("error.shareLink.missingPort")
+    case .invalidPort(let text): return String(format: L("error.shareLink.invalidPort"), text)
+    case .invalidParameter(let name): return String(format: L("error.shareLink.invalidParameter"), name)
+    case .removedTransport(let name): return String(format: L("error.shareLink.removedTransport"), name)
+    case .unsupportedTransport(let name): return String(format: L("error.shareLink.unsupportedTransport"), name)
+    case .unsupportedSecurity(let name): return String(format: L("error.shareLink.unsupportedSecurity"), name)
+    case .unsupportedFlow(let name): return String(format: L("error.shareLink.unsupportedFlow"), name)
+    case .visionNeedsTLS: return L("error.shareLink.visionNeedsTLS")
+    case .unsupportedEncryption(let name): return String(format: L("error.shareLink.unsupportedEncryption"), name)
+    case .unsupportedCipher(let name): return String(format: L("error.shareLink.unsupportedCipher"), name)
+    case .invalidShadowsocksKey(let bytes): return String(format: L("error.shareLink.invalidShadowsocksKey"), bytes)
+    case .shadowsocksPlugin(let name): return String(format: L("error.shareLink.shadowsocksPlugin"), name)
+    case .invalidBase64: return L("error.shareLink.invalidBase64")
+    case .invalidVMessJSON: return L("error.shareLink.invalidVMessJSON")
+    case .vmessAlterID: return L("error.shareLink.vmessAlterID")
+    case .missingRealityKey: return L("error.shareLink.missingRealityKey")
+    case .invalidRealityKey: return L("error.shareLink.invalidRealityKey")
+    case .invalidShortID: return L("error.shareLink.invalidShortID")
+    case .missingServerName: return L("error.shareLink.missingServerName")
+    case .invalidPinnedCertificate: return L("error.shareLink.invalidPinnedCertificate")
+    case .unsupportedParameter(let name, let value): return String(format: L("error.shareLink.unsupportedParameter"), name, value)
+    }
 }

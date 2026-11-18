@@ -99,6 +99,8 @@ struct ProxyLine: Equatable {
         case .empty:
             return .empty
         case .several(let count):
+            // A .ovpn file's text pasted: said what to do with it, not "several lines".
+            if Self.looksLikeOpenVPN(text) { return .problem(L("proxyLine.error.openVPN")) }
             return .problem(String(format: L("proxyLine.error.several"), count))
         case .problem(let reason):
             return .problem(reason.words)
@@ -106,7 +108,8 @@ struct ProxyLine: Equatable {
             guard var proxy = checkable else { return .empty }
             let found = currentCheck?.result.diagnosis?.kinds ?? []
             if line.kindGiven {
-                guard let first = found.first, !found.contains(proxy.kind) else { return .proxy(proxy, .scheme) }
+                // A link is the link it is, whatever its relay answered as.
+                guard proxy.kind != .xray, let first = found.first, !found.contains(proxy.kind) else { return .proxy(proxy, .scheme) }
                 let given = proxy.kind
                 proxy.kind = first
                 if first == .socks5 { proxy.tlsToProxy = false }
@@ -134,8 +137,17 @@ struct ProxyLine: Equatable {
     /// nil when there is no password in it. Where the password is not found in the text as written,
     /// the proxy's own address is shown with dots instead: the password is never shown.
     var maskedText: String? {
-        guard case .proxy(let line) = field, let password = line.proxy.password, !password.isEmpty else { return nil }
         let dots = String(repeating: "•", count: 8) // l10n: not text
+        // A share link's secret is its id or password, or the whole base64 of a form that holds them.
+        if case .proxy(let line) = field, line.proxy.kind == .xray {
+            var shown = ShareLink.masked(text)
+            if let range = ProxyListImport.passwordRange(in: text) {
+                shown = text
+                shown.replaceSubrange(range, with: dots)
+            }
+            return shown.split(whereSeparator: { $0.isNewline || $0.isWhitespace }).joined(separator: " ")
+        }
+        guard case .proxy(let line) = field, let password = line.proxy.password, !password.isEmpty else { return nil }
         var shown: String
         if let range = ProxyListImport.passwordRange(in: text) {
             shown = text
@@ -146,6 +158,14 @@ struct ProxyLine: Equatable {
         }
         // One line: whatever pasted line breaks and runs of spaces there are, as one space.
         return shown.split(whereSeparator: { $0.isNewline || $0.isWhitespace }).joined(separator: " ")
+    }
+
+    /// The text of an OpenVPN configuration: a `remote` line, and `client`, a `dev` line or a
+    /// certificate block (OpenVPN's own directives).
+    static func looksLikeOpenVPN(_ text: String) -> Bool {
+        let lines = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        guard lines.contains(where: { $0.hasPrefix("remote ") }) else { return false } // l10n: not text
+        return lines.contains { $0 == "client" || $0.hasPrefix("dev ") || $0 == "<ca>" } // l10n: not text
     }
 
     static func scheme(_ proxy: ProxySettings) -> String {
@@ -169,12 +189,14 @@ struct ProxyLineField: View {
     /// A check from this field is running.
     var checking: Bool
     var onCheck: () -> Void
+    /// What the empty field shows; nil: every form it takes, proxies and links.
+    var placeholder: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 TextField(L("proxyLine.field"), text: $line.text, prompt: Text(verbatim: ""))
-                    .lumenField(L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText)
+                    .lumenField(placeholder ?? L("proxyLine.example"), isEmpty: line.text.isEmpty, masked: line.maskedText)
                     .accessibilityLabel(L("proxyLine.field"))
                 Button(action: onCheck) {
                     Label(L("proxyLine.check"), systemImage: "checkmark.shield")
@@ -208,7 +230,10 @@ struct ProxyLineReadingView: View {
                 Label(message, systemImage: "exclamationmark.circle.fill")
                     .foregroundStyle(Theme.danger)
             case .proxy(let proxy, let source):
-                Label(Self.summary(proxy, kind: Self.kindText(proxy, source)), systemImage: "checkmark.circle")
+                // "Recognised: VLESS · REALITY + TCP + Vision · server nl1.example.com:443": what the
+                // line was taken for, at once, before any check.
+                Label(String(format: L("proxyLine.recognized"), Self.summary(proxy, kind: Self.kindText(proxy, source))),
+                      systemImage: "checkmark.circle")
                     .foregroundStyle(Theme.textSecondary)
             case .kindUnknown(let proxy):
                 Label(Self.summary(proxy, kind: L("proxyLine.kind.unknown")), systemImage: "questionmark.circle")
@@ -221,15 +246,26 @@ struct ProxyLineReadingView: View {
         .textSelection(.enabled)
     }
 
-    /// "SOCKS5 · 1.2.3.4:1080 · user alice".
+    /// "SOCKS5 · 1.2.3.4:1080 · user alice"; a link: "VLESS · REALITY + TCP + Vision · server
+    /// nl1.example.com:443 · “Amsterdam”" — how it reaches its server, the server, its name as the
+    /// provider gave it.
     static func summary(_ proxy: ProxySettings, kind: String) -> String {
-        var parts = [kind, proxy.displayAddress]
+        var parts = [kind]
+        if let link = proxy.shareLink {
+            let transport = ShareLinkText.transport(link)
+            if !transport.isEmpty { parts.append(transport) }
+            parts.append(String(format: L("proxyLine.server"), proxy.displayAddress))
+            if !link.name.isEmpty { parts.append("“" + link.name + "”") } // l10n: not text
+            parts.append(contentsOf: ShareLinkText.notes(link))
+            return parts.joined(separator: " · ") // l10n: not text
+        }
+        parts.append(proxy.displayAddress)
         if let user = proxy.username, !user.isEmpty { parts.append(String(format: L("proxyLine.user"), user)) }
         return parts.joined(separator: " · ") // l10n: not text
     }
 
     static func kindText(_ proxy: ProxySettings, _ source: ProxyLine.KindSource) -> String {
-        let name = ProxyReport.kindName(proxy.kind, tls: proxy.tlsToProxy)
+        let name = ProxyReport.kindName(of: proxy)
         switch source {
         case .scheme: return name
         case .check: return String(format: L("proxyLine.kind.found"), name)
@@ -292,7 +328,8 @@ struct ProxyLineCheckView: View {
     private func headline(state: ProxyState, result: ProxyCheckResult) -> String {
         guard state.isWorking, let proxy else { return state.title }
         let kind = result.diagnosis?.kinds.first ?? proxy.kind
-        var parts = [state.title, ProxyReport.kindName(kind, tls: kind == .httpConnect && proxy.tlsToProxy)]
+        var parts = [state.title, proxy.kind == .xray ? ProxyReport.kindName(of: proxy)
+                                                      : ProxyReport.kindName(kind, tls: kind == .httpConnect && proxy.tlsToProxy)]
         let latency = ProxyCheckText.latency(result)
         if !latency.isEmpty { parts.append(latency) }
         return parts.joined(separator: " · ") // l10n: not text

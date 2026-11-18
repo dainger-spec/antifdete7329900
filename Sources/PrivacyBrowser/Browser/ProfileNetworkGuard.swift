@@ -1,4 +1,5 @@
 import BrowserCore
+import Darwin
 import Foundation
 import Network
 import os
@@ -42,6 +43,9 @@ enum ProfileNetworkGuard {
     private(set) static var proxies: [ProxyConfiguration]?
     static var isEngaged: Bool { proxies != nil }
     private static var profileID: UUID?
+    /// A profile on a relay (a share link, an OpenVPN connection): its relay's port, the one TCP
+    /// destination the kernel leaves it ("tcp-relay-only"); what the report's TCP probes knock beside.
+    private static var heldRelayPort: Int?
     /// The profile protects its local requests without a proxy: the local-network rule list is one
     /// of the lists no "content blockers off" switch turns off (`theProfilesContentStays`).
     private static var protectsLocalNetwork = false
@@ -146,13 +150,22 @@ enum ProfileNetworkGuard {
     static func engage(profileID: UUID, proxy: ProxySettings?, safeBrowsing: Bool = false,
                        protectsLocalNetwork: Bool = false) throws {
         guard proxies == nil else { return }
+        // A proxy a relay of the app's carries — a share link's, an OpenVPN connection — is reached
+        // through its relay alone, at the route the manager handed over with the grant
+        // (`ProxyRoutes`, `LocalRelays`): without one this process does not run at all.
+        let reach = proxy.flatMap { ProxyRoutes.shared.connectable($0) }
+        if proxy?.localRelay != nil, reach == nil {
+            throw CoreError.invalidConfiguration("no relay was given for the profile's proxy")
+        }
+        let relayPort = proxy?.localRelay != nil ? reach?.port : nil
         let proxies = try ProxyConfigurationFactory.make(proxy)
         self.proxies = proxies
+        heldRelayPort = relayPort
         self.profileID = profileID
         self.protectsLocalNetwork = protectsLocalNetwork && proxies.isEmpty
         let policy = ProfileChallengePolicy(
             hasProxy: !proxies.isEmpty,
-            proxyCredential: proxy?.username.map { URLCredential(user: $0, password: proxy?.password ?? "", persistence: .forSession) })
+            proxyCredential: ProxyConfigurationFactory.credential(for: proxy))
         challengePolicy = policy
         if !proxies.isEmpty {
             // Lock 3. The default privacy context is what every Network.framework connection and
@@ -162,10 +175,15 @@ enum ProfileNetworkGuard {
         // With a proxy, every session of the process carries it; with or without, none shares the
         // app's own cookie jar, cache or saved credentials with the other profiles' processes.
         missingHooks += proxyEverySessionConfiguration(proxies, delegate: StoreChallenges(policy: policy))
-        missingHooks += closeTheProcess(udp: !proxies.isEmpty, profileID: profileID)
+        missingHooks += closeTheProcess(udp: !proxies.isEmpty, profileID: profileID, relayPort: relayPort)
         // QUIC goes around any proxy: a profile with one does not run with UDP open.
         if !proxies.isEmpty, !closures.sorted.contains("udp") {
             throw CoreError.invalidConfiguration("UDP could not be closed to the profile's process")
+        }
+        // Nor does a profile on a relay (a link, an OpenVPN connection) run with TCP open to anything
+        // but its relay's port.
+        if relayPort != nil, !closures.sorted.contains("tcp-relay-only") {
+            throw CoreError.invalidConfiguration("TCP could not be closed but to the relay of the profile's process")
         }
         // Nor does any profile run with the keychain open to its process (`closeTheProcess`).
         if !closures.sorted.contains("keychain") {
@@ -868,11 +886,18 @@ enum ProfileNetworkGuard {
     ///     (`ProfileGrant`); before, its sandbox let it read the account's tokens and read or change
     ///     another running profile's cookies and history (the security audit of 12 November 2026,
     ///     APP-10). Its own folder stays open: in a sandbox profile the last rule that matches wins.
-    nonisolated private static func closeTheProcess(udp: Bool, profileID: UUID) -> [String] {
+    nonisolated private static func closeTheProcess(udp: Bool, profileID: UUID, relayPort: Int? = nil) -> [String] {
         var rules: [String] = []
         var vaultRules: [String] = []
         let vaultNamed = closeTheVault(profileID: profileID, into: &vaultRules)
         if udp { rules.append("(deny network-outbound (remote udp \"*:*\"))") }
+        // A profile on a relay (a share link, an OpenVPN connection): TCP to its relay's port on this
+        // Mac and nowhere else, whatever in this process would connect by itself (docs/TUNNEL.md,
+        // "Relays"). WebKit's network process is held by the data store's proxy, which is that relay.
+        if let relayPort, (1...65535).contains(relayPort) {
+            rules.append("(deny network-outbound (remote tcp \"*:*\"))")
+            rules.append("(allow network-outbound (remote tcp \"localhost:\(relayPort)\"))")
+        }
         rules.append("(deny mach-lookup (global-name \"com.apple.SecurityServer\") (global-name-regex #\"^com\\.apple\\.securityd\\.\"))")
         if let realHome = SafariPaths.realHome {
             rules.append("(deny file-read* file-write* (subpath \"\(realHome)/Library/Keychains\"))")
@@ -911,6 +936,7 @@ enum ProfileNetworkGuard {
                 let reached = KeychainCheck.securitydServices.filter { KeychainCheck.lookUp($0) == KERN_SUCCESS }
                 if reached.isEmpty { closures.insert("keychain") } else { missing.append("sandbox: securityd stays reachable (\(reached.joined(separator: ", ")))") }
                 if udp { closures.insert("udp") }
+                if relayPort != nil { closures.insert("tcp-relay-only") }
                 if placesClosed { closures.insert("safari-places") }
                 if !vaultRules.isEmpty, attempt.contains(vaultRules[0]) {
                     closures.insert("other-profiles")
@@ -958,8 +984,9 @@ enum ProfileNetworkGuard {
         return out
     }
 
-    /// What the kernel closed to this process (`closeTheProcess`): "udp", "safari-places",
-    /// "safari-xpc-services", "keychain", "other-profiles".
+    /// What the kernel closed to this process (`closeTheProcess`): "udp", "tcp-relay-only" (a relay's
+    /// profile: TCP to its relay alone), "safari-places", "safari-xpc-services", "keychain",
+    /// "other-profiles".
     nonisolated private static let closures = LockedSet()
 
     // MARK: Lock 2: every other store closed
@@ -1261,6 +1288,18 @@ enum ProfileNetworkGuard {
             report.udp["udp"] = await datagram(to: "192.0.2.16", using: .udp)
             report.udp["quic"] = await datagram(to: "192.0.2.17", using: NWParameters(quic: NWProtocolQUIC.Options(alpn: ["h3"])))
         }
+        if let port = heldRelayPort {
+            // A profile on a relay: TCP to its relay taken, and refused by the kernel (EPERM) to
+            // another port of this Mac's loopback and to an address outside — a packet to that one
+            // in a capture is one that left (scripts/xray_leak_check.py).
+            report.tcpRelayOnly = closures.sorted.contains("tcp-relay-only")
+            let other = port == 65535 ? port - 1 : port + 1
+            report.tcp = await Task.detached {
+                ["relay": ProfileNetworkGuard.tcpConnect("127.0.0.1", port),
+                 "loopback": ProfileNetworkGuard.tcpConnect("127.0.0.1", other),
+                 "outside": ProfileNetworkGuard.tcpConnect("192.0.2.18", 443)]
+            }.value
+        }
         if probe != nil {
             // Safari's app-link banner tracker, asked as its banner asks it: its file read from a
             // path the process does not have ended the profile's process (SafariChrome).
@@ -1272,6 +1311,35 @@ enum ProfileNetworkGuard {
         // Last: what the probes above reached is counted too.
         report.stubsReached = SafariStubCount.snapshot
         return report
+    }
+
+    /// What the kernel does with a TCP connection from this process to `host`:`port` (an IPv4
+    /// address), asked the plain way: "connected", "refused EPERM" (the sandbox), "refused <errno>"
+    /// (nothing listens), or "pending" (a SYN on its way, no answer in a second).
+    nonisolated static func tcpConnect(_ host: String, _ port: Int) -> String {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return "no socket (\(errno))" }
+        defer { close(fd) }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        var noSignal: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &noSignal, socklen_t(MemoryLayout<Int32>.size))
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr(host)
+        address.sin_port = UInt16(port).bigEndian
+        let result = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+        }
+        func named(_ code: Int32) -> String { code == EPERM ? "refused EPERM" : "refused \(String(cString: strerror(code)))" }
+        if result == 0 { return "connected" }
+        guard errno == EINPROGRESS else { return named(errno) }
+        var waiting = pollfd(fd: fd, events: Int16(POLLOUT), revents: 0)
+        guard poll(&waiting, 1, 1000) == 1 else { return "pending" }
+        var code: Int32 = 0
+        var length = socklen_t(MemoryLayout<Int32>.size)
+        getsockopt(fd, SOL_SOCKET, SO_ERROR, &code, &length)
+        return code == 0 ? "connected" : named(code)
     }
 
     /// What became of a connection to `host`:443 made with `parameters` and given one datagram:
@@ -1405,6 +1473,13 @@ struct ProfileNetworkReport: Codable, Equatable {
     var safariPathsRedirected: [String] = []
     /// With a proxy: what became of a UDP datagram and of a QUIC connection, by name.
     var udp: [String: String] = [:]
+    /// A profile on a relay (a share link, an OpenVPN connection): the kernel leaves this process TCP
+    /// to its relay alone (`ProfileNetworkGuard.closeTheProcess`, "tcp-relay-only").
+    var tcpRelayOnly = false
+    /// A profile on a relay: what became of TCP to its relay ("relay"), to another port of this
+    /// Mac's loopback ("loopback") and to an address outside ("outside")
+    /// (`ProfileNetworkGuard.tcpConnect`).
+    var tcp: [String: String] = [:]
     /// The profile's service workers have the profile's preferences (nil: this WebKit cannot).
     var workerPreferences: Bool?
     /// WebKit's version (`CFBundleVersion`), for telling apart what differs between versions.

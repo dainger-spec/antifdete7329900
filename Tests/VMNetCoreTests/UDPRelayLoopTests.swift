@@ -510,7 +510,12 @@ final class UDPRelayLoopTests: XCTestCase {
             guest.send(Wire.udp(from: port, to: literal, 443, payload: [1]))
             XCTAssertTrue(toldUnreachable(guest, from: literal))
         }
-        let counters = waitForCounters { $0.udpAssociationsFailed == 1 }
+        // The counters are what the loop publishes once a round (`NetworkLoop.snapshot`), and the
+        // guest is told "unreachable" during the round that counts the drop, before that round
+        // publishes it. Waiting only for the failed association, counted by the first datagram, read
+        // the round before the sixth drop now and then (5 for 6: Linux CI run 44010390210, 2 in 150
+        // here): wait for what is asserted, as the test below does.
+        let counters = waitForCounters { $0.udpAssociationsFailed == 1 && $0.datagramsDropped >= 6 }
         XCTAssertEqual(counters.udpAssociationsFailed, 1)
         XCTAssertEqual(counters.udpAssociationsOpened, 0)
         XCTAssertEqual(counters.datagramsDropped, 6)

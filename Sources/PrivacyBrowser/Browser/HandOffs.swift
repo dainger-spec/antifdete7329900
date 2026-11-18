@@ -1,4 +1,5 @@
 import AppKit
+import BrowserCore
 import os
 import WebKit
 
@@ -189,6 +190,71 @@ enum HandOffs {
         // A password remembered here is for this session only: a permanent or synchronized one
         // would go to the owner's keychain, outside the vault, and to their other devices.
         closePermanentCredentials()
+
+        // A text field's "Search with Google" searches in the profile.
+        keepWebSearchInProfile()
+    }
+
+    /// WebKit's own identifier of its "Search with Google" item.
+    static let webSearchItem = "WKMenuItemIdentifierSearchWeb"
+
+    /// WebKit's own "Search with Google" — the item a text field's menu has; a page's selected text
+    /// gets Safari's own search item instead — hands the selection to the system's search service,
+    /// which the real Safari provides. Chosen in a profile's Safari window, it brought the real
+    /// Safari to the front to search there, with the owner's own cookies and outside the profile's
+    /// proxy, and the window stopped for three seconds meanwhile (the sweep with real input, CI run
+    /// 43999545658, macOS 26.7.2). It searches in the profile instead — in a new tab, with the
+    /// profile's engine, as Safari's own item does — and its title names that engine.
+    private static func keepWebSearchInProfile() {
+        guard let menuTarget = NSClassFromString("WKMenuTarget") else {
+            log.notice("No WKMenuTarget in this WebKit: its Search with Google is not looked at")
+            return
+        }
+        let selector = NSSelectorFromString("forwardContextMenuAction:")
+        guard let method = class_getInstanceMethod(menuTarget, selector) else { return }
+        typealias Forward = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Forward.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { target, sender in
+            guard (sender as? NSMenuItem)?.identifier?.rawValue == HandOffs.webSearchItem else {
+                original(target, selector, sender)
+                return
+            }
+            refused["search", default: 0] += 1
+            log.notice("Search with the system's provider: searched in the profile, not handed to another app")
+            HandOffs.searchSelectionInProfile()
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+        // As the menu opens, before it is drawn (posted on the main thread, as tracking begins).
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: nil) { note in
+            guard let menu = note.object as? NSMenu, Thread.isMainThread else { return }
+            MainActor.assumeIsolated { HandOffs.nameProfileEngine(in: menu) }
+        }
+    }
+
+    /// Names the system's search providers go by in WebKit's item.
+    private static let providerNames = ["Google", "Bing", "Yahoo", "DuckDuckGo", "Ecosia", "Yandex", "Яндекс", "Baidu"]
+
+    /// WebKit's item says the system's provider ("Search with Google"): it says the profile's engine.
+    static func nameProfileEngine(in menu: NSMenu) {
+        guard SafariChromeHost.isHosting,
+              let item = menu.items.first(where: { $0.identifier?.rawValue == webSearchItem }) else { return }
+        let engine = SafariChrome.profileSearchEngine.name
+        guard let shown = providerNames.first(where: { item.title.contains($0) }), shown != engine else { return }
+        item.title = item.title.replacingOccurrences(of: shown, with: engine)
+    }
+
+    /// The selection of the page in front — a text field's, or the page's — searched with the
+    /// profile's engine in a new tab of its window.
+    static func searchSelectionInProfile() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow, let page = SafariChromeHost.frontPage(in: window) else { return }
+        let script = "const e = document.activeElement; "
+            + "if (e && typeof e.selectionStart === 'number' && typeof e.value === 'string') { return e.value.substring(e.selectionStart, e.selectionEnd); } "
+            + "return String(window.getSelection());"
+        page.callAsyncJavaScript(script, arguments: [:], in: nil, in: .defaultClient) { result in
+            guard case .success(let value) = result, let text = value as? String,
+                  let address = WebAddress.searchURL(for: text, engine: SafariChrome.profileSearchEngine) else { return }
+            Task { @MainActor in _ = await SafariTabs.openTab(address, in: window) }
+        }
     }
 
     private static func closePermanentCredentials() {

@@ -51,6 +51,9 @@ enum ProfileCommand: Codable {
     /// Choose every item of Safari's menu bar in turn, from item `from` on, and say what each did
     /// (`SafariMenuWalk`). Sent by the `--menu-walk` check only, never by the app.
     case walkMenu(from: Int)
+    /// Drive the profile's window with real input events, unit by unit, from step `from`, unit
+    /// `sub` on (`SafariSweep`); `phases` empty: every step. Sent by the `--sweep` check only.
+    case sweep(from: Int, sub: Int, phases: [String])
     /// Close every window of the profile as its close button does — the way a person ends a
     /// profile; the last one closing quits the process, which seals. Sent by the self-test only.
     case closeWindows
@@ -140,11 +143,17 @@ enum ProfileEvent: Codable {
     case sealing
     /// How the profile's WebKit data was sealed, just before the process exits.
     case sealed(ProfileSealReport)
+    /// The launch put back cookies the profile's store had lost (docs/COOKIE_RECOVERY.md): how many,
+    /// from the snapshot of when, why, and whether the profile's window said so. Once per launch,
+    /// for the profile's journal; nothing of a cookie.
+    case cookiesRecovered(CookieSnapshotKeeper.Report)
     /// No geolocation service answered through the profile's proxy: where it exits is not known,
     /// and the profile runs in the last known location's time zone and language, or this Mac's.
     case proxyLocationUnknown
     /// One step of `walkMenu`, as a line of JSON (`SafariMenuWalk`).
     case menuWalk(String)
+    /// One line of JSON of `sweep` (`SafariSweep`).
+    case sweep(String)
     /// The answer to `checkKeychain`.
     case keychainReport(KeychainReport)
     /// The answer to `lookAtHistory`.

@@ -357,6 +357,14 @@ jobs:
           python3 scripts/menu_walk.py --app build/unsandboxed/Lumen.app --out build/egress27/menu-walk \
             --title "macOS 27 - Safari's menu" --record "docs/menu-walk/safari-$major.json" --check \
             --ignore "$HOME/Library/Logs:$HOME/actions-runner:$HOME/runners" --safari-sentinels
+      - name: macOS 27 - what the sweep with real input found in Safari 27's window, again (reported)
+        # scripts/sweep.py, phase regress, as in the macOS 26 job: fails the step, not the job.
+        if: always()
+        continue-on-error: true
+        timeout-minutes: 12
+        env:
+          PB_SWEEP_PHASES: regress
+        run: python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out build/egress27/sweep-regress --state "macOS 27 regress"
       - name: macOS 27 - a scenario's run in Safari 27's window — its click on the button it aimed at (reported)
         # scripts/scenario_safari_check.sh, as in the macOS 26 job: fails the step, not the job.
         if: always()
@@ -541,7 +549,14 @@ jobs:
         # (Lumen --release-check) — then zipped, the zip signed with Ed25519, the appcast made and
         # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
         # are skipped and said so.
-        run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+        # As a release is made: with OpenVPN connections and the links' relay (release.sh's default,
+        # OVPN=1 XRAY=1) — OpenVPN, mbed TLS, LZO and LZ4 from their pinned tarballs, Xray from its
+        # pinned source with the pinned Go that build-xray.sh fetches and checks — and with nothing
+        # but what macOS and Xcode put on a Mac: the runner's Homebrew (CMake, pkg-config, autotools,
+        # its Python) and its Go are out of PATH, as they are on the owner's Mac. Then openvpn,
+        # LumenTunnel and LumenXray are read back from the app: no entitlement, the hardened runtime,
+        # each starts, their licences in Contents/Resources/ThirdParty.
+        run: env PATH=/usr/bin:/bin:/usr/sbin:/sbin VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
       - name: The disk image's window as a person sees it, light and dark — it must show its picture, and its control must not
         # The owner, 3 November: 0.1.1's window had its icons and its size and no picture while
         # make_dmg.sh said it was laid out. The dry run's image opened in Finder, its window captured
@@ -821,8 +836,9 @@ jobs:
         # scripts/update_check.py: the old build's own updater against a local HTTPS feed — no request
         # with checks off (packet capture), an older build never offered, a stale and a forged appcast
         # and a changed archive refused, nothing installed while a profile with a window and a warm-up
-        # without one run — then the quit path, the gate, the real installer: the swap, the new build
-        # started, the old build's data opened by the new one. Its own bundle id (dev.local.PBUpdateCheck).
+        # without one run — then the quit path, the gate, the real installer: Lumen opened again the
+        # moment it quit must step aside and the install go on; the swap, the new build started, the
+        # old build's data opened by the new one. Its own bundle id (dev.local.PBUpdateCheck).
         # Early in the job, and not stopping it: a failure fails the job at its end ("Updates end to end, result").
         id: updates
         continue-on-error: true
@@ -1068,6 +1084,26 @@ jobs:
         with:
           name: menu-walk
           path: build/menu-walk
+          if-no-files-found: ignore
+      - name: What the sweep with real input found in Safari's window, again — none of it comes back
+        # scripts/sweep.py with only its phase regress (SafariSweep, SweepSteps): with the window
+        # server's own keys and clicks, a page added to the Reading List and the list shown with ⌃⌘2
+        # while the page has the keyboard (the profile's process ended there: CI run 43990525206),
+        # ⌘D in a window with a tab group (the bookmark's sheet never came), a key equivalent whose
+        # action throws pressed with the page focused, an image's Save Image to the downloads folder
+        # ("(null)", and the save failed), ⌘N (nothing came), a text field's Search with (the real
+        # Safari came to the front: run 43999545658). A crash, an exception the run loop caught or one Safari's
+        # code threw and something else swallowed, a notice, a hang over two seconds, fails the build.
+        if: always()
+        timeout-minutes: 12
+        env:
+          PB_SWEEP_PHASES: regress
+        run: python3 -u scripts/sweep.py --app build/unsandboxed/Lumen.app --out build/sweep-regress --state "regress"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-regress
+          path: build/sweep-regress
           if-no-files-found: ignore
       - name: A scenario's run in Safari's window — its click on the button it aimed at, as the page saw it
         # scripts/scenario_safari_check.sh (Lumen --scenario-safari-check): a profile started without
@@ -1574,3 +1610,35 @@ jobs:
           # Measured next to the macOS 27 job's same lines.
           grep -h "^INFO fragment jump" build/egress/selftest-unsandboxed.txt \
             | head -8 | cut -c1-1000 | sed 's/^/::notice title=self-test - measured::/' || true
+
+  # OpenVPN connections end to end (docs/OPENVPN.md): the app built with OVPN=1 (openvpn from its
+  # pinned sources, LumenTunnel), an OpenVPN server on the runner (root, utun), a profile through it
+  # started as a person's is and driven over WebDriver, inside a capture of every packet. A release
+  # with OVPN=1 needs it passed.
+  openvpn:
+    if: github.event_name != 'schedule'
+    name: OpenVPN end to end (macOS 26)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the app with OpenVPN (OVPN=1)
+        run: OVPN=1 SANDBOX=0 APP_DIR=build/ovpn scripts/build-app.sh
+      - name: A profile through a .ovpn - wrong password, pages and DNS through the tunnel, the port's credentials, fail closed, the capture
+        run: scripts/openvpn_macos_e2e.sh build/ovpn/Lumen.app build/openvpn-e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: openvpn-e2e
+          path: |
+            build/openvpn-e2e/result.txt
+            build/openvpn-e2e/server-log.txt
+            build/openvpn-e2e/work/serve*.txt
+
+  links:
+    # Profiles on VLESS, VMess, Trojan and Shadowsocks links (docs/TUNNEL.md, "Links"): the relay's
+    # reproducible build, every kind against a real Xray server, and the leak test inside a capture.
+    # The same workflow runs on a push to a branch claude/xray-* and on request.
+    if: github.event_name != 'schedule'
+    name: Links — VLESS, VMess, Trojan, Shadowsocks
+    uses: ./.github/workflows/xray-tunnels.yml

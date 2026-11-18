@@ -43,6 +43,8 @@ since):
 | Proxy: `Accept-Language` | the header the proxy sees is the language the app decided at its first launch (`de-DE,de;q=0.9` in the self-test) |
 | Time zone from the proxy | a profile with a proxy and *Time zone of the proxy's location* runs in the time zone the lookup through the proxy returned, cached per profile |
 | Several SOCKS5 profiles at once | three profiles behind three SOCKS5 proxies, one with username/password authentication, are launched together through the app's launch path and load at the same time: each page arrives through its own proxy, by name, with its own credentials; after one stops the others keep loading through theirs; wrong or missing SOCKS5 credentials fail closed |
+| VLESS, VMess, Trojan, Shadowsocks links (`.github/workflows/xray-tunnels.yml`; macOS 26.7.2 and 27.0.1, CI runs 44024780666 and 44034707092) | the app run as a release declares it (SDK 14.0); a profile on each of eight shapes of link — VLESS REALITY + vision over RAW and XHTTP, VLESS TLS + vision, WebSocket and gRPC, VMess WebSocket, Trojan TLS, Shadowsocks 2022 — and on two links naming their server by a host name, started as the app starts one, its relay (Xray, the pinned build) started by the app: the leak page through it by name, its loopback requests through it too (the canary took none), WebRTC relay candidates at the far side's address only, the relay's door shut without its login; the profile's process refused by the kernel TCP to anything but its relay, and UDP; the relay's sandbox, knocked with a configuration that would go anywhere, refusing every port but the server's and every file write (its unsandboxed control reaching them); a relay killed under a running page started again twice on its port with its login, and the third time in a minute the profile stopped with its message, its fetches failing meanwhile — inside a capture of every packet: nothing of the profile's process, of the app's or of WebKit's off loopback while a profile ran, each relay only to its server, no page's name resolved locally, the controls seen (`scripts/xray_leak_check.py`); every shape's configuration against a real Xray server (`scripts/xray_relay_check.py`) |
+| OpenVPN connections (`scripts/openvpn_macos_e2e.sh`, the job `openvpn` of `full.yml`; macOS 26.7.2, CI runs 44011508202 and 44034707092) | the app built as a release (`OVPN=1`); an OpenVPN 2.7 server on the runner and a profile given its `.ovpn`, started as the app starts one and driven over WebDriver: a wrong password refused and said, nothing left running; a page named only by the tunnel's DNS server, and one by address, seen by the server from the tunnel's address; the profile's port refusing a client without credentials or with wrong ones; the server killed: nothing loads, the profile stopped and said so, no OpenVPN or LumenTunnel left; a pktap capture of the whole run with none of the profile's process, of openvpn or of LumenTunnel around the tunnel, and its controls (the forwarder's packets to the server, the question inside the tunnel) seen |
 | Launch speed | with a location remembered for the proxy, a launch waits at most 1 s for a 4 s lookup (the lookup finishes in the background, and its new time zone is remembered and noted for the next launch); with nothing remembered it waits at most 3 s |
 | Proxy list checker | observed in CI run 394, both builds (the end-to-end check through the HTTP proxy with a login: run 395): the probe tells every listener of the self-test proxy apart — HTTP CONNECT listed as SOCKS5 and SOCKS5 listed as HTTP each found as what it is, the login of the HTTP and the SOCKS5 proxy not given (needs a login), wrong (rejected) and right (taken), the IPv6 listener, a listener that takes the connection and never answers (silent), a closed port (refused), a host name that does not exist (host not found); end to end through a working proxy listed with the wrong type, the exit IP, country, time zone, city and network the stand-in service gave and the probe's median latency, and the exit IP, country and city through every other listener that works (SOCKS5, both with their login, IPv6); through an unreachable proxy, and one whose host does not resolve, it is dead, and a real website among the services, which a direct request would reach, did not answer either (the unreachable proxy's check connected to nothing else, as the URL loading system reports it — shown only where the same report listed the working proxy's connection); a proxy answering 407 to a check without credentials is dead for that reason; settings that cannot be applied are not checked (no request); the list's model checks several at a time and keeps the results encrypted, gives a line without a scheme the type found and corrects a wrong one; a profile given a checked proxy knows where it exits before its first launch; a profile started with the silent proxy says why (silent), one with a working proxy says nothing, and Check from there is the list's check. All of it but the unknown host runs in an egress window: the capture fails on any packet of the app past loopback, and on a DNS question for the service's name, which carries the run id (the unknown host's name is the control that says whether such a question for a `.invalid` name reaches the network at all) |
 | Proxy exit IP | with *Warn when the proxy's IP changes* on, a changed exit IP (same proxy and credentials) is reported, the first launch and an unchanged IP are not; the option is off by default and then nothing is reported or stored, and turning it off, or replacing the proxy, while a lookup is under way leaves no new IP stored and nothing reported |
@@ -666,6 +668,7 @@ storage and network (§1, §4).
 | Restore points (copies of the profile's site data, cookies, history, open tabs) | the copied files as they were, still encrypted (`restore-points/<id>/`, with `point.bin`; this Mac only, not synced, not in a profile export) | listed when the sheet opens | — |
 | The profile's history of events (`journal.bin`) | encrypted (this Mac only, not synced, not in a profile export) | decrypted when the inspector shows the profile | — |
 | Synced cookies (persistent cookies, with cookie sync on) | encrypted (`cookies.bin`; its local baseline `cookies-baseline.bin`) | encrypted | encrypted; written at launch and stop |
+| Cookie snapshots (the last 3 copies of the persistent cookies; docs/COOKIE_RECOVERY.md) | encrypted (`cookie-snapshots.bin`, under the profile's key; this Mac only, not synced, not in a profile export) | encrypted (listed when Restore Cookies from a Snapshot… opens) | encrypted; written when the cookies change (every few minutes at most, at once after Lumen's own change) and at a clean stop; never plaintext on disk |
 | History | encrypted (`history.bin`); ephemeral profiles: never written | encrypted | in memory, saved encrypted (debounced, ≤ 3 s) |
 | Bookmarks | encrypted (`bookmarks.bin`) | encrypted | in memory, saved encrypted on every change |
 | Sync target and token | encrypted (`settings.bin`, not synced) | in memory | — |
@@ -745,6 +748,39 @@ proxies on the CI Mac. cloudflare-quic.com answers a profile without a proxy ove
 same requests through an HTTP CONNECT or SOCKS5 proxy over HTTP/2, each one seen by the proxy;
 the SOCKS5 proxy was never asked for UDP. So QUIC needs nothing more. WebRTC does: the relay and
 the network guard ([TUNNEL.md](TUNNEL.md)), below.
+
+**VLESS, VMess, Trojan and Shadowsocks links.** A profile's proxy can be a share link
+(`vless://`, `vmess://`, `trojan://`, `ss://`). The profile does not speak those protocols: the
+app runs a relay for it (Xray-core, built from its pinned source and checked against the SHA-256 it
+records), and the profile goes through that relay as through a SOCKS5 proxy on 127.0.0.1, with a
+login made for the launch — so everything above holds through it: fail closed, remote DNS, no
+QUIC, WebRTC through its UDP with the network guard. On top: the profile's process is held by the
+kernel to TCP to the relay's port alone; the relay has one way out, the link's server, and runs in a
+sandbox that lets it reach nothing but the server's port, UDP to loopback and the resolver; a relay that
+ends is started again, and one that does not come back stops its profile — its pages fail meanwhile,
+never going another way. What is verified, how, and the limits (the server's own name is resolved by
+this Mac, as a proxy's name is): [TUNNEL.md](TUNNEL.md), "Links". Measured on CI's Macs (macOS 26
+and 27, the app declaring SDK 14.0 as a release does; runs 44024780666 and 44034707092) inside a capture of every
+packet, on every shape of link Lumen reads: nothing of the profile's process off loopback, its relay
+only to its server, no page's name resolved locally. What such a capture cannot speak for: a macOS
+other than those two, a build declaring SDK 15 or newer (above, §2), and the system's own daemons —
+`webprivacyd`, started as the first profile's WebKit starts, fetched Apple's lists from Apple directly
+in every run, as it does for Safari and for every proxy (§4a, "Not covered").
+
+**OpenVPN connections.** A profile's proxy can be an OpenVPN connection, imported from a provider's
+`.ovpn` ([OPENVPN.md](OPENVPN.md)). It is the same shape as a link: the app runs OpenVPN 2.7
+(unprivileged, in a sandbox that allows it loopback alone, its servers reached through forwarders
+that carry to each one's single address) with LumenTunnel as its tun, a user-space TCP/IP stack
+serving the profile SOCKS5 on 127.0.0.1 with a login made for the launch; names are asked of the
+DNS servers the VPN pushed, through the tunnel; nothing of this Mac's routes, addresses or DNS
+changes. The launch, the hand-over of the port, the kernel's hold of the profile's process (TCP to
+that port alone, no UDP) and the stop of a profile whose tunnel does not come back are the links' own
+step ([TUNNEL.md](TUNNEL.md), "Relays"). Measured on CI's Mac (macOS 26, the app built as a release;
+runs 44011508202 and, with the shared step, 44034707092) inside a pktap capture of the whole run: nothing of the profile's process, of OpenVPN or of
+LumenTunnel off loopback but the forwarder's packets to the server, the tunnel's name asked inside
+the tunnel only, a wrong password refused, the server killed and nothing loading, then the profile
+stopped. Not shown on a Mac: WebRTC through the tunnel with the network guard installed, IPv6 inside
+the tunnel, a real provider's mobile network.
 
 **App Transport Security:** `NSAllowsArbitraryLoadsInWebContent` lets the browser load
 `http://` pages. The app's own URLSession traffic (HTTP sync) remains HTTPS-only.
@@ -1928,6 +1964,12 @@ from a web page (`Origin`, `Sec-Fetch-Site`). Whoever has the token can start an
 open pages in them and read and write their cookies — not the passwords, the proxy credentials or
 the vault. A program running as this user that can read the app's memory or watch the user type
 is out of scope either way (above).
+
+A profile on a VLESS, VMess, Trojan or Shadowsocks link, or on an OpenVPN connection, has a relay on
+the loopback address too (TUNNEL.md, "Relays"): any program here can connect to it, and is refused
+without the login the app made for that launch and gave to the profile's process alone. While a relay that ended is
+started again its port is free for a moment; a program of this user's racing for it then would be
+sent the profile's connections — such a program is out of scope (above).
 
 ## 11. App lifecycle, appearance and language
 

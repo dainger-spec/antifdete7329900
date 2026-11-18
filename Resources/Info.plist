@@ -61,6 +61,25 @@
 			</dict>
 		</dict>
 	</dict>
+	<!-- A .ovpn file opened with Lumen (double-click where no VPN client claims the extension, or
+	     Open With): Proxies › Add › OpenVPN with the file read (AppDelegate.application(_:open:)).
+	     "Alternate": an OpenVPN client the person has stays the file's default. Viewer: Lumen never
+	     writes the file. -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>OpenVPN Configuration</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>CFBundleTypeExtensions</key>
+			<array>
+				<string>ovpn</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Deliberately no NSLocationUsageDescription: the app never uses CoreLocation.
 	     Geolocation is answered by the per-profile JavaScript shim (deny or fixed coordinates). -->
 </dict>

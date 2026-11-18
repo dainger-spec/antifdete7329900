@@ -2,6 +2,7 @@ import AppKit
 import BrowserCore
 import MachineCover
 import SwiftUI
+import UpdateProgress
 
 /// `Lumen --render-ui-snapshots <folder>`: renders the app's screens with sample data
 /// into PNG files, so the design can be reviewed from CI (no vault, no WebKit, no network).
@@ -141,6 +142,10 @@ enum UISnapshots {
         // found, and that setting's row marked on its page (SettingsSearch).
         problems += await Shot(name: "settings-search", size: SettingsView.size, edges: true) {
             SettingsView(section: .behavior, search: L("settings.behavior.zoom")).environmentObject(model)
+        }.capture(into: folder)
+        // "OpenVPN" typed: Proxies, with Add a proxy, a link or OpenVPN marked.
+        problems += await Shot(name: "settings-search-openvpn", size: SettingsView.size, edges: true) {
+            SettingsView(section: .proxies, search: "OpenVPN").environmentObject(model) // l10n: not text
         }.capture(into: folder)
         // The command palette with the same typed: the single setting, and the page it is on.
         problems += await Shot(name: "palette-setting", size: CommandPaletteView.size, titled: false) {
@@ -297,6 +302,8 @@ enum UISnapshots {
             return 1
         }
         NSApp.activate(ignoringOtherApps: true)
+        // The update's windows alone, for a quick look (a scratch run of CI): PB_SNAPSHOTS_ONLY=updates.
+        if ProcessInfo.processInfo.environment["PB_SNAPSHOTS_ONLY"] == "updates" { return await updateWindows(into: folder) }
         let rows = sampleRows()
         let clicks = ClickLog()
         var actions = ProfileActions()
@@ -566,10 +573,11 @@ enum UISnapshots {
         problems += await Shot(name: "profiles-updated", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 620), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, updatedTo: "0.1.5") // l10n: not text
         }.capture(into: folder)
-        // A newer version is out and ready: said above the profiles, not only in Settings.
+        // A newer version is out and ready: the sidebar's row says so while it waits.
         problems += await Shot(name: "profiles-update-offer", size: CGSize(width: 1180, height: 740), edges: true) {
-            ProfilesPreview(rows: rows, sync: .off, updateOffer: UpdateOffer(version: "0.1.9", stage: .ready)) // l10n: not text
+            ProfilesPreview(rows: rows, sync: .off, pendingUpdate: UpdateOffer(version: "0.1.9", stage: .ready)) // l10n: not text
         }.capture(into: folder)
+        problems += await updateWindows(into: folder)
         problems += await Shot(name: "profiles-guard-banners", size: CGSize(width: 1180, height: 640), edges: true) {
             ProfilesPreview(rows: rows, sync: .off, indexNotice: unlisted, proxyProblem: threeAtOnce, guardNotice: .notInstalled)
         }.capture(into: folder)
@@ -703,6 +711,27 @@ enum UISnapshots {
             problems += await Shot(name: "sheet-profile-import", size: CGSize(width: 480, height: 300), titled: false) {
                 ProfileImportView().environmentObject(model)
             }.capture(into: folder)
+            // A profile's cookie snapshots, one of them all expired (its Restore greyed, with why),
+            // and the notice a launch shows in the profile's window after putting cookies back.
+            let jar = CookieImporter.read(Data(#"[{"domain":".example.org","name":"session","value":"a1","path":"/","secure":true,"expirationDate":4102444800},{"domain":".shop.example","name":"cart","value":"b2","path":"/","expirationDate":4102444800}]"#.utf8)).cookies
+            let stale = CookieImporter.read(Data(#"[{"domain":".example.org","name":"old","value":"c3","path":"/","expirationDate":1700000000}]"#.utf8)).cookies
+            let snapshotsNow = Date()
+            let snapshots = [CookieSnapshot(takenAt: snapshotsNow.addingTimeInterval(-600), trigger: .periodic, cookies: jar),
+                             CookieSnapshot(takenAt: snapshotsNow.addingTimeInterval(-26 * 3_600), trigger: .close, cookies: jar),
+                             CookieSnapshot(takenAt: Date(timeIntervalSince1970: 1_699_000_000), trigger: .close, cookies: stale)]
+            problems += await Shot(name: "sheet-cookie-snapshots", size: CGSize(width: 560, height: 480), titled: false) {
+                CookieSnapshotsView(profile: northwind, sample: snapshots).environmentObject(model)
+            }.capture(into: folder)
+            problems += await Shot(name: "cookie-recovery-notice", size: CGSize(width: 420, height: 110), titled: false) {
+                CookieRecoveryNotice.preview(CookieSnapshotKeeper.Report(restored: 41, refused: 0,
+                                                                         snapshotTakenAt: snapshotsNow.addingTimeInterval(-3_600),
+                                                                         cause: .uncleanEnd))
+                    .padding(16)
+            }.capture(into: folder)
+            // Copies of a profile: how many, typed or stepped, and where their proxies come from.
+            problems += await Shot(name: "sheet-duplicate", size: CGSize(width: 520, height: 520), titled: false) {
+                DuplicateProfileView(profile: northwind).environmentObject(model)
+            }.capture(into: folder)
         } else {
             print("FAIL could not make a sample profile summary")
             problems += 1
@@ -754,7 +783,7 @@ enum UISnapshots {
         going.began(scenarioProfiles[4].id, at: runStart.addingTimeInterval(40))
         var ended = going
         ended.ended(scenarioProfiles[1].id, .finished, at: runStart.addingTimeInterval(50), result: "\"signed in\"")
-        ended.ended(scenarioProfiles[2].id, .failed(reason: "timed out: text=My orders visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
+        ended.ended(scenarioProfiles[2].id, .failed(reason: "Error: timed out: text=My orders to be visible (line 17)", line: 17), at: runStart.addingTimeInterval(72),
                     log: ["    0.0  window: Safari's", "    0.1  goto https://shop.example/login", "    2.3  type 17 characters into input[type=\"email\"]",
                           "    4.4  type 14 characters into input[type=\"password\"]", "    7.0  press Enter", "    7.1  waitFor text=My orders visible",
                           "   37.1  timed out: text=My orders visible (line 17)", "   37.1  Failed: timed out: text=My orders visible (line 17)"])
@@ -916,6 +945,7 @@ enum UISnapshots {
             LockBackdrop(phase: .open) { VaultOpenView() }
         }.capture(into: folder)
         problems += await welcome(into: folder)
+        problems += await firstRun(into: folder, model: lockModel)
         problems += await Shot(name: "app-icon", size: CGSize(width: 900, height: 640), titled: false) {
             AppIconSheet()
         }.capture(into: folder)
@@ -935,42 +965,60 @@ enum UISnapshots {
 
     // MARK: The launch screen
 
-    /// The launch screen (WelcomeSplash), still at chosen moments: a later launch's greeting written
-    /// and settled, in Russian and in English; the Russian one 60 % written; the first launch's, with
-    /// its button; and the Russian one in the glass drawn where Metal is missing. The Metal glass is
-    /// drawn here as a picture (a cached picture of a window holds no Metal layer), by the same shader.
+    /// The launch screen (WelcomeSplash), still at chosen moments, in the run's language: a later
+    /// launch's, settled; the first launch's, with its button; and the first launch's mid-way, the
+    /// title fading in above the arc.
     private static func welcome(into folder: URL) async -> Int {
-        guard let russian = WelcomeLettering.all.first(where: { $0.code == "ru" }),
-              let english = WelcomeLettering.all.first(where: { $0.code == "en" }) else {
-            print("FAIL the launch screen has no greeting in Russian or English")
-            return 1
-        }
-        func settled(_ greeting: WelcomeLettering) -> Double {
-            WelcomeTiming(duration: greeting.duration, reduced: false).settledAt + 0.5
-        }
-        if WelcomeGlassRenderer.prepareNow() == nil {
-            print("NOTE the launch screen's Metal glass cannot be made here: its pictures show the drawn glass")
-        }
+        let settled = WelcomeTiming(reduced: false).settledAt + 0.5
         let size = CGSize(width: 1180, height: 740)
         var problems = 0
-        problems += await Shot(name: "welcome-ru", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {}, still: settled(russian))
+        problems += await Shot(name: "welcome", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: false, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-ru-writing", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: false, opening: {}, finished: {},
-                          still: WelcomeTiming.penStart + russian.duration * 0.6)
+        problems += await Shot(name: "welcome-first", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-en", size: size, edges: true) {
-            WelcomeSplash(greeting: english, firstLaunch: false, opening: {}, finished: {}, still: settled(english))
+        problems += await Shot(name: "welcome-first-rising", size: size, edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: 0.55)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-en-first", size: size, edges: true) {
-            WelcomeSplash(greeting: english, firstLaunch: true, opening: {}, finished: {}, still: settled(english))
+        problems += await Shot(name: "welcome-first-small", size: CGSize(width: 900, height: 560), edges: true) {
+            WelcomeSplash(firstLaunch: true, opening: {}, finished: {}, still: settled)
         }.capture(into: folder)
-        problems += await Shot(name: "welcome-ru-drawn-glass", size: size, edges: true) {
-            WelcomeSplash(greeting: russian, firstLaunch: true, opening: {}, finished: {}, still: settled(russian),
-                          fallbackGlass: true)
+        return problems
+    }
+
+    // MARK: The first run's steps
+
+    /// After the vault is made (FirstRun): the Touch ID offer — asked, on, not recognised — and the
+    /// protection setup — to install, waiting in System Settings, done, the camera not in the plan,
+    /// and inside a virtual machine; and the Profiles window with no profile yet and the guard missing.
+    private static func firstRun(into folder: URL, model: AppModel) async -> Int {
+        var problems = 0
+        let size = CGSize(width: 1180, height: 820)
+        let touchID: [(String, FirstRunTouchIDOutcome?)] = [
+            ("firstrun-touchid", nil), ("firstrun-touchid-on", .on),
+            ("firstrun-touchid-failed", .failed(L("firstRun.touchID.notRecognised"))),
+        ]
+        for (name, outcome) in touchID {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunTouchIDView(done: {}, preview: outcome).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        let protection: [(String, FirstRunProtectionView.Preview)] = [
+            ("firstrun-protection", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true)),
+            ("firstrun-protection-waiting", .init(guardState: .awaitingApproval, cameraState: .awaitingApproval, cameraAllowed: true)),
+            ("firstrun-protection-done", .init(guardState: .ready, cameraState: .active, cameraAllowed: true)),
+            ("firstrun-protection-no-camera-plan", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: false)),
+            ("firstrun-protection-vm", .init(guardState: .notInstalled, cameraState: .notInstalled, cameraAllowed: true, virtualMachine: true)),
+        ]
+        for (name, preview) in protection {
+            problems += await Shot(name: name, size: size, edges: true) {
+                LockBackdrop { FirstRunProtectionView(done: {}, preview: preview).environmentObject(model) }
+            }.capture(into: folder)
+        }
+        problems += await Shot(name: "profiles-empty-guard-reminder", size: CGSize(width: 1180, height: 640), edges: true) {
+            ProfilesPreview(rows: [], sync: .notYet, guardNotice: .notInstalled)
         }.capture(into: folder)
-        WelcomeGlassRenderer.release()
         return problems
     }
 
@@ -1094,6 +1142,104 @@ enum UISnapshots {
     /// the one behind a VPN's substitute DNS, on the service's and on a working one; the Edit and
     /// Export sheets; and what a profile whose proxy did not work at its launch says. Nothing is
     /// checked here and nothing goes to the network.
+    // MARK: The update's windows
+
+    /// The update's windows (docs/UPDATES.md §7), every state, in this run's language, each as tall
+    /// as its content: a release found (with profiles running; with notes of thirty lines; as one
+    /// long paragraph; with none), checking, up to date, "Installing the update" — the download's
+    /// bar, then checking, installing and restarting (the installer helper's window is this same
+    /// view, with the words the app sends it), and after a Lumen opened meanwhile stepped aside —,
+    /// a download that failed, an update that did not happen, and the new version's first launch.
+    private static func updateWindows(into folder: URL) async -> Int {
+        var problems = 0
+        let model = AppModel()
+        let russian = Localization.locale.language.languageCode?.identifier == "ru"
+        let notes = russian
+            ? "• Обновление больше не прерывается, если Lumen открыть во время установки.\n• Окно обновления показывает загрузку, проверку, установку и перезапуск.\n• Прокси, который молчит после подключения, называется так в списке."
+            : "• An update is no longer cut short when Lumen is opened while it installs.\n• The update’s window shows the download, the check, the install and the restart.\n• A proxy that stays silent after connecting is named as such in the list."
+        let longNotes = (1...30).map { index in
+            russian ? "• Исправление \(index): профиль с прокси, который отвечает медленно, больше не считается неработающим, а его проверка повторяется через минуту."
+                    : "• Fix \(index): a profile whose proxy answers slowly is no longer counted as failing, and its check is repeated a minute later."
+        }.joined(separator: "\n")
+        let paragraph = russian
+            ? "В этом выпуске Lumen устанавливает обновления заметно: окно показывает загрузку, проверку, установку и перезапуск, а Lumen, открытый во время установки, ждёт её окончания и открывается сам уже в новой версии. Кроме того, исправлены несколько ошибок списка прокси и ускорен запуск профилей с большим количеством вкладок, а сообщения о неудачной установке теперь написаны понятным языком."
+            : "In this release Lumen installs updates in plain sight: the window shows the download, the check, the install and the restart, and a Lumen opened during the install waits for it and opens by itself in the new version. Several fixes in the proxy list, profiles with many tabs start faster, and an install that did not happen is now said in plain words."
+        func item(_ notes: String) -> AppcastItem {
+            AppcastItem(version: "0.1.19", build: "19", minimumSystemVersion: "26.0",
+                        url: URL(string: "https://updates.example/lumen/Lumen-0.1.19.zip")!, length: 48_210_944,
+                        sha256: String(repeating: "0", count: 64), keyID: "0123456789abcdef", edSignature: Data(count: 64),
+                        publishedAt: Date().addingTimeInterval(-2 * 3600), notes: notes)
+        }
+        let release = item(notes)
+        let configuration = AppUpdater.Configuration(
+            feed: URL(string: "https://updates.example/lumen/appcast.json")!, keys: [:], version: "0.1.18",
+            build: BuildVersion("18")!, bundleIdentifier: "io.lumenbrowser.Lumen",
+            app: URL(fileURLWithPath: "/Applications/Lumen.app"), staging: URL(fileURLWithPath: "/nonexistent/updates"))
+        let texts = UpdateProgressTexts(AppUpdater.progressTexts)
+
+        /// The window as the app makes it — as tall as its content, once that has laid out.
+        func shot<V: View>(_ name: String, _ view: V) async -> Int {
+            let size = await fitted(view)
+            return await Shot(name: name, size: size) { view }.capture(into: folder)
+        }
+
+        problems += await shot("update-found", UpdateFoundPanel(item: release, update: {}, later: {}))
+        problems += await shot("update-found-stopping",
+                               UpdateFoundPanel(item: release, stops: [String(format: L("updates.stops.ownProcess"), "Shop DE"), // l10n: not text
+                                                                       String(format: L("updates.stops.warmUp"), "Northwind")], // l10n: not text
+                                                update: {}, later: {}))
+        problems += await shot("update-found-long-notes", UpdateFoundPanel(item: item(longNotes), update: {}, later: {}))
+        problems += await shot("update-found-paragraph", UpdateFoundPanel(item: item(paragraph), update: {}, later: {}))
+        problems += await shot("update-found-no-notes", UpdateFoundPanel(item: item(""), update: {}, later: {}))
+        problems += await shot("update-checking",
+                               UpdaterStatePanel(updater: AppUpdater(preview: .checking, configuration: configuration)).environmentObject(model))
+        problems += await shot("update-up-to-date",
+                               UpdaterStatePanel(updater: AppUpdater(preview: .upToDate(checkedAt: Date()), configuration: configuration))
+                                   .environmentObject(model))
+        let downloading = UpdateDownloadProgress(received: 18_350_000, total: Int64(release.length), startedAt: Date().addingTimeInterval(-9))
+        let stages: [(name: String, stage: UpdateProgressModel.Stage, reopened: Bool)] = [
+            ("update-downloading", .downloading(fraction: downloading.fraction, detail: model.downloadDetail(downloading)), false),
+            ("update-checking-release", .step(.checking), false),
+            ("update-installing", .step(.installing), false),
+            ("update-restarting", .step(.relaunching), false),
+            ("update-installing-reopened", .step(.installing), true),
+        ]
+        for entry in stages {
+            let progress = UpdateProgressModel(version: release.version, stage: entry.stage, reopened: entry.reopened, cancel: { })
+            problems += await shot(entry.name, UpdateProgressView(model: progress, texts: texts))
+        }
+        problems += await shot("update-failed", UpdateFailedPanel(release: release.version, reason: L("updates.error.network"), retry: {}, close: {}))
+        problems += await shot("update-not-installed",
+                               UpdateNoticePanel(text: String(format: L("updates.outcome.startedAgain"), release.version), canInstall: true,
+                                                 install: {}, retry: {}, close: {}))
+        problems += await shot("update-not-installed-check",
+                               UpdateNoticePanel(text: String(format: L("updates.outcome.badRelease"), release.version), canInstall: false,
+                                                 install: {}, retry: {}, close: {}))
+        problems += await shot("update-installed",
+                               UpdateInstalledPanel(update: InstalledUpdate(version: release.version, notes: notes), dismiss: {}, still: true))
+        problems += await shot("update-installed-long-notes",
+                               UpdateInstalledPanel(update: InstalledUpdate(version: release.version, notes: longNotes), dismiss: {}, still: true))
+        return problems
+    }
+
+    /// The size a view takes as the update's windows give it (their width, its own height), once it
+    /// has laid out — its notes measure themselves — in a window off screen.
+    private static func fitted<V: View>(_ view: V) async -> CGSize {
+        let host = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: NSRect(x: -4000, y: -4000, width: UpdateWindowLayout.width, height: 400),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        window.orderBack(nil)
+        for _ in 0..<4 {
+            host.layoutSubtreeIfNeeded()
+            try? await Task.sleep(nanoseconds: 120_000_000)
+        }
+        let size = host.fittingSize
+        window.orderOut(nil)
+        return CGSize(width: UpdateWindowLayout.width, height: ceil(size.height))
+    }
+
     // MARK: A virtual machine's start
 
     /// The cover over a profile's machine while its start puts the profile's settings in place
@@ -1112,6 +1258,38 @@ enum UISnapshots {
                 MachineCoverView(model: model, still: shot.still)
             }.capture(into: folder)
         }
+        // The machine's window as the helper draws it: Lumen's bar over the screen (the cover here,
+        // as at a start) — a machine through a proxy, its answer time and UDP; and one without a
+        // proxy whose network does not work. The window's own buttons are drawn where they are.
+        let proxied = VMProfile(name: "Vienna", proxy: ProxySettings(kind: .socks5, host: "at.proxy.example", port: 1080), // l10n: not text
+                                timeZoneIdentifier: "Europe/Vienna", countryCode: "AT")
+        let exit = sampleWorks(.socks5, "203.0.113.30", "AT", "Europe/Vienna", "Vienna", [42]) // l10n: not text
+        let windows: [(name: String, bar: VMHelperRequest.WindowBar, ping: Int?, trouble: String?)] = [
+            ("vm-window-bar", VMCenter.windowBar(for: proxied, exit: exit, udp: .throughProxy), 42, nil),
+            ("vm-window-bar-direct", VMCenter.windowBar(for: VMProfile(name: "Vienna", proxy: nil), exit: nil, udp: .direct), nil, // l10n: not text
+             L("vm.window.trouble")),
+        ]
+        for window in windows {
+            let bar = MachineTitleBarModel(name: "Vienna", bar: window.bar, texts: VMCenter.helperTexts) // l10n: not text
+            bar.latency = window.ping
+            bar.bytesUp = 48_300_000
+            bar.bytesDown = 912_000_000
+            bar.trouble = window.trouble
+            let cover = MachineCoverModel(name: "Vienna", texts: texts, stage: .look) // l10n: not text
+            problems += await Shot(name: window.name, size: CGSize(width: 1280, height: 860), titled: false) {
+                VStack(spacing: 0) {
+                    MachineTitleBar(model: bar)
+                        .frame(height: 28)
+                        .overlay(alignment: .leading) {
+                            HStack(spacing: 8) {
+                                ForEach(0..<3, id: \.self) { _ in Circle().fill(Color.white.opacity(0.22)).frame(width: 12, height: 12) }
+                            }
+                            .padding(.leading, 12)
+                        }
+                    MachineCoverView(model: cover, still: 3.0)
+                }
+            }.capture(into: folder)
+        }
         return problems
     }
 
@@ -1120,8 +1298,9 @@ enum UISnapshots {
     /// The virtual machines' rows as they say what happened (no vault, no machine): one running;
     /// one asleep; one whose proxy rejected its login at the start, said as the check found it;
     /// one not started onto a disk that is nearly full; one macOS refused for Apple's limit, in
-    /// the interface's words with the system's under them; one shut down instead of kept as it
-    /// was, for want of room for its state.
+    /// the interface's words (the system's go to the log); one shut down instead of kept as it
+    /// was, for want of room for its state. Each a line with its action; the proxy's with what to
+    /// do opened under «Подробнее».
     private static func machinesList(into folder: URL) async -> Int {
         let guest = VMGuestStatus(text: "LUMEN_TOOLS_VERSION=13\nLUMEN_MACOS_VERSION=26.1\nLUMEN_SAFARI_VERSION=26.1\n")
         func proxy(_ host: String) -> ProxySettings {
@@ -1146,7 +1325,8 @@ enum UISnapshots {
                   exit: sampleWorks(.socks5, "198.51.100.7", "US", "America/New_York", "New York", [140]), guest: guest,
                   disk: 4 * gigabyte, asleep: true),
             .init(profile: machine("Mail FR", "fr.proxy.example", "FR"), // l10n: not text
-                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte),
+                  problem: VMCenter.proxyProblem(rejectedProxy, check: rejected), exit: rejected, guest: guest, disk: 5 * gigabyte,
+                  expanded: true),
             .init(profile: machine("Bank UK", "uk.proxy.example", "GB", display: "imac-24"), // l10n: not text
                   problem: VMCenter.roomText(of: VMStartRoom.Problem.full(needed: VMStartRoom.floorBytes, free: gigabyte + gigabyte / 4)),
                   guest: guest, disk: 7 * gigabyte),
@@ -1224,9 +1404,10 @@ enum UISnapshots {
                                                                                 "Amsterdam", [138, 142, 160]))
             }
             let addLine = added
-            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 470), titled: false) {
-                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine)
+            problems += await Shot(name: "sheet-proxy-add", size: CGSize(width: 560, height: 680), titled: false) {
+                ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: addLine, onOpenVPN: { _ in })
             }.capture(into: folder)
+            problems += await proxyAdding(into: folder, proxies: proxies, rows: rows)
             problems += await Shot(name: "sheet-proxy-add-unreadable", size: CGSize(width: 560, height: 380), titled: false) {
                 ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: ProxyLine(text: "1.2.3.4:1080:alice"))
             }.capture(into: folder)
@@ -1247,6 +1428,91 @@ enum UISnapshots {
             print("FAIL could not make the sample proxy list: \(error)")
             return 1
         }
+    }
+
+    // MARK: Adding: a proxy, a link, OpenVPN
+
+    /// What Add offers (the owner did not find OpenVPN or the links in 0.1.18): its choices, as
+    /// under the header's Add; Add's sheet empty (the field's example names every form) and with
+    /// a VLESS link recognised; OpenVPN's sheet empty and with a file read; the empty list, which
+    /// offers the same choices; the profile editor's connection with Add to List…, under New and
+    /// under From the List with the list empty.
+    private static func proxyAdding(into folder: URL, proxies: ProxyListModel, rows: [ProfileRowItem]) async -> Int {
+        var problems = 0
+        problems += await Shot(name: "proxies-add-choices", size: CGSize(width: 320, height: 300), titled: false) {
+            ProxyAddChoicesView(choose: { _ in }, importList: {})
+                .background(Theme.raised)
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-proxy-add-empty", size: CGSize(width: 560, height: 680), titled: false) {
+            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, onOpenVPN: { _ in })
+        }.capture(into: folder)
+        let link = "vless://b831381d-6324-4d53-ad4f-8cda48b30811@nl1.example.com:443?encryption=none&flow=xtls-rprx-vision" // l10n: not text
+            + "&security=reality&sni=www.example.com&pbk=SbVKOEMjK0sIlbwg4akyBg5mL5KZwwB-ed4eEE7YnRc&sid=6ba85179e30d4fc2&type=tcp#Amsterdam" // l10n: not text
+        problems += await Shot(name: "sheet-proxy-add-link", size: CGSize(width: 560, height: 470), titled: false) {
+            ProxyEditView(proxies: proxies, entry: nil, profileCount: 0, line: ProxyLine(text: link), choice: .link, onOpenVPN: { _ in })
+        }.capture(into: folder)
+        problems += await Shot(name: "sheet-openvpn-add", size: CGSize(width: 560, height: 420), titled: false) {
+            OpenVPNImportView(proxies: proxies)
+        }.capture(into: folder)
+        // A provider's file, read as the sheet opens (dropped on Add's sheet, or opened in the Finder).
+        let ovpnFolder = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-ovpn-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: ovpnFolder) }
+        let ovpn = ovpnFolder.appendingPathComponent("Amsterdam-UDP.ovpn")
+        let certificate = "-----BEGIN CERTIFICATE-----\nMIIBszCCAVmgAwIBAgIUQ0E=\n-----END CERTIFICATE-----" // l10n: not text
+        let configuration = ["client", "dev tun", "remote nl1.vpn.example.net 1194 udp", "remote nl2.vpn.example.net 443 tcp", // l10n: not text
+                             "nobind", "persist-tun", "remote-cert-tls server", "cipher AES-256-GCM", "auth-user-pass", // l10n: not text
+                             "<ca>", certificate, "</ca>"].joined(separator: "\n") // l10n: not text
+        do {
+            try FileManager.default.createDirectory(at: ovpnFolder, withIntermediateDirectories: true)
+            try configuration.write(to: ovpn, atomically: true, encoding: .utf8)
+            problems += await Shot(name: "sheet-openvpn-add-file", size: CGSize(width: 560, height: 560), titled: false) {
+                OpenVPNImportView(proxies: proxies, file: ovpn)
+            }.capture(into: folder)
+            // Stressed: a long file name, many servers, many notices.
+            let long = ovpnFolder.appendingPathComponent("Provider-Netherlands-Amsterdam-Mobile-4G-Rotating-Pool-UDP-1194-very-long-name.ovpn")
+            let stressed = ["client", "dev tun"] + (1...12).map { "remote nl\($0).vpn.example.net 1194 udp" } // l10n: not text
+                + ["nobind", "persist-tun", "persist-key", "resolv-retry infinite", "verb 3", "mute 20", "route-delay 2", // l10n: not text
+                   "redirect-gateway def1", "user nobody", "group nogroup", "remote-cert-tls server", "auth-user-pass", // l10n: not text
+                   "<ca>", certificate, "</ca>"] // l10n: not text
+            try stressed.joined(separator: "\n").write(to: long, atomically: true, encoding: .utf8)
+            problems += await Shot(name: "sheet-openvpn-add-long", size: CGSize(width: 560, height: 600), titled: false) {
+                OpenVPNImportView(proxies: proxies, file: long)
+            }.capture(into: folder)
+        } catch {
+            print("FAIL could not write the sample .ovpn: \(error)")
+            problems += 1
+        }
+        // The empty list: a vault of its own, with no proxy.
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("pb-snapshots-proxies-empty-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        do {
+            let vault = try MasterVault.create(in: root, password: "snapshots", iterations: 10_000)
+            let empty = ProxyListModel(vault: vault) { print("FAIL sample empty proxy list: \($0)") }
+            problems += await Shot(name: "proxies-empty", size: CGSize(width: 1400, height: 860), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
+                                proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
+            }.capture(into: folder)
+            problems += await Shot(name: "proxies-empty-narrow", size: CGSize(width: ProfilesScreen.minimumWindowWidth, height: 760), edges: true) {
+                ProfilesPreview(rows: rows, section: .proxies, proxyCount: 0,
+                                proxies: AnyView(ProxyListPanel(proxies: empty, selection: .constant([]))))
+            }.capture(into: folder)
+        } catch {
+            print("FAIL could not make the empty proxy list: \(error)")
+            problems += 1
+        }
+        // The editor: New, empty (the field's example names the links), and From the List with
+        // the list empty — Add to List… beside the connection's choice in both.
+        var fresh = ProfileDraft()
+        fresh.name = "Northwind"
+        fresh.proxyMode = .new
+        var savedEmpty = fresh
+        savedEmpty.proxyMode = .saved
+        for (name, sample) in [("editor-network-add", fresh), ("editor-network-saved-empty", savedEmpty)] {
+            problems += await Shot(name: name, size: ProfileEditorForm.size, titled: false) {
+                EditorPreview(draft: sample, topic: .connection, isNew: true)
+            }.capture(into: folder)
+        }
+        return problems
     }
 
     // MARK: The list after a profile comes back
@@ -1764,8 +2030,9 @@ enum UISnapshots {
             ProfileRowItem(id: id(5), name: "Travel", activity: .sealing,
                            exit: .proxy(endpoint: "lisbon.example:1080", countryCode: "PT"), ephemeral: false,
                            appearsAs: mac, lastUsed: now.addingTimeInterval(-60)),
+            // Waiting for its turn in a selection's Launch, while "Launch Review" starts.
             ProfileRowItem(id: id(6), name: "Shopping", activity: .stopped, exit: .direct, ephemeral: true,
-                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400)),
+                           appearsAs: mac, lastUsed: now.addingTimeInterval(-3 * 86_400), launchQueued: true),
             // At its last launch no geolocation service answered through its proxy.
             ProfileRowItem(id: id(7), name: "Banking", activity: .stopped,
                            exit: .proxy(endpoint: "10.20.0.2:3128", countryCode: nil), ephemeral: false,
@@ -2127,6 +2394,7 @@ private struct ProfilesPreview: View {
     var engineWarning: EngineWarning.Facts?
     var updatedTo: String?
     var updateOffer: UpdateOffer?
+    var pendingUpdate: UpdateOffer?
     var order: ProfileListOrder = .created
 
     var body: some View {
@@ -2136,7 +2404,7 @@ private struct ProfilesPreview: View {
                        inspectorInfo: inspectorInfo,
                        guardReady: true, initialSelection: selected, initialBannersExpanded: bannersExpanded,
                        proxyProblem: proxyProblem, guardNotice: guardNotice, engineWarning: engineWarning,
-                       updateOffer: updateOffer, updatedTo: updatedTo)
+                       updateOffer: updateOffer, updatedTo: updatedTo, pendingUpdate: pendingUpdate)
     }
 }
 

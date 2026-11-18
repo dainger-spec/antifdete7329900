@@ -397,6 +397,35 @@ struct SettingsCaption: View {
     }
 }
 
+/// "More": what a page explains beyond its settings, shown on demand (the owner: details only when
+/// asked for, not a paragraph under every control). A caption-like line with a chevron.
+struct SettingsMoreButton: View {
+    let title: String
+    @Binding var expanded: Bool
+
+    var body: some View {
+        Button {
+            withAnimation(Theme.appearAnimation) { expanded.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Text(title)
+                    .lumenCaps()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(Theme.textTertiary)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 26)
+        .padding(.bottom, 12)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(L(expanded ? "settings.more.expanded" : "settings.more.collapsed"))
+    }
+}
+
 /// One setting (the design's row): its title, a sentence on what it does, when that takes effect,
 /// and its control at the right.
 struct SettingRow<Control: View>: View {
@@ -520,6 +549,9 @@ private struct DiagnosticsSettings: View {
     @State private var report = ""
     @State private var collecting = false
     @State private var outcome: String?
+    /// The ZIP just saved: Show in Finder beside the line that says so.
+    @State private var saved: URL?
+    @State private var failed = false
     @State private var copied = false
 
     var body: some View {
@@ -541,15 +573,28 @@ private struct DiagnosticsSettings: View {
                 }
                 .buttonStyle(.lumenSecondary)
                 .disabled(report.isEmpty)
-                if collecting { ProgressView().controlSize(.small) }
+                if collecting {
+                    ProgressView().controlSize(.small)
+                    Text(L("settings.diagnostics.collecting"))
+                        .font(.lumenSecondary)
+                        .foregroundStyle(Theme.textSecondary)
+                }
             }
             .padding(.top, 12)
             if let outcome {
-                Text(outcome)
-                    .font(.lumenSecondary)
-                    .foregroundStyle(Theme.textSecondary)
-                    .textSelection(.enabled)
-                    .padding(.top, 8)
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(outcome)
+                        .font(.lumenSecondary)
+                        .foregroundStyle(failed ? Theme.danger : Theme.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    if let saved {
+                        Button(L("settings.diagnostics.reveal")) { SystemOpen.revealInFinder([saved]) }
+                            .buttonStyle(.lumenSecondary)
+                            .controlSize(.small)
+                    }
+                }
+                .padding(.top, 8)
             }
             Text(L("settings.diagnostics.report"))
                 .font(.lumenSection)
@@ -582,13 +627,17 @@ private struct DiagnosticsSettings: View {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         collecting = true
         outcome = nil
+        saved = nil
+        failed = false
         Task {
             let data = await Diagnostics.bundle(Diagnostics.snapshot(model: model))
             do {
                 try data.write(to: url, options: .atomic)
                 outcome = String(format: L("settings.diagnostics.saved"), url.lastPathComponent)
+                saved = url
             } catch {
-                outcome = String(format: L("settings.diagnostics.failed"), error.localizedDescription)
+                outcome = String(format: L("settings.diagnostics.failed"), errorText(error))
+                failed = true
             }
             collecting = false
         }
@@ -730,6 +779,13 @@ private struct ProxySettingsPane: View {
         SettingsPage(title: L("settings.section.proxies"), subtitle: L("settings.proxies.subtitle")) {
             SettingRow(L("settings.proxies.list"), detail: L("settings.proxies.list.detail"), effect: nil) {
                 Button(L("settings.proxies.list.open")) { model.showProxyList() }
+                    .buttonStyle(.lumenSecondary)
+                    .disabled(model.proxyList == nil)
+            }
+            // What can be added, by name — OpenVPN, VLESS, VMess, Trojan, Shadowsocks — so that the
+            // search finds it; Add… opens the section's own choices.
+            SettingRow(L("settings.proxies.add"), detail: L("settings.proxies.add.detail"), effect: nil) {
+                Button(L("settings.proxies.add.open")) { model.requestProxyAdd(ProxyAddRequest()) }
                     .buttonStyle(.lumenSecondary)
                     .disabled(model.proxyList == nil)
             }

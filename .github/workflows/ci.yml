@@ -121,8 +121,10 @@ jobs:
         # Safari's pieces, and a profile started as the app starts one opening in Safari's own window
         # (Lumen --release-check) — then zipped, the zip signed with Ed25519, the appcast made and
         # signed, both checked with the app's own code (pbupdate verify). Notarization and stapling
-        # are skipped and said so.
-        run: VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
+        # are skipped and said so. Without OpenVPN and the links' relay here (OVPN=0 XRAY=0): their
+        # builds from source are the full pipeline's dry run's, which a release needs passed, and its
+        # jobs of each (macOS runners are shared).
+        run: OVPN=0 XRAY=0 VERSION=0.1.1 BUILD=2 OUT=build/release scripts/release.sh
       - name: The release gate fails where Safari's chrome is not hosted (its controls)
         # A gate that cannot fail proves nothing. The sandboxed build, and the release with Safari's
         # chrome turned off for the profile's process (--control), must each come back FAIL, for

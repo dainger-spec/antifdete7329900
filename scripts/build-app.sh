@@ -31,6 +31,25 @@
 #   VM=check scripts/build-app.sh   # builds the helper and starts it once, for CI; the app is as
 #                                   # without it
 #
+#   OVPN=1 SANDBOX=0 scripts/build-app.sh # with OpenVPN connections (docs/OPENVPN.md): Contents/MacOS/
+#                                   # openvpn (OpenVPN 2.7 from pinned sources, unmodified:
+#                                   # scripts/build-openvpn.sh, Xcode's tools alone) and
+#                                   # Contents/MacOS/LumenTunnel (its tun), each signed with no
+#                                   # entitlement; their licenses and sources in
+#                                   # Contents/Resources/ThirdParty/OpenVPN. Without it the app cannot
+#                                   # run an OpenVPN connection and says so.
+#   OVPN=check scripts/build-app.sh # builds both and starts each once, for CI; the app is as without them
+#   XRAY=1 SANDBOX=0 scripts/build-app.sh   # with the relay of VLESS, VMess, Trojan and Shadowsocks links
+#                                   # (docs/TUNNEL.md, "Links"): Xray-core, built from its pinned source
+#                                   # by scripts/build-xray.sh (git, curl and unzip: it fetches its own
+#                                   # pinned Go and checks it) and checked against the SHA-256
+#                                   # scripts/xray.lock records, as Contents/MacOS/LumenXray — signed
+#                                   # apart with no entitlement — with its licences in
+#                                   # Contents/Resources/ThirdParty/Xray/NOTICE.txt. XRAY_BINARY=path
+#                                   # takes a build made already (CI's), checked the same way. Without
+#                                   # it a link's profile does not start, and says why.
+#   scripts/release.sh builds with OVPN=1 and XRAY=1 unless told OVPN=0 or XRAY=0.
+#
 # A profile's process — and every process that runs Safari's code — is started from
 # Contents/MacOS/LumenProfile, a copy of the executable signed with the base entitlements and library
 # validation off: never the app's application identifier, app group or network extension rights,
@@ -62,6 +81,8 @@ APP="$APP_DIR/Lumen.app"
 NE="${NE:-0}"
 CAM="${CAM:-0}"
 VM="${VM:-0}"
+OVPN="${OVPN:-0}"
+XRAY="${XRAY:-0}"
 EXTENSION_ID="${EXTENSION_ID:-$BUNDLE_ID.PacketTunnel}"
 if [[ "$NE" == "1" ]]; then
   : "${TEAM_ID:?NE=1 needs TEAM_ID (your Apple Developer team)}"
@@ -184,7 +205,7 @@ rm -rf "$ICON_DIR"
 cp Resources/fingerprint_probe.js "$APP/Contents/Resources/fingerprint_probe.js"
 # "What sites see" runs the probe and these, the scripts of CI's live comparison (scripts/live_compare.py).
 cp -R Resources/SiteProbes "$APP/Contents/Resources/SiteProbes"
-# The licences of what the app carries of others' work (the launch screen's letters: Pacifico, SIL OFL 1.1).
+# The licences of what the app carries of others' work (OpenVPN, lwIP, Xray: where each is, below).
 cp Resources/ThirdPartyNotices.txt "$APP/Contents/Resources/ThirdPartyNotices.txt"
 
 # Localized strings into Bundle.main, where the app looks them up (see Localization.swift).
@@ -368,6 +389,72 @@ if [[ "$VM" == "1" || "$VM" == "check" ]]; then
   fi
 fi
 
+# OpenVPN connections (docs/OPENVPN.md): openvpn and LumenTunnel beside the app's executable, with
+# the licenses and sources that must ship with them. Neither holds any entitlement: OpenVPN runs
+# confined by a sandbox the app applies, without root.
+OVPN_PROGRAMS=()
+if [[ "$OVPN" == "1" || "$OVPN" == "check" ]]; then
+  # For each architecture the app is built for, as the links' relay is (below).
+  echo "OpenVPN (OVPN=$OVPN): openvpn from its pinned sources for $(lipo -archs "$BIN_DIR/PrivacyBrowser"), and LumenTunnel"
+  ARCHS="$(lipo -archs "$BIN_DIR/PrivacyBrowser")" scripts/build-openvpn.sh build/openvpn
+  swift build -c "$CONFIG" --product LumenTunnel
+  # Each started once: a program that does not load is found here, not at a person's launch.
+  "$BIN_DIR/LumenTunnel" --version
+  # `openvpn --version` ends with status 1 by design: its words are what is checked.
+  OVPN_VERSION_LINE="$(build/openvpn/openvpn --version 2>&1 || true)"
+  [[ "$OVPN_VERSION_LINE" == "OpenVPN 2."* ]] || { echo "error: build/openvpn/openvpn does not start" >&2; exit 1; }
+  echo "${OVPN_VERSION_LINE%%$'\n'*}"
+  if [[ "$OVPN" == "1" ]]; then
+    [[ "$SANDBOX" != "1" ]] || { echo "error: OVPN=1 needs SANDBOX=0 (a profile's tunnel is for a profile in its own process)" >&2; exit 1; }
+    cp build/openvpn/openvpn "$APP/Contents/MacOS/openvpn"
+    cp "$BIN_DIR/LumenTunnel" "$APP/Contents/MacOS/LumenTunnel"
+    mkdir -p "$APP/Contents/Resources/ThirdParty/OpenVPN"
+    cp build/openvpn/licenses/* "$APP/Contents/Resources/ThirdParty/OpenVPN/"
+    cp Sources/CLwIP/lwip/COPYING "$APP/Contents/Resources/ThirdParty/OpenVPN/lwIP-COPYING.txt"
+    OVPN_PROGRAMS=("$APP/Contents/MacOS/openvpn" "$APP/Contents/MacOS/LumenTunnel")
+  fi
+fi
+
+# The relay of links (docs/TUNNEL.md, "Links"): Xray-core from its pinned source, the same bytes
+# scripts/xray.lock records for each architecture this app is built for (a universal app gets a
+# universal relay), whoever built it.
+XRAY_HELPER=""
+if [[ "$XRAY" == "1" ]]; then
+  [[ "$SANDBOX" != "1" ]] || { echo "error: XRAY=1 needs SANDBOX=0 (a sandboxed app's child would inherit the App Sandbox)" >&2; exit 1; }
+  echo "The links' relay (XRAY=1): Xray $(awk -F= '$1 == "XRAY_TAG" { print $2 }' scripts/xray.lock) for $(lipo -archs "$BIN_DIR/PrivacyBrowser")${XRAY_BINARY:+, from $XRAY_BINARY}"
+  XRAY_DIR="$PWD/build/xray"
+  mkdir -p "$XRAY_DIR"
+  XRAY_PARTS=()
+  for arch in $(lipo -archs "$BIN_DIR/PrivacyBrowser"); do
+    case "$arch" in
+      arm64) goarch=arm64 ;;
+      x86_64) goarch=amd64 ;;
+      *) echo "error: no relay for the architecture $arch" >&2; exit 1 ;;
+    esac
+    part="$XRAY_DIR/xray-darwin-$goarch"
+    if [[ -n "${XRAY_BINARY:-}" ]]; then
+      # (CI builds it where this would put it: then it is already there.)
+      [[ "$XRAY_BINARY" -ef "$part" ]] || cp "$XRAY_BINARY" "$part"
+    else
+      scripts/build-xray.sh --arch "$goarch" --out "$part"
+    fi
+    expected="$(awk -F= -v key="SHA256_darwin_$goarch" '$1 == key { print $2 }' scripts/xray.lock)"
+    actual="$(shasum -a 256 "$part" | awk '{ print $1 }')"
+    [[ -n "$expected" && "$actual" == "$expected" ]] \
+      || { echo "error: the relay for $arch is $actual, and scripts/xray.lock records ${expected:-nothing}: refused" >&2; exit 1; }
+    XRAY_PARTS+=("$part")
+  done
+  XRAY_HELPER="$APP/Contents/MacOS/LumenXray"
+  if [[ "${#XRAY_PARTS[@]}" == "1" ]]; then
+    cp "${XRAY_PARTS[0]}" "$XRAY_HELPER"
+  else
+    lipo -create "${XRAY_PARTS[@]}" -output "$XRAY_HELPER"
+  fi
+  chmod 755 "$XRAY_HELPER"
+  mkdir -p "$APP/Contents/Resources/ThirdParty/Xray"
+  cp Resources/Xray/NOTICE.txt "$APP/Contents/Resources/ThirdParty/Xray/NOTICE.txt"
+fi
+
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature
 # without it refuses the debugger ("Not allowed to attach to process"), and hosting Safari's chrome
 # is debugged by stopping inside Safari's own code. Never for a build that goes anywhere.
@@ -400,6 +487,12 @@ codesign --force --options runtime "$TIMESTAMP" --sign "$SIGN_IDENTITY" "$HELPER
 codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID" \
   --entitlements "$PROFILE_ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$PROFILE_EXECUTABLE"
+# The links' relay: under a name of its own (the network guard takes it for no profile, and lets it
+# ask nothing of it), with no entitlement at all, the hardened runtime on.
+if [[ -n "$XRAY_HELPER" ]]; then
+  codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID.Xray" \
+    --sign "$SIGN_IDENTITY" "$XRAY_HELPER"
+fi
 # The machines' helper: under a name of its own (the network guard takes it for no profile), with
 # the virtualization right alone.
 if [[ -n "$VM_HELPER" ]]; then
@@ -407,6 +500,12 @@ if [[ -n "$VM_HELPER" ]]; then
     --entitlements Resources/LumenVM.entitlements \
     --sign "$SIGN_IDENTITY" "$VM_HELPER"
 fi
+# OpenVPN's programs: under names of their own (the network guard takes them for no profile), with
+# no entitlement at all.
+for program in ${OVPN_PROGRAMS[@]+"${OVPN_PROGRAMS[@]}"}; do
+  codesign --force --options runtime "$TIMESTAMP" --identifier "$BUNDLE_ID.$(basename "$program")" \
+    --sign "$SIGN_IDENTITY" "$program"
+done
 codesign --force --options runtime "$TIMESTAMP" \
   --entitlements "$ENTITLEMENTS" \
   --sign "$SIGN_IDENTITY" "$APP"
@@ -425,6 +524,28 @@ if [[ -n "$VM_HELPER" ]]; then
     fi
   done
   "$VM_HELPER" --check
+fi
+for program in ${OVPN_PROGRAMS[@]+"${OVPN_PROGRAMS[@]}"}; do
+  codesign --verify --strict "$program"
+  # Read back: no entitlement, the debugger's included.
+  if codesign -d --entitlements - --xml "$program" 2>/dev/null | grep -q "<key>"; then
+    echo "error: $program is signed with entitlements: it holds none" >&2; exit 1
+  fi
+  [[ "$("$program" --version 2>&1 || true)" == *"2."* || "$("$program" --version 2>&1 || true)" == "LumenTunnel "* ]] \
+    || { echo "error: $program does not start as signed" >&2; exit 1; }
+done
+if [[ -n "$XRAY_HELPER" ]]; then
+  codesign --verify --strict "$XRAY_HELPER"
+  # No entitlement of any kind: read back from its signature.
+  if [[ -n "$(codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | tr -d '[:space:]')" ]] \
+     && codesign -d --entitlements - --xml "$XRAY_HELPER" 2>/dev/null | grep -F "<key>" >/dev/null; then
+    echo "error: the links' relay is signed with an entitlement: it holds none" >&2; exit 1
+  fi
+  [[ "$(codesign -d -v "$XRAY_HELPER" 2>&1 | awk -F= '/^Identifier=/ { print $2 }')" == "$BUNDLE_ID.Xray" ]] \
+    || { echo "error: the links' relay is not signed as $BUNDLE_ID.Xray" >&2; exit 1; }
+  # It starts, and is the pinned version.
+  "$XRAY_HELPER" version | grep -F "Xray $(awk -F= '$1 == "XRAY_TAG" { sub(/^v/, "", $2); print $2 }' scripts/xray.lock) " >/dev/null \
+    || { echo "error: the links' relay does not start as the pinned Xray" >&2; exit 1; }
 fi
 # No executable holds a relaxation of the hardened runtime beside the network extension's right: the
 # kernel kills it at its start, after it was notarized (0.1.1, 3 November). Read from every

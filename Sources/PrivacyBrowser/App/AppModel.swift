@@ -3,6 +3,7 @@ import BrowserCore
 import Combine
 import Foundation
 import os
+import UpdateProgress
 
 /// App-level state: vault lock state, profile list, and the profile manager.
 @MainActor
@@ -19,7 +20,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var isWorking = false
     /// A sync is running: launches wait for it (it replaces the profiles' files on disk).
     private var isSyncing = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet { if errorMessage == nil { errorTitle = nil } }
+    }
+    /// What the alert of `errorMessage` is titled: what happened ("Update not installed"), when
+    /// whoever raised it said so (`showError(_:title:)`); nil — and the generic «Error» — when it did
+    /// not, or when messages of different titles are shown together.
+    @Published private(set) var errorTitle: String?
+    /// The error alert's title.
+    var errorAlertTitle: String { errorTitle ?? L("common.error") }
     /// Why the master password just typed is not accepted (§10.1): it is the account's password or
     /// the license's key. Shown under its field, on the setup screen and in "Change master password";
     /// cleared as the password changes.
@@ -106,6 +115,9 @@ final class AppModel: ObservableObject {
     let settings = AppSettings()
     /// The Proxies section is asked for from outside the Profiles window (Settings → Proxies).
     @Published var proxiesRequest = false
+    /// Add, asked for from outside the Proxies section (Settings › Proxies' Add…, a `.ovpn` opened
+    /// with Lumen in the Finder): the section takes it as it shows, once the vault is open.
+    @Published var proxyAddRequest: ProxyAddRequest?
     /// File › New Profile (⌘N): the Profiles window opens its editor for a new one.
     @Published var newProfileRequest = false
     /// The command palette (⌘K) is open in the Profiles window.
@@ -121,6 +133,9 @@ final class AppModel: ObservableObject {
     /// The network guard's notice at the foot of the profiles was closed: not again until the app
     /// starts again (kept nowhere but here).
     @Published var guardNoticeHidden = false
+    /// The first run's steps still to show after the vault was made, before the profiles: the
+    /// Touch ID offer and the system extensions' setup (`FirstRun`, `planFirstRun`).
+    @Published var firstRunSteps: [FirstRunStep] = []
     /// Safari on this Mac runs a newer engine than profiles, and OK was not yet pressed for this
     /// pair of versions (`EngineWarning`).
     @Published private(set) var engineWarning: EngineWarning.Facts?
@@ -132,8 +147,22 @@ final class AppModel: ObservableObject {
     /// Nil when there is none, or once the person put it away for this version, until the app
     /// starts again.
     @Published private(set) var updateOffer: UpdateOffer?
-    private var updateOfferPutAway: String?
+    /// The release waiting — found, downloading or ready — whatever was said of it: the sidebar's
+    /// row stays while there is one (`UpdateSidebarRow`).
+    @Published private(set) var pendingUpdate: UpdateOffer?
+    var updateOfferPutAway: String?
     private var updaterObservation: AnyCancellable?
+    private var phaseObservation: AnyCancellable?
+    /// The update's window (`UpdateWindowView`): what it shows; nil while it is closed.
+    @Published var updateWindowMode: UpdateWindowMode?
+    /// After "Update and Restart": the download's and the checks' progress the window shows.
+    @Published var updateProgress: UpdateProgressModel?
+    let updateWindow = UpdateWindowController()
+    /// The release the window opened by itself for in this run: once each.
+    var updateWindowOpenedFor: String?
+    /// Found while the vault was locked: offered once it opens (a window over the password's field
+    /// would take the keyboard from it).
+    var updateToOffer: AppcastItem?
 
     /// "Later" on the offer: not said again for this version in this run.
     func updateOfferSeen() {
@@ -142,6 +171,10 @@ final class AppModel: ObservableObject {
     }
 
     private func offer(for state: UpdateState) -> UpdateOffer? {
+        offer(for: state, putAway: updateOfferPutAway)
+    }
+
+    private func offer(for state: UpdateState, putAway: String?) -> UpdateOffer? {
         let offer: UpdateOffer?
         switch state {
         case .available(let item): offer = UpdateOffer(version: item.version, stage: .available)
@@ -150,7 +183,7 @@ final class AppModel: ObservableObject {
         case .blocked(let item, _): offer = UpdateOffer(version: item.version, stage: .blocked)
         case .idle, .upToDate, .checking, .failed: offer = nil
         }
-        return offer?.version == updateOfferPutAway ? nil : offer
+        return offer?.version == putAway ? nil : offer
     }
 
     func updatedNoticeSeen() {
@@ -273,6 +306,13 @@ final class AppModel: ObservableObject {
         proxiesRequest = true
     }
 
+    /// The Proxies section with Add's choices open (`request.choice` nil) or its sheet; a locked
+    /// vault first asks for its password, and the section shows once it is open.
+    func requestProxyAdd(_ request: ProxyAddRequest) {
+        proxyAddRequest = request
+        activateProfilesWindow()
+    }
+
     var hasRunningProfiles: Bool { manager?.hasRunningProfiles ?? false }
 
     /// Brings the Profiles window to the front (e.g. after closing a profile, or on dock reopen).
@@ -303,6 +343,8 @@ final class AppModel: ObservableObject {
             }.value
             try self.didUnlock(vault)
             self.license.forgetComparisons()
+            // The first run goes on: Touch ID and the system extensions, offered once (`FirstRun`).
+            self.planFirstRun()
         }
     }
 
@@ -317,6 +359,7 @@ final class AppModel: ObservableObject {
             masterPasswordWarning = warning
             masterPasswordRefusal = nil
             license.forgetComparisons()
+            planFirstRun()
         } catch {
             showError(errorText(error))
         }
@@ -552,6 +595,11 @@ final class AppModel: ObservableObject {
             self?.refresh()
         }
         manager.onConfigurationChanged = { [weak self] _ in self?.refresh() }
+        // Cookies a launch put back from their snapshot (docs/COOKIE_RECOVERY.md): in the profile's
+        // journal, with the time of the snapshot they came from.
+        manager.onCookiesRecovered = { [weak self] id, report in
+            self?.recordInJournal(.cookiesRecovered, detail: report.snapshotTakenAt.shown(date: .abbreviated, time: .shortened), for: id)
+        }
         // ⌘, in a profile's window: this app's Settings, in front.
         manager.onShowSettings = { Self.openSettingsWindow() }
         manager.onShowPasswords = { [weak self] id in
@@ -665,7 +713,7 @@ final class AppModel: ObservableObject {
             } else {
                 deviceSettingsUnreadable = true
                 Logger(subsystem: "PrivacyBrowser", category: "Vault").error("settings.bin could not be read: \(error.logKind, privacy: .public); kept, the defaults shown")
-                showError(L("settings.device.unreadable"))
+                showError(L("settings.device.unreadable"), title: L("settings.device.unreadable.title"))
             }
         }
         restartAutomation()
@@ -711,6 +759,8 @@ final class AppModel: ObservableObject {
     /// after every seal attempt is force-sealed instead of left decrypted (also when the quit
     /// joins a Lock already under way). See `WebDataStoreVault.forceSealWhenStoreStaysInUse`.
     func lock(forQuit: Bool = false) async {
+        // What the first run had left to offer is offered no more: the lock screen comes.
+        firstRunSteps = []
         if forQuit {
             recordProfilesToReopen()
             manager?.prepareForQuit()
@@ -848,10 +898,10 @@ final class AppModel: ObservableObject {
             let (transport, scoped) = try syncTransport(for: target, vaultID: repository.vault.vaultID)
             folder = scoped
             if try await SyncEngine(repository: repository, transport: transport).publishVaultHeader() != .published {
-                showError(L("changepw.sync.notThere"))
+                showError(L("changepw.sync.notThere"), title: L("changepw.sync.title"))
             }
         } catch {
-            showError(String(format: L("changepw.sync.later"), errorText(error)))
+            showError(String(format: L("changepw.sync.later"), errorText(error)), title: L("changepw.sync.title"))
         }
     }
 
@@ -1047,6 +1097,9 @@ final class AppModel: ObservableObject {
         }
         // Cookie sync off: the synced cookies go, here and (at the next sync) on the other devices.
         if !saved.syncsCookies { try repository.clearSyncedCookies(for: id) }
+        // Cookie snapshots off (or the profile made ephemeral): no copy of its cookies is kept. A run
+        // of it under way stops copying at its next look (`CookieSnapshotKeeper.snapshot`).
+        if !saved.keepsCookieSnapshots, stored.keepsCookieSnapshots { try repository.removeCookieSnapshots(for: id) }
         if try repository.summary(for: id).name != name {
             try repository.rename(id, to: name)
         }
@@ -1182,6 +1235,9 @@ final class AppModel: ObservableObject {
 
     /// Profiles whose proxy is getting a new IP before they start (the row says so).
     @Published private(set) var changingIPBeforeLaunch: Set<UUID> = []
+    /// Profiles of a selection's Launch waiting for their turn (`launchProfiles`, four start at a
+    /// time): their rows say so, instead of looking as if the click did nothing to them.
+    @Published var launchQueued: Set<UUID> = []
 
     /// A profile on a proxy that changes its IP at each launch (`ProxyListEntry.changesIPOnLaunch`)
     /// gets a new one first — unless another running profile is on that proxy, whose pages would
@@ -1236,6 +1292,25 @@ final class AppModel: ObservableObject {
         return outcome
     }
 
+    /// The profile's cookie snapshots, newest first (docs/COOKIE_RECOVERY.md); nil when they could
+    /// not be read — the next copy moves the file aside, a newer version's is left as it is.
+    func cookieSnapshots(for id: UUID) -> [CookieSnapshot]? {
+        guard let repository else { return [] }
+        return (try? repository.cookieSnapshots(for: id))?.newestFirst
+    }
+
+    /// Puts back the cookies of `snapshot` the person chose, still valid now
+    /// (`CookieRecovery.manualRestore`): they replace the profile's cookies of the same name, domain
+    /// and path, and leave the others. At once when it runs, else at its next launch, before its first
+    /// page — as an import, which it is: Lumen's own change, copied at once, and with cookie sync on
+    /// recorded as a change of now.
+    func restoreCookies(from snapshot: CookieSnapshot, into id: UUID) async throws -> ProfileManager.CookieImportOutcome {
+        guard let manager else { throw CoreError.vaultNotFound }
+        let outcome = try await manager.importCookies(CookieRecovery.manualRestore(from: snapshot, now: Date()), into: id)
+        recordInJournal(.cookiesRestored, detail: snapshot.takenAt.shown(date: .abbreviated, time: .shortened), for: id)
+        return outcome
+    }
+
     /// Every cookie of a profile, for an export (`ProfileManager.exportCookies`).
     func exportCookies(of id: UUID) async throws -> [ImportedCookie] {
         guard let manager else { throw CoreError.vaultNotFound }
@@ -1270,7 +1345,7 @@ final class AppModel: ObservableObject {
         do {
             try repository.saveWarmUpPlan(plan, for: id)
         } catch {
-            if !quiet { showError(error.localizedDescription) }
+            if !quiet { showError(named(String(format: L("warmup.error.planNotSaved"), errorText(error)), for: id)) }
         }
         // Starting or being encrypted (a launch or a stop under way): let that finish first.
         while manager.busyProfileIDs.contains(id) { try? await Task.sleep(nanoseconds: 100_000_000) }
@@ -1321,7 +1396,7 @@ final class AppModel: ObservableObject {
             objectWillChange.send()
             return true
         } catch {
-            showError(error.localizedDescription)
+            showError(String(format: L("warmup.templates.saveFailed"), errorText(error)))
             return false
         }
     }
@@ -1334,7 +1409,7 @@ final class AppModel: ObservableObject {
             try stored.save(to: vault)
             objectWillChange.send()
         } catch {
-            showError(error.localizedDescription)
+            showError(String(format: L("warmup.templates.deleteFailed"), errorText(error)))
         }
     }
 
@@ -1440,7 +1515,7 @@ final class AppModel: ObservableObject {
             // With sync a renewal carries the synced profiles' tokens, without it none: the license is told.
             refresh()
         } catch {
-            showError(error.localizedDescription)
+            showError(errorText(error))
         }
     }
 
@@ -1903,7 +1978,7 @@ final class AppModel: ObservableObject {
         do {
             try updateDeviceSettings { $0.automation = settings }
         } catch {
-            showError(String(format: L("automation.error.save"), error.localizedDescription))
+            showError(String(format: L("automation.error.save"), errorText(error)))
             return
         }
         restartAutomation()
@@ -1980,7 +2055,8 @@ final class AppModel: ObservableObject {
 
     /// Once, when the app's window first appears — never in the self-test, the snapshots or a
     /// profile's own process: the updater of a build with a feed, its automatic checks when they
-    /// are on, and what became of the last update when it was not installed.
+    /// are on, and what became of the last update — the new version's welcome, or, when it was not
+    /// installed, why, in the interface's words (`UpdateOutcome.kind`), never the installer's.
     func startUpdates() {
         guard !updatesStarted else { return }
         updatesStarted = true
@@ -1995,19 +2071,38 @@ final class AppModel: ObservableObject {
                 if case .checking = state { return }
                 let offer = self.offer(for: state)
                 if self.updateOffer != offer { self.updateOffer = offer }
+                let pending = self.offer(for: state, putAway: nil)
+                if self.pendingUpdate != pending { self.pendingUpdate = pending }
+                self.offerUpdateWindow(for: state)
+            }
+        }
+        phaseObservation = $phase.sink { [weak self] phase in
+            guard phase == .unlocked else { return }
+            Task { @MainActor in
+                guard let self, let item = self.updateToOffer else { return }
+                self.updateToOffer = nil
+                if let state = self.updater?.state, state.item == item { self.offerUpdateWindow(for: state) }
             }
         }
         updater.start()
+        let log = Logger(subsystem: "PrivacyBrowser", category: "Updates")
         switch updater.notice {
         case .outcome(let outcome)?:
-            switch outcome.result {
-            case .installed: updatedTo = outcome.version // and the Updates section says when
-            case .rolledBack: showError(String(format: L("updates.notice.rolledBack"), outcome.version, outcome.detail))
-            case .refused: showError(String(format: L("updates.notice.refused"), outcome.version, outcome.detail))
-            case .gaveUp: showError(String(format: L("updates.notice.gaveUp"), outcome.version, outcome.detail))
+            log.notice("Last update: \(outcome.result.rawValue, privacy: .public) (\(outcome.kind.rawValue, privacy: .public)): \(outcome.detail, privacy: .private)")
+            if outcome.result == .installed {
+                // Over the lock screen, once the launch screen (if any) has gone; without the keyboard.
+                let installed = InstalledUpdate(version: outcome.version, notes: updater.installedItem?.notes ?? "")
+                Task { @MainActor [weak self] in
+                    while let self, self.welcome != nil, !self.welcomeFinished { try? await Task.sleep(nanoseconds: 200_000_000) }
+                    self?.showUpdateWindow(.installed(installed), focus: false)
+                }
+            } else {
+                showUpdateWindow(.notice(String(format: L("updates.outcome.\(outcome.kind.rawValue)"), outcome.version)), focus: false)
             }
-        case .deferred(let reason)?:
-            showError(String(format: L("updates.notice.deferred"), reason))
+        case .deferred(.gate)?:
+            showUpdateWindow(.notice(UpdateNoticeText.deferred("")), focus: false)
+        case .deferred(.installer)?:
+            showUpdateWindow(.notice(L("updates.notice.installerDidNotStart")), focus: false)
         case nil:
             break
         }
@@ -2020,38 +2115,140 @@ final class AppModel: ObservableObject {
     }
 
     /// At the end of a quit that sealed every profile (`QuitCoordinator`): the gate, then the
-    /// installer. Whatever stops it is said at the next launch; the app quits either way.
+    /// installer — whose window shows the install, and which opens the new version. Whatever stops
+    /// it is said at the next launch; the app quits either way.
     func installUpdateAtQuit() async {
         guard let updater, updater.isReady else { return }
         switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: forcedExitsBeforeQuit)) {
         case .started, .nothingReady: break
-        case .refused(let reasons): updater.rememberNotInstalled(reasons.joined(separator: "; "))
+        case .refused(let reasons): updater.rememberNotInstalled(.gate, reasons: reasons.joined(separator: "; "))
         case .blocked: break // the Updates sheet says where the app has to be
-        case .failed(let reason): updater.rememberNotInstalled(reason)
+        case .failed(let reason): updater.rememberNotInstalled(.installer, reasons: reason)
         }
     }
 
-    /// "Install Now": the quit path, asked for here — every profile stopped and sealed (the vault
-    /// locked) — then the gate. If it does not pass, the app does not quit: it stays locked, says
-    /// why, and keeps the update for the next quit.
+    /// The quit path, asked for here — every profile stopped and sealed (the vault locked) — then
+    /// the gate, and the installer, which restarts Lumen. The update's window shows "Checking" the
+    /// while; the installer's own window, in the same place, takes over. If the gate does not pass,
+    /// the app does not quit: it stays locked, says why in the window, and keeps the update.
     func installUpdateNow() async {
-        guard let updater, updater.isReady, !isInstallingUpdate else { return }
+        guard let updater, updater.isReady, !isInstallingUpdate, case .ready(let item) = updater.state else { return }
         isInstallingUpdate = true
         defer { isInstallingUpdate = false }
+        if updateProgress == nil { updateProgress = UpdateProgressModel(version: item.version, stage: .step(.checking)) }
+        updateProgress?.cancel = nil
+        updateProgress?.stage = .step(.checking)
+        showUpdateWindow(.installing, focus: true)
         let before = ProfileProcess.forcedExits
         await lock(forQuit: true)
+        let log = Logger(subsystem: "PrivacyBrowser", category: "Updates")
         switch await updater.installAtQuit(gate: updateGate(forcedExitsBefore: before)) {
         case .started:
             NSApp.terminate(nil)
         case .refused(let reasons):
-            showError(String(format: L("updates.now.refused"), reasons.joined(separator: "\n")))
+            log.notice("Install Now: the quit's gate did not pass: \(reasons.joined(separator: "; "), privacy: .private)")
+            updateProgress = nil
+            showUpdateWindow(.notice(L("updates.now.notStopped")), focus: true)
         case .blocked:
-            showError(L("updates.now.blocked"))
+            updateProgress = nil
+            showUpdateWindow(.updater, focus: true)
         case .failed(let reason):
-            showError(String(format: L("updates.now.failed"), reason))
+            log.error("Install Now: the installer did not start: \(reason, privacy: .private)")
+            updateProgress = nil
+            showUpdateWindow(.notice(L("updates.now.installerDidNotStart")), focus: true)
         case .nothingReady:
-            break
+            updateProgress = nil
+            showUpdateWindow(.updater, focus: true)
         }
+    }
+
+    /// "Update and Restart": the download, with its bar, if the release is not here yet — Cancel
+    /// stops it —, then `installUpdateNow`. The person does nothing more: Lumen quits, the
+    /// installer swaps it and opens the new version.
+    func updateAndRestart() async {
+        guard let updater, !isInstallingUpdate, let item = updater.state.item else { return }
+        let progress = UpdateProgressModel(version: item.version,
+                                           stage: .downloading(fraction: nil, detail: L("updates.progress.estimating")),
+                                           cancel: { [weak updater] in updater?.cancelDownload() })
+        updateProgress = progress
+        showUpdateWindow(.installing, focus: true)
+        let ticker = Task { @MainActor [weak self, weak updater] in
+            while !Task.isCancelled {
+                if let shown = updater?.downloadProgress, let self {
+                    progress.stage = .downloading(fraction: shown.fraction, detail: self.downloadDetail(shown))
+                }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+        }
+        if case .available = updater.state {
+            await updater.download()
+        } else {
+            while case .downloading = updater.state { try? await Task.sleep(nanoseconds: 200_000_000) }
+        }
+        ticker.cancel()
+        guard case .ready = updater.state else {
+            // Cancelled, or failed: the window says what the updater has (found again, or the failure with Try Again).
+            updateProgress = nil
+            if updateWindowMode == .installing { updateWindowMode = .updater }
+            updateWindow.update(closable: true, floating: false)
+            return
+        }
+        await installUpdateNow()
+    }
+
+    /// "12.3 MB of 45.6 MB · 20 s left", in the interface's words.
+    func downloadDetail(_ progress: UpdateDownloadProgress) -> String {
+        let size = { (bytes: Int64) in bytes.formatted(.byteCount(style: .file).locale(Localization.locale)) }
+        let amount = String(format: L("updates.progress.downloaded"), size(progress.received), size(progress.total))
+        guard let left = progress.remaining() else { return amount + " · " + L("updates.progress.estimating") }
+        let rounded = left < 60 ? max(1, (left / 5).rounded(.up) * 5) : (left / 60).rounded(.up) * 60
+        let time = Duration.seconds(rounded).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .abbreviated).locale(Localization.locale))
+        return amount + " · " + String(format: L("updates.progress.remaining"), time)
+    }
+
+    /// The app menu's Check for Updates…, and the palette's: the update's window, a check in it.
+    func checkForUpdatesInWindow() {
+        showUpdateWindow(.updater, focus: true)
+        Task { await updater?.checkNow() }
+    }
+
+    /// Opens the update's window at `mode`. `focus`: brought to the front with the keyboard; else
+    /// shown without taking it — from the lock screen's password field, say.
+    func showUpdateWindow(_ mode: UpdateWindowMode, focus: Bool) {
+        updateWindowMode = mode
+        updateWindow.show(model: self, focus: focus)
+        updateWindow.update(closable: mode != .installing, floating: mode == .installing)
+    }
+
+    /// "Later", "Close": the window goes; a release put away is not offered by itself again in this run.
+    func closeUpdateWindow(later: Bool = false) {
+        if later { updateOfferSeen() }
+        updateWindow.close()
+        updateWindowMode = nil
+    }
+
+    /// The window closed by its own button.
+    func updateWindowClosed() {
+        if updateWindowMode != .installing { updateWindowMode = nil }
+    }
+
+    /// A release found: the update's window opens by itself, once a run for it — when it is
+    /// downloaded (or, "only tell me", found), the person not told already, nothing else in the
+    /// window, and the vault open (else at the unlock).
+    private func offerUpdateWindow(for state: UpdateState) {
+        let item: AppcastItem
+        switch state {
+        case .ready(let ready): item = ready
+        case .available(let found) where updater?.installPolicy == .notifyOnly: item = found
+        default: return
+        }
+        guard updateWindowOpenedFor != item.version, updateOfferPutAway != item.version, updateWindowMode == nil else { return }
+        guard phase == .unlocked else {
+            updateToOffer = item
+            return
+        }
+        updateWindowOpenedFor = item.version
+        showUpdateWindow(.updater, focus: false)
     }
 
     /// What a quit would stop now, one line per profile, for Install Now's confirmation.
@@ -2074,11 +2271,16 @@ final class AppModel: ObservableObject {
     /// Shows `message` in the error alert. What arrives while it is up is shown with it (a launch
     /// can report several things at once: an exit-IP change, a new time zone, a language note),
     /// not instead of it; a message already shown is not repeated, and the latest few are kept.
-    func showError(_ message: String) {
+    /// `title`: what happened, as the alert's title (`errorAlertTitle`); kept while what is shown
+    /// with it has the same one.
+    func showError(_ message: String, title: String? = nil) {
         var shown = errorMessage?.components(separatedBy: "\n\n") ?? []
         guard !shown.contains(message) else { return }
+        let alone = shown.isEmpty
         shown.append(message)
+        let shownTitle = alone || errorTitle == title ? title : nil
         errorMessage = shown.suffix(5).joined(separator: "\n\n")
+        errorTitle = shownTitle
     }
 
     /// `id`: the profile the work is on — what goes wrong is then said with its name
@@ -2150,6 +2352,8 @@ struct ProfileDetails: Equatable {
     var languages: String
     var window: String
     var syncsCookies: Bool
+    /// It keeps snapshots of its cookies (docs/COOKIE_RECOVERY.md).
+    var keepsCookieSnapshots: Bool
     var historyPolicy: HistoryStore.Policy
     /// Its time zone and language follow where its proxy comes out (`matchProxyLocation`).
     var followsProxyLocation: Bool
@@ -2190,6 +2394,7 @@ struct ProfileDetails: Equatable {
                 : L("inspector.asThisMac"))
         window = configuration.windowSize.map { "\($0.frame.width) × \($0.frame.height)" } ?? L("editor.window.app")
         syncsCookies = configuration.syncsCookies
+        keepsCookieSnapshots = configuration.keepsCookieSnapshots
         historyPolicy = configuration.historyPolicy
     }
 }

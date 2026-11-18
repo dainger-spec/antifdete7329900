@@ -40,6 +40,10 @@ struct SignInFlow: View {
     @State private var dontRememberKey = false
     @State private var limit: AccountServerError?
     @State private var outcome: LicenseModel.ActivationOutcome?
+    /// "I've paid": the check is running, and what it found — the button said nothing before,
+    /// and the lines above it stayed those of before the payment.
+    @State private var checkingPayment = false
+    @State private var paymentNote: String?
     /// The sign-in the server holds for its letter's code (§5.2): in memory, for this screen only.
     @State private var loginCode: LoginCode?
     @State private var codeText = ""
@@ -413,6 +417,22 @@ struct SignInFlow: View {
         }
     }
 
+    /// "I've paid — refresh": the account asked again, and what it says now said under the button.
+    private func checkPayment() {
+        checkingPayment = true
+        paymentNote = nil
+        Task {
+            await license.refresh()
+            checkingPayment = false
+            if let p = license.state?.entitlement, p.status != .exportOnly {
+                paymentNote = String(format: L("contract.account.payment_received"), LicenseText.plan(p.plan),
+                                     p.periodEndsAt.map(LicenseText.date) ?? "—")
+            } else {
+                paymentNote = L("license.activate.paid.notYet")
+            }
+        }
+    }
+
     // MARK: Connected
 
     private var connected: some View {
@@ -434,8 +454,15 @@ struct SignInFlow: View {
                 if outcome.entitlement.status == .exportOnly, outcome.entitlement.isOwner {
                     Button(L("license.activate.plans")) { openSite("/pricing") }
                         .buttonStyle(.lumenSecondary)
-                    Button(L("license.activate.paid")) { Task { await license.refresh() } }
+                    Button(L(checkingPayment ? "license.account.refreshing" : "license.activate.paid"), action: checkPayment)
                         .buttonStyle(.lumenGhost)
+                        .disabled(checkingPayment)
+                    if let paymentNote {
+                        Text(paymentNote)
+                            .font(.lumenBody)
+                            .foregroundStyle(Theme.textPrimary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
             LockActionButton(title: L("license.activate.next")) { onFinished() }
@@ -708,6 +735,13 @@ struct LicenseBannerView: View {
     /// the plans otherwise (§17.4).
     private var renewalPath: String { license.hasNoEmail ? "/key" : "/pricing" }
 
+    /// Check Now: "Checking…" while the account is asked, not pressable again.
+    private var checkNow: some View {
+        Button(L(license.refreshing ? "license.account.refreshing" : "license.banner.checkNow")) { Task { await license.refresh() } }
+            .buttonStyle(.lumenSecondary)
+            .disabled(license.refreshing)
+    }
+
     @ViewBuilder
     private var actions: some View {
         switch banner {
@@ -728,10 +762,10 @@ struct LicenseBannerView: View {
             if outdated {
                 Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
             } else {
-                Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+                checkNow
             }
         case .unverified:
-            Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+            checkNow
         case .appOutdated:
             Button(L("license.banner.update"), action: update).buttonStyle(.lumenSecondary)
         case .clockSkew:
@@ -748,7 +782,7 @@ struct LicenseBannerView: View {
                 Button(L("license.banner.hide")) { license.closeTrialNotice() }.buttonStyle(.lumenGhost)
             }
         case .renewalFailing:
-            Button(L("license.banner.checkNow")) { Task { await license.refresh() } }.buttonStyle(.lumenSecondary)
+            checkNow
         }
     }
 
@@ -961,11 +995,11 @@ struct AccountSettingsPage: View {
                         }
                         .buttonStyle(.lumenSecondary)
                     }
-                    Button(L(license.isWorking ? "license.account.refreshing" : "license.account.refresh")) {
+                    Button(L(license.isWorking || license.refreshing ? "license.account.refreshing" : "license.account.refresh")) {
                         Task { await license.refresh() }
                     }
                     .buttonStyle(.lumenGhost)
-                    .disabled(license.isWorking)
+                    .disabled(license.isWorking || license.refreshing)
                 }
             }
             SettingRow(String(format: L("contract.account.profiles"), "\(model.profiles.count)", "\(p.profilesOnOtherDevices)"),
@@ -981,10 +1015,11 @@ struct AccountSettingsPage: View {
             switch reason {
             case "no_license": return L("contract.export.no_license")
             case "account_disabled": return L("contract.error.account_disabled")
-            default: return String(format: L("contract.export.period_ended"), p.periodEndsAt.map(LicenseText.date) ?? "—")
+            default: return String(format: L("contract.export.period_ended"), p.periodEndsAt.map { LicenseText.shortDate($0, now: state.now) } ?? "—")
             }
         }
-        let end = p.periodEndsAt.map(LicenseText.date) ?? "—"
+        // The day alone: the period's minute is no one's business on this line.
+        let end = p.periodEndsAt.map { LicenseText.shortDate($0, now: state.now) } ?? "—"
         if p.plan == "trial" { return String(format: L("contract.account.plan.trial"), end) }
         return String(format: L("contract.account.plan"), LicenseText.plan(p.plan), end)
     }

@@ -3,11 +3,10 @@ import SwiftUI
 
 /// Updates (Settings → Updates, docs/UPDATES.md §7): the version running, what the updater knows,
 /// the release notes as text, automatic checks, what to do with a release, Check Now and Install
-/// Now — which asks first, and lists what it stops.
+/// Now — which opens the update's window, where what it stops is listed and Update and Restart is.
 struct UpdatesPane: View {
     @EnvironmentObject private var model: AppModel
     @ObservedObject var updater: AppUpdater
-    @State private var confirming = false
 
     /// "0.1.0 (1)": the running app's version and build.
     static var runningVersion: String {
@@ -48,7 +47,8 @@ struct UpdatesPane: View {
                         .buttonStyle(.lumenSecondary)
                 }
                 if updater.isReady {
-                    Button(L("updates.installNow")) { confirming = true }
+                    // The update's window: what is new, what it stops, Update and Restart.
+                    Button(L("updates.installNow")) { model.showUpdateWindow(.updater, focus: true) }
                         .buttonStyle(.lumenPrimary)
                         .disabled(model.isInstallingUpdate)
                 }
@@ -86,15 +86,6 @@ struct UpdatesPane: View {
                 .fixedSize()
             }
         }
-        .alert(confirmTitle, isPresented: $confirming) {
-            Button(model.updateStopsList().isEmpty ? L("updates.installNow.confirm") : L("updates.installNow.confirmStopping"),
-                   role: .destructive) {
-                Task { await model.installUpdateNow() }
-            }
-            Button(L("common.cancel"), role: .cancel) {}
-        } message: {
-            Text(confirmMessage)
-        }
     }
 
     private var isBusy: Bool {
@@ -102,18 +93,6 @@ struct UpdatesPane: View {
         case .checking, .downloading: return true
         default: return false
         }
-    }
-
-    private var confirmTitle: String {
-        String(format: L("updates.installNow.title"), updater.state.item?.version ?? "")
-    }
-
-    /// What Install Now stops before anything is installed: every profile with a window, in its own
-    /// process or not, every warm-up without one, every launch and seal under way.
-    private var confirmMessage: String {
-        let stops = model.updateStopsList()
-        guard !stops.isEmpty else { return L("updates.installNow.nothingRuns") }
-        return L("updates.installNow.stops") + "\n" + stops.map { "• " + $0 }.joined(separator: "\n")
     }
 
     private var stateText: String {

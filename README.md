@@ -28,6 +28,7 @@ approximations limited by what WebKit exposes. The tables below say which parts 
 - [docs/ISOLATION_AND_LIMITATIONS.md](docs/ISOLATION_AND_LIMITATIONS.md): what is isolated, what leaks, fingerprinting, App Sandbox, verified results
 - [docs/LEAK_AUDIT.md](docs/LEAK_AUDIT.md): the leak audit's short list — each channel, why it is reachable, what proves it, its state
 - [docs/SYNC_FORMAT.md](docs/SYNC_FORMAT.md): sync wire format, merge rules, what is server-ready vs. local-only
+- [docs/COOKIE_RECOVERY.md](docs/COOKIE_RECOVERY.md): snapshots of each profile's cookies, kept encrypted while it runs, and what a launch puts back when the cookie store lost them
 - [docs/SYNC_SERVER_API.md](docs/SYNC_SERVER_API.md): HTTP contract for a future sync server
 - [docs/AUTOMATION_API.md](docs/AUTOMATION_API.md): the local automation API and `scripts/pbctl` (a developer script here, not shipped in the app)
 - [docs/UPDATES.md](docs/UPDATES.md): automatic updates — why our own updater rather than Sparkle, installing only after every profile is sealed, what each file on disk may hold across versions (in force: a version refuses, and never writes over, a file a newer one wrote), the privacy of the check (design; implemented step by step)
@@ -551,9 +552,8 @@ Tests/BrowserCoreTests/            XCTest suite (incl. stub sync server)
 Tests/UpdateInstallerTests/        the installer on real signed bundles (macOS)
 Resources/                         Info.plist, entitlements (sandboxed / not), container-migration.plist,
                                    Updater/Info.plist (the installer helper), ThirdPartyNotices.txt (the
-                                   licences of others' work the app carries: Pacifico's, SIL OFL 1.1, for the
-                                   launch screen's letters; copied into the app by build-app.sh)
-design/fonts/Pacifico/             the font the launch screen's greetings are drawn from, with its OFL.txt
+                                   licences of others' work the app carries: OpenVPN, lwIP, Xray; copied
+                                   into the app by build-app.sh)
 scripts/                           build-app.sh, release.sh (a release, or a dry run of one), test-shims.mjs,
                                    selftest_proxy.py, safari_reference.py,
                                    update_public_suffix_list.py,

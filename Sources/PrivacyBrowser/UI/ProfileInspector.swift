@@ -103,6 +103,15 @@ struct ProfileInspectorView: View {
                 .buttonStyle(LumenIconButtonStyle(size: 30))
                 .help(L("profiles.row.edit"))
                 .accessibilityLabel(L("profiles.row.edit"))
+                // Everything the row's menu does, here too: beside the inspector the rows have no
+                // buttons of their own, and Duplicate, Export and Delete were then only a right
+                // click away — which a person has to know of.
+                MoreMenu(side: 30) {
+                    ProfileMenuItems(row: row, actions: actions)
+                }
+                .disabled(row.isBusy)
+                .help(String(format: L("profiles.row.moreFor"), row.name))
+                .accessibilityLabel(String(format: L("profiles.row.moreFor"), row.name))
             }
             Text(row.name)
                 .lumenHeadingTitle()
@@ -182,6 +191,7 @@ struct ProfileInspectorView: View {
         case .starting: return row.startingText
         case .sealing: return L("profiles.row.encrypting")
         case .stopped:
+            if row.launchQueued { return L("profiles.row.launchQueued") }
             guard let date = row.lastUsed else { return L("profiles.row.neverLaunched") }
             return String(format: L("profiles.row.lastUsed"), date.shownRelative)
         }
@@ -370,6 +380,9 @@ struct ProfileInspectorView: View {
             InspectorMenuLink(title: L("inspector.cookies"), count: counts?.syncedCookies) {
                 Button(L("profiles.row.importCookies")) { actions.importCookies(row.id) }
                 Button(L("profiles.row.exportCookies")) { actions.exportCookies(row.id) }
+                if !row.ephemeral {
+                    Button(L("profiles.row.cookieSnapshots")) { actions.cookieSnapshots(row.id) }
+                }
             }
             // When it was last warmed, and how much: a profile never warmed, or not for a month, is
             // told from one warmed this morning without opening its warm-up.

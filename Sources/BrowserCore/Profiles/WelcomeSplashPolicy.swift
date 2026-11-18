@@ -1,7 +1,8 @@
 import Foundation
 
-/// The launch screen's two decisions (the app's `WelcomeSplash`): whether this start of the app
-/// shows it, and in which language its greeting is written. The owner, 15 November: a greeting
+/// The launch screen's decision (the app's `WelcomeSplash`): whether this start of the app shows
+/// it. (It wrote a greeting by hand until 17 November; the owner then chose the mark, "Lumen" and a
+/// line in the interface's language.) The owner, 15 November: a greeting
 /// written as with a pen, a couple of seconds, then the app opens smoothly — "only at the first
 /// launch of the app"; on 16 November, at every start and always the English "welcome"; and later
 /// the same day, having lived with it: only at the first start after all, with a setting (Settings →
@@ -41,7 +42,4 @@ public enum WelcomeSplashPolicy {
         if everyStart { return vaultExists ? .returning : .firstLaunch }
         return vaultExists || shownBefore ? .none : .firstLaunch
     }
-
-    /// The one greeting written: the English one, whatever the interface's language.
-    public static let greetingLanguage = "en"
 }

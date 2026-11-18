@@ -28,7 +28,8 @@ enum SimplifiedModeNotice {
         case .turnedOff: return L("simplified.reason.turnedOff")
         case .notInProfileProcess: return L("simplified.reason.noProfileProcess")
         case .frameworksDidNotLoad: return L("simplified.reason.frameworks")
-        case .missingPieces(let names): return String(format: L("simplified.reason.missingPieces"), names.joined(separator: ", "))
+        // Which pieces (class names) is in the log, not in what the person reads.
+        case .missingPieces: return L("simplified.reason.missingPieces")
         case .notSafarisApplication: return L("simplified.reason.notSafarisApplication")
         case .windowDidNotOpen: return L("simplified.reason.windowDidNotOpen")
         }

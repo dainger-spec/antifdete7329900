@@ -76,6 +76,7 @@ enum SettingsSearch {
         SettingsSearchEntry(.downloads, "settings.downloads.ask", detail: "settings.downloads.ask.detail"),
 
         SettingsSearchEntry(.proxies, "settings.proxies.list", detail: "settings.proxies.list.detail"),
+        SettingsSearchEntry(.proxies, "settings.proxies.add", detail: "settings.proxies.add.detail"),
         SettingsSearchEntry(.proxies, "settings.proxies.checks", detail: "settings.proxies.checks.detail"),
         SettingsSearchEntry(.proxies, "settings.proxies.failure", detail: "settings.proxies.failure.detail"),
 
@@ -92,7 +93,7 @@ enum SettingsSearch {
 
         SettingsSearchEntry(.security, "settings.security.password", detail: "settings.security.password.detail"),
         SettingsSearchEntry(.security, "settings.security.lock", detail: "profiles.action.lock.help"),
-        SettingsSearchEntry(.security, "settings.security.vault"),
+        SettingsSearchEntry(.security, "settings.security.vault", detail: "settings.security.vault.detail"),
 
         SettingsSearchEntry(.automation, "automation.enabled", detail: "automation.note"),
         SettingsSearchEntry(.automation, "automation.port"),

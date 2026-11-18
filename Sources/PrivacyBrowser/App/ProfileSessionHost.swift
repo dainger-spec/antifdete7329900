@@ -53,6 +53,16 @@ enum ProfileSessionHost {
             FileHandle.standardError.write(Data("--profile-session was granted another profile\n".utf8))
             exit(2)
         }
+        // The route to the relay the manager runs for the profile's proxy — a share link's, an
+        // OpenVPN connection (`LocalRelays`, `ProxyRoutes`) — right after the grant: this process
+        // reaches the link's server or the VPN through it alone, and without it not at all.
+        do {
+            let routes = try ProxyRoutes.readRecord { count in try? FileHandle.standardInput.read(upToCount: count) }
+            for (key, route) in routes { ProxyRoutes.shared.add(route, for: key, id: UUID()) }
+        } catch {
+            FileHandle.standardError.write(Data("--profile-session expects the proxy routes after its grant\n".utf8))
+            exit(2)
+        }
         // The profile's own settings first: what this process may send, and through which proxy,
         // is decided before anything in it can send at all — before Safari's frameworks, which
         // start clients of their own as soon as they load, are even loaded (ProfileNetworkGuard).
@@ -66,7 +76,10 @@ enum ProfileSessionHost {
                 DispatchQueue.main.async { MainActor.assumeIsolated { ProfileSessionHost.send(.configurationSaved) } }
             }
             stored = try repository.loadConfiguration(profileID)
-            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy, safeBrowsing: stored.safeBrowsingEnabled,
+            // A proxy a relay carries is held to its relay's port (`ProxyRoutes`), never to the
+            // link's server or the VPN server.
+            try ProfileNetworkGuard.engage(profileID: profileID, proxy: stored.proxy,
+                                           safeBrowsing: stored.safeBrowsingEnabled,
                                            protectsLocalNetwork: stored.blocksLocalNetwork)
         } catch {
             log.error("Could not open the vault or hold \(profileID.uuidString, privacy: .public) to its proxy: \(String(describing: error), privacy: .private)")
@@ -89,6 +102,15 @@ enum ProfileSessionHost {
         // again each time its service ended: in our own window, for ever. Its
         // stub is made here for every profile, not only where Safari's chrome is hosted.
         SafariChrome.stopRefusedServiceLoops()
+        // The app's browsing settings as this process starts: its first window opens by them.
+        if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
+           let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
+            BrowsingPreferences.current = preferences
+        }
+        // Safari's own downloads folder, which its code names and saves to, is the settings' one:
+        // set before Safari's frameworks load, as its other settings for a profile are, since some
+        // of what they read they read as they load.
+        HostedDownloads.nameFolderForSafari(BrowsingPreferences.current)
         // Before NSApplication exists: hosting Safari's chrome means this process has to *be* the
         // kind of application its chrome expects, starting with NSApp itself.
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
@@ -96,11 +118,6 @@ enum ProfileSessionHost {
         }
         // ⌘, and Settings… in Safari's menu: the manager's Settings, not Safari's.
         SafariChrome.onShowSettings = { ProfileSessionHost.send(.showSettings) }
-        // The app's browsing settings as this process starts: its first window opens by them.
-        if let json = ProcessInfo.processInfo.environment[ProfileProcess.browsingPreferencesVariable],
-           let preferences = try? JSONDecoder().decode(BrowsingPreferences.self, from: Data(json.utf8)) {
-            BrowsingPreferences.current = preferences
-        }
         let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared
@@ -170,7 +187,9 @@ enum ProfileSessionHost {
             // may misbehave", when there is no Safari window.
             let missing = SafariChromeHost.isHosting ? SafariChrome.missingPieces() : []
             if !missing.isEmpty {
-                ProfileSessionHost.send(.error(String(format: L("safari.chrome.missingPieces"), missing.joined(separator: ", "))))
+                // Which pieces (class and method names) is for the log, not for the person.
+                ProfileSessionHost.log.error("This Safari lacks pieces of the chrome: \(missing.joined(separator: ", "), privacy: .private)")
+                ProfileSessionHost.send(.error(L("safari.chrome.missingPieces")))
             }
             let manager = ProfileManager(repository: repository)
             manager.runsInProfileProcess = true
@@ -189,6 +208,8 @@ enum ProfileSessionHost {
             SafariChromeHost.onLastWindowClosed = { NSApp.terminate(nil) }
             // How the data was sealed, told to the manager before this process exits.
             manager.onSealed = { _, report in ProfileSessionHost.send(.sealed(report)) }
+            // Cookies the launch put back: the manager keeps it in the profile's journal.
+            manager.onCookiesRecovered = { _, report in ProfileSessionHost.send(.cookiesRecovered(report)) }
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
@@ -344,6 +365,7 @@ enum ProfileSessionHost {
                 }
             case .preferences(let preferences):
                 BrowsingPreferences.current = preferences
+                HostedDownloads.nameFolderForSafari(preferences)
                 DockIcon.show(initials: preferences.dockInitials, of: profileName)
             case .webRTC(let message):
                 // The launch inside this process waits for it (`ProfileManager.webRTCRelay`).
@@ -363,6 +385,10 @@ enum ProfileSessionHost {
             case .walkMenu(let from):
                 SafariMenuWalk.start(from: from, session: manager?.session(for: profileID)) { line in
                     ProfileSessionHost.send(.menuWalk(line))
+                }
+            case .sweep(let from, let sub, let phases):
+                SafariSweep.start(from: from, sub: sub, phases: phases, session: manager?.session(for: profileID)) { line in
+                    ProfileSessionHost.send(.sweep(line))
                 }
             case .startWarmUp(let plan):
                 if manager?.startWarmUp(profileID, plan: plan) != true {
@@ -403,6 +429,8 @@ enum ProfileSessionHost {
             if !SafariChromeHost.open(session: session, url: url) {
                 session.openWindow(url: url)
             }
+            // Cookies its launch put back while it had no window (a warm-up's): said in this one.
+            manager?.presentCookieRecovery(profileID)
         }
 
         /// Closing the window must not quit before the data is sealed; the quit path does that.

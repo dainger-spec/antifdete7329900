@@ -64,6 +64,11 @@ ALLOWED_EXPRESSIONS = {
     "wanted": "a yes/no: whether the profile has a proxy",
     "exceptionName": "an Objective-C exception's name (its reason is logged privately)",
     "origin": "which initializer built a web view, a label in the code",
+    "viewsAround": "class names of Safari's views and the names of their nil instance variables (SafariWindowGuard.describe(around:)): no page content",
+    "madeSaid": "a fixed text: whether a nib was made",
+    "ownerClass": "the class name of a nib's owner (SafariWindowGuard.watchReadingListRows)",
+    "topLevel": "class names of a nib's top-level objects (SafariWindowGuard.watchReadingListRows)",
+    "folderKind": "a bookmark folder's class, whether it has a title (yes or no, never the title) and its kind's yes/no flags (SafariWindowGuard.describe(folder:))",
     "self.lastTerminationReason": "why a page's process ended, WebKit's reason by a name in the code (BrowserTab.terminationReason)",
     "closures.sorted.joined(separator: \", \")": "which kernel closures applied, labels in the code",
     "enabled ? schedule.everyHours : 0": "a number of hours",
@@ -123,6 +128,10 @@ ALLOWED_IN_FILE = {
     ("ProfileProcess.swift", "status"): "a process's exit status or signal number",
     ("ProfileManager.swift", "report.attempts"): "a count of seal attempts",
     ("ProfileManager.swift", "report.pagesClosed"): "a count of pages closed",
+    ("ProfileManager.swift", "report.noticeShown"): "a yes/no: whether a profile's window said its cookies were put back",
+    ("CookieSnapshotKeeper.swift", "note"):
+        "what the check of a profile's cookie file found (BinaryCookiesFile): fixed words of the code and counts of records, "
+        "never a cookie's name, value or domain (CookieRecoveryTests)",
     ("SafariAccountPreferences.swift", "domain"): "a preferences domain's name from the code: com.apple.Safari, or the self-test's",
     ("SafariAccountPreferences.swift", "removed"): "names of com.apple.Safari keys from that file's own list, or \"none\"",
     ("SafariAccountPreferences.swift", "left"): "names of com.apple.Safari keys from that file's own list, or \"none\"",

@@ -183,8 +183,8 @@ and sealed, the vault locked, then the gate. If the gate fails then, the app doe
 locked, says why, and keeps the update.
 
 The helper is the only process that touches the bundle: `Contents/Helpers/Lumen
-Updater.app` (`<bundle-id>.Updater`, background only, hardened runtime, **no** sandbox
-entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
+Updater.app` (`<bundle-id>.Updater`, an agent — no Dock icon, no menu, but the update's progress
+window —, hardened runtime, **no** sandbox entitlement — `build-app.sh` signs it first, then the app, and fails if it carries one). It is
 started by LaunchServices — so it is neither in the sandbox of the sandboxed build nor a child that
 ends with the app.
 
@@ -205,12 +205,14 @@ takes no arguments and makes no network request.
    trusted, nothing installed);
 2. refuses a request for another app, or one older than 15 minutes (not from this quit);
 3. waits until no process runs from the bundle — the app first of all — and **kills nothing**:
-   after 10 minutes it gives up and keeps the archive for the next quit; a process of the bundle
-   started after the request (the app opened again) ends the request at once, since that quit is
-   over and the next one asks again. It looks again right before the swap (step 6) and right after
-   it, at the old app's new place: the app opened again while steps 4 and 5 ran (a Dock click, a
-   link, a profile's file) ends the request the same way — the old app swapped back if need be,
-   nothing replaced, the archive kept — and never runs on from a bundle swapped away and deleted;
+   after 10 minutes it gives up and keeps the archive for the next quit. A process of the bundle
+   started after the request (the app opened again) is given 15 seconds to end by itself — a Lumen
+   opened now steps aside (below) within a second —; one that stays open ends the request, since
+   the person is using Lumen and the next quit asks again. It looks again, with the same grace,
+   right before the swap (step 6) and right after it, at the old app's new place: an app opened
+   while steps 4 and 5 ran (a Dock click, a link, a profile's file) and left open ends the request
+   the same way — the old app swapped back if need be, nothing replaced, the archive kept — and
+   never runs on from a bundle swapped away and deleted;
 4. checks the release again: newer than the installed build, for this macOS, the archive's
    length, SHA-256 and Ed25519 signature with a key the installed app carries;
 5. extracts it with `ditto` next to the app (same volume): exactly one app, the installed app's
@@ -220,8 +222,28 @@ takes no arguments and makes no network request.
    and starts it; if it does not check or cannot start, swaps back and starts the previous one.
    Should even swapping back fail, the previous app is kept beside it as `… (previous
    version).app`, never deleted;
-7. leaves `outcome.json` (installed, rolled back, refused, gave up — and why) for the app's next
-   launch. One helper at a time (a lock in the folder).
+7. leaves `outcome.json` (installed, rolled back, refused, gave up — the reason as a code, and the
+   log's English detail) for the app's next launch. One helper at a time (a lock in the folder).
+
+**A Lumen opened during an install** (0.1.18's tester: Lumen reopened a moment after quitting, the
+install given up, and the next start said "the app was started again before it could be replaced"
+— in English, as an error, on the lock screen). While it works the helper keeps `installing.json`
+in the staging folder — its pid, the app it replaces, the step, rewritten every few seconds — and
+removes it before it starts any app. A Lumen started as a person starts it looks there before
+anything else of it runs (`UpdateLaunchGuard`, `UpdateStepAside`): a marker for this very app, not
+older than 2 minutes since it last changed, from an installer at it for less than 3 minutes and
+whose pid is alive — and a release newer than this build — and it **steps aside**: it leaves
+`relaunch.json` and exits. The helper then brings its window to the front ("Lumen opens by itself
+as soon as the update is installed") and, whatever comes of the install, Lumen is opened at the
+end: the new version, or the one there was. A request without a marker yet (the helper starting)
+is waited for 5 seconds. A dead installer, a stale marker, another copy of the app, or the new
+version itself start as usual — and the installer's grace and checks above still hold for anything
+that stays open.
+
+**The installer's window.** The helper shows the update's progress window (`UpdateProgress`, the
+same view the app shows until it quits) in the app's words, which the request carries
+(`UpdateRequest.texts`): "Installing the update — don't close Lumen", the steps checking →
+installing → restarting.
 
 ## 4. Data on disk across versions
 
@@ -261,20 +283,21 @@ in the self-test, which runs the app's own code for it):
 | `vault.json` | KDF parameters, the wrapped master key, the vault id, how many times the master password was changed (`passwordRevision`, optional: absent = 0) | `format` = 1, anything else refused | newer: the vault does not open, and a password change does not write over it; also the generation of the vault (R3). Generation 2 (saved passwords with versions and deletions, sync records `pbsync-2`): raised at unlock (`raiseGenerationIfNeeded`, before anything of generation 2 is written) and on the sync location at the next sync; generation 1 still opens |
 | `index.bin` | the profile list | `format` = 1, anything else refused | newer refused; not written over, by this device or by sync. Missing or unreadable: no profile folder deleted, nothing pushed (ARCHITECTURE.md, `index.bin` missing or unreadable) |
 | `profiles/<id>/key.bin` | a copy of the profile's entry in the index: its wrapped key, name, creation date | did not exist | `format` = 1, a newer one is not taken in (the folder stays out of the list, kept); written at create, rename, after a sync, and at unlock for a listed profile without one |
-| `config.bin`, `config.bin.conflict` | a profile's settings (synced) | **no marker** — an older version drops new fields and writes the rest back; **one that could not be read was saved over by the editor with defaults (no proxy), and pushed by sync over the server's** | `format` read (absent = 1; this version writes none); newer: the profile does not start, nothing is written. Unreadable for any other reason (damaged, missing): the profile does not start, every save is refused (`CoreError.unreadableSettings`), sync never pushes it, takes the server's copy when one opens and keeps this one beside it as `config.bin.unreadable` (docs/DESTRUCTIVE_PATHS.md, R1) |
+| `config.bin`, `config.bin.conflict` | a profile's settings (synced) | **no marker** — an older version drops new fields and writes the rest back; **one that could not be read was saved over by the editor with defaults (no proxy), and pushed by sync over the server's** | `format` read (absent = 1; this version writes none); newer: the profile does not start, nothing is written. Unreadable for any other reason (damaged, missing): the profile does not start, every save is refused (`CoreError.unreadableSettings`), sync never pushes it, takes the server's copy when one opens and keeps this one beside it as `config.bin.unreadable` (docs/DESTRUCTIVE_PATHS.md, R1). Format 2 (0.1.18) while the profile's proxy is reached through a relay the app runs (`ProxySettings.localRelay`): an OpenVPN connection (`ProxySettings.openVPN`; docs/OPENVPN.md), which a version from before them would read as SOCKS5 at the VPN server's address and could write back without its configuration, or a VLESS, VMess, Trojan or Shadowsocks link (`ProxySettings.Kind.xray`; docs/TUNNEL.md, "Links"), which a version from before links could not decode and would take the file for damaged. Such a version (0.1.17 and earlier) refuses the file as a newer version's instead (R4). Every other profile's settings stay format 1, written as before |
 | `passwords.bin` | saved passwords | **no marker** (a JSON array) | format 2: the logins with their versions (each with the Mac that made it, `device`, optional), and the deletions — sync merges it login by login; the array (format 1) is still read and written back as 2. Format 3 once a login holds a one-time code's generator (`totp`): a version from before codes would write that login back without it (R4), so it refuses the file whole; a profile without codes stays format 2, written as before. The vault's generation is not raised for it: every version that opens generation 2 checks this file's format before it reads or writes it (R2), so the refusal is this profile's passwords only. 4 or newer refused, and no change is written. A profile export (`.pbprofile`) follows the same rule: format 3 only when a login in it holds a code. `passwords.bin.conflict`, which syncs before format 2 left beside it, is taken in as versions kept after a conflict and then removed (docs/SYNC_FORMAT.md) |
 | `history.bin`, `bookmarks.bin` | history, bookmarks | `format` = 1, **not checked** | checked; newer refused, never written |
 | `cookies.bin` | the synced cookie jar | `format` = 1, **not checked** | checked; newer refused: not merged, not emptied when cookie sync is turned off |
 | `cookies-baseline.bin` | this device's last cookie state | no marker | `format` read (absent = 1); newer refused, not written over, not deleted |
+| `cookie-snapshots.bin` | this Mac's last 3 snapshots of the profile's persistent cookies (docs/COOKIE_RECOVERY.md) | new (November 2026): no marker, written like `warmup-last.bin` | `format` read (absent = 1); newer: not read (no restore at launch), never written over or removed; unreadable: no restore at that launch, moved aside as `cookie-snapshots.bin.unreadable` at the next snapshot. A snapshot's trigger a later version adds is read as a periodic one. `cookies-running` beside it is an empty file. A version from before keeps neither: it never reads them, and a profile it edits keeps the setting on (`cookieRecovery` is written only when off) |
 | `cookies-import.bin` | cookies queued for the next launch | no marker (an array); **deleted when it could not be read** | newer refused, not written, **not deleted**; unreadable: moved aside as `cookies-import.bin.unreadable`, never deleted (docs/DESTRUCTIVE_PATHS.md) |
 | `journal.bin`, `restore-points/<p>/point.bin` | the profile's history of events; a restore point's description | new: no marker, written the same way as `warmup-last.bin`. An event of a kind this version does not know is kept as written (the kind is text); a point of a kind it does not know is read as the person's own; a point whose description does not open is not listed and left as it is |
 | `warmup.bin`, `warmup-schedule.bin`, `warmup-last.bin` | the warm-up plan, its schedule, its last run | no marker (`warmup-last.bin`: new, written the same way); **an unreadable one was shown as none and written over** | `format` read (absent = 1); newer refused, never written; unreadable: said on the warm-up screen, moved aside at the next save (`.unreadable`) |
 | `warmup-history.bin` | a profile's last 50 warm-ups with their sites | new (November 2026) | written like `warmup-last.bin`; newer refused, never written over; unreadable: moved aside as `warmup-history.bin.unreadable` and a new history begun. A run's result, a site's outcome and arrival are text: a later version's value is kept as written and shown as the nearest known. A plan chosen from templates (`WarmUpChoice.source` "templates") is not readable by a version from before templates: such a version shows the profile's saved plan as unreadable and does not write over it. |
-| `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4. Format 2 once it holds a proxy given by Lumen's service (`ProxyOrigin`): a version from before origins would read that proxy as the user's own and write it back without its origin (R4); a list of the user's own proxies stays format 1, written as before. Nothing in this version gives a proxy from the service, so it writes format 1 only; the version that brings the service raises the vault's generation first (R3). Format 3 once a proxy holds an IP-change link or changes its IP at launch (`ProxyListEntry.changeIPURL`, `changesIPOnLaunch`): a version from before would write that proxy back without them (R4), so it refuses the list whole — this Mac's proxy list only, the profiles keep their own copies of their proxies; a list without links is written in format 1 (or 2) as before |
+| `proxies.bin` | the proxy list | `format` = 1, anything else refused | newer refused with the newer-version message, never written; unknown kinds of entry: R4. Format 2 once it holds a proxy given by Lumen's service (`ProxyOrigin`): a version from before origins would read that proxy as the user's own and write it back without its origin (R4); a list of the user's own proxies stays format 1, written as before. Nothing in this version gives a proxy from the service, so it writes format 1 only; the version that brings the service raises the vault's generation first (R3). Format 3 once a proxy holds an IP-change link or changes its IP at launch (`ProxyListEntry.changeIPURL`, `changesIPOnLaunch`): a version from before would write that proxy back without them (R4), so it refuses the list whole — this Mac's proxy list only, the profiles keep their own copies of their proxies; a list without links is written in format 1 (or 2) as before. Format 4 (0.1.18) once it holds a proxy reached through a relay the app runs (`ProxySettings.localRelay`): an OpenVPN connection, which a version from before them would read as SOCKS5 at the VPN server and drop its configuration when it saves the list, or a share link's proxy (VLESS, VMess, Trojan, Shadowsocks), whose entry a version from before links skips and would drop the same way (R4) |
 | `settings.bin` | sync target, automation API settings | no marker — a failed read falls back to defaults **that are then saved over the file** | `format` read (absent = 1); newer: said at unlock, and the defaults are never saved over it. Unreadable for any other reason: said at unlock, the defaults shown, and at the first change the file is moved aside as `settings.bin.unreadable` (then `-2`, …), never written over. Format 2 while the sync target is the **Lumen account** (`{"account": {}}`), a case a version from before it cannot read: that version refuses the file as a newer version's and leaves it as it is, rather than take it for damaged and move it aside; with any other target, format 1 as before |
 | `sync-state.bin` | what sync last saw, and the place it is of (a folder, a server and the vault) | no marker (a map) | the map (format 1, names no place) is still read: its records count as another place's, and the first sync after the update compares everything anew; format 2 (`{"format": 2, "items", "serverGeneration"}`) while a server generation is kept (the Lumen server, docs/SYNC_FORMAT.md, Engine algorithm, step 0), its server and vault the place — a version from before generations refuses it and does not sync, rather than take the server's older copies for newer; format 3 (`{"format": 3, "items", "place"}`) with a place and no generation (a folder, a server of one's own that keeps none) — a version from before places would keep those records for another folder or the account, and take that place's older copies for newer, so it refuses it (R4). Newer: the sync stops before it fetches or pushes anything (starting over would push this device's files over newer ones) |
 | `webdata.pbsa`, `safarihome.pbsa` | WebKit's data, Safari's home, archived | `PBSA` + version byte 1, anything else refused — **and a refused Safari home archive left an empty home behind, which the next unlock or an export of the profile sealed over the archive** | newer refused before anything is read from it; the profile does not start; no home is left; nothing is sealed over it. The same for a Safari home archive that cannot be restored for any other reason (damaged, a full disk): no home is left, and a home without a single file is never sealed over an archive |
-| `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | 2 since saved passwords have versions (a version that reads 1 would import a version kept after a conflict as an ordinary login, over the other); 1 still imported; newer: the newer-version message, nothing imported |
+| `*.pbprofile` | a profile export | `format` = 1 in its header, anything else refused | 2 since saved passwords have versions (a version that reads 1 would import a version kept after a conflict as an ordinary login, over the other); 3 when a login holds a one-time code; 4 (0.1.18) when the profile's proxy is reached through a relay the app runs — an OpenVPN connection or a share link's; 1 still imported; newer: the newer-version message, nothing imported |
 | sync records | on the sync server | envelope `pbsync-1`, anything else refused | `pbsync-2` written since generation 2, `pbsync-1` still read, any other refused; the file inside a record is checked like the file itself, on the remote copy and on this device's: a newer one is neither pulled, nor merged, nor written over — the sync stops |
 
 Two of these lost a newer version's file whatever its format said, and were found while writing
@@ -541,7 +564,14 @@ beside them, on the Mac that runs `release.sh`:
    commit.
 7. **Xcode 27**, the active one (`xcode-select -p`): its SwiftPM declares SDK 14.0, and a release of
    a build declaring 15 or newer is refused (the certificate fetched outside a profile's proxy on
-   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2).
+   macOS 27, docs/ISOLATION_AND_LIMITATIONS.md §2). Nothing else is installed for OpenVPN
+   connections and links' relay, which every release builds (`OVPN=1 XRAY=1`, the default; `OVPN=0`
+   or `XRAY=0` leaves one out, said at the start and the end): `scripts/build-openvpn.sh` builds
+   OpenVPN with mbed TLS, LZO and LZ4 from their tarballs, each checked by its SHA-256, with Xcode's
+   tools alone; `scripts/build-xray.sh` builds Xray from its pinned commit with the Go toolchain it
+   fetches from Go's module proxy and checks against `scripts/xray.lock`, and the relay must come
+   out with the SHA-256 recorded there. The first release fetches a few hundred megabytes (the
+   sources, Go, Xray's modules) into `build/`; later ones reuse them.
 
 Then:
 
@@ -667,17 +697,46 @@ release is made on; on another macOS a profile whose window cannot be Safari's s
 
 ## 7. Interface
 
-The **Updates** section of the app's Settings window (⌘, or Profiles window → ⋯ → Settings…;
-`UpdatesPane` in `SettingsView`; it was a sheet of its own before the settings had one window): the version running; Check
-Now; "Check for updates automatically"; what to do with an update (download it and install at quit
-— the default — or only tell me, then Download); the release notes as text; the state — not checked
-yet, up to date (when), checking, downloading, "downloaded and checked, installs when you quit",
-failed with the reason, not available in this build (no feed URL), or a place the update cannot be
-installed to (App Translocation; a folder this user cannot write). Install Now asks first, listing
-what it will stop. What the server sees is said under the settings. After an update the sheet says
-which one this launch is; an update that was not installed — refused, rolled back, given up, or not
-handed over at the last quit — is said once at the next launch. In the UI snapshots
-(`settings-updates-ready`, `settings-updates-up-to-date`, `settings-updates-unavailable`).
+**The update's window** (`UpdateWindowView`, an AppKit window of its own so that it opens over the
+lock screen as over the profiles; `UpdateWindowFrame`: the app's icon over the lock screen's
+horizon, a title, a line, the content, the buttons):
+
+- **Found** — "Lumen 0.1.x is available", the version running and the update's size, the release
+  notes as plain text (never a page), **Update and Restart** (the default) and **Later**; with
+  profiles running, what Update and Restart stops and encrypts is listed above the buttons — the
+  press is the answer. It opens by itself once a run when a release is downloaded (or, "only tell
+  me", found) — never over the lock screen's password field: found while locked, it waits for the
+  unlock — and from Lumen › Check for Updates…, the palette, Settings › Updates' Install Now and
+  the sidebar's row, which stays while a release waits.
+- **Installing** — "Installing the update — don't close Lumen": the download's bar with MB and
+  the time left (Cancel), then checking (the profiles stopped and encrypted, the quit's gate) →
+  installing → restarting. The window cannot be closed. Lumen quits; the installer's window — the
+  same view, in the same place — takes over and opens the new version. The person does nothing.
+- **Failed** — a check or a download that failed, in the interface's words (the system's own error
+  texts follow the Mac's language, so they are not shown), with **Try Again**.
+- **Not installed** — an install that did not happen (the installer's outcome, by its reason; the
+  quit's gate; an installer that did not start), said calmly — never an "Error" alert, never the
+  installer's English, which goes to the log only — with **Install Now** while the release is still
+  here, else **Try Again**.
+- **Installed** — the first launch of the new version: "Update installed — Lumen 0.1.x", what is
+  new, **Continue**; once per update, over the lock screen on a veil. It takes no keyboard: the
+  password's field keeps it, and the first key typed puts the card away and goes on to the field
+  (as the launch screen does).
+
+**Settings › Updates** (⌘, or Profiles window → ⋯ → Settings…; `UpdatesPane` in `SettingsView`): the
+version running; Check Now; "Check for updates automatically"; what to do with an update (download
+it and install at quit — the default — or only tell me, then Download); the release notes as text;
+the state — not checked yet, up to date (when), checking, downloading, "downloaded and checked,
+installs when you quit", failed with the reason, not available in this build (no feed URL), or a
+place the update cannot be installed to (App Translocation; a folder this user cannot write).
+Install Now opens the update's window. A quit with a release ready installs it as before, the
+installer's window showing it, and the new version opens by itself.
+
+In the UI snapshots: `update-found`, `update-found-stopping`, `update-checking`, `update-up-to-date`,
+`update-downloading`, `update-checking-release`, `update-installing`, `update-restarting`,
+`update-installing-reopened`, `update-failed`, `update-not-installed`, `update-not-installed-check`,
+`update-installed`, `profiles-update-offer` (the sidebar's row), and Settings' `settings-updates-…`.
+`PB_SNAPSHOTS_ONLY=updates` renders the update's alone.
 
 ## 8. How it is proven
 
@@ -701,7 +760,14 @@ handed over at the last quit — is said once at the next launch. In the UI snap
   no downgrade; an appcast older than the last accepted refused; R1–R4 for every file in §4
   (`UpdateTests`, `FormatPolicyTests`).
 - **The installer on real bundles (macOS):** `UpdateInstallerTests` — apps signed ad hoc, zipped,
-  their zips signed; the swap, the swap back, waiting without killing, every refusal.
+  their zips signed; the swap, the swap back, waiting without killing, every refusal; a Lumen that
+  steps aside during the wait or the checks (installed) and one left open (given up after the
+  grace, the old app swapped back); the marker and the steps; the relaunch wish.
+- **Stepping aside, and the words (BrowserCore, Linux and macOS):** `UpdateStepAsideTests` — a
+  fresh marker of a live installer steps aside; a dead pid, a stale or too old marker, another copy
+  of the app, the version being installed do not; a recent request without a marker waits; every
+  outcome's reason has its sentence in ru and en, the Russian with no English in it, none an
+  "error"; an earlier installer's outcome told from its English detail.
 - **Self-test (macOS, real app):** the quit gate on the real layout (`updateGate`); Safari's home
   archive of a newer version refused, no home left, nothing sealed over it (`formatPolicy`).
 - **End to end (CI, sandboxed and unsandboxed builds):** `scripts/update_check.py` makes an
@@ -720,7 +786,9 @@ handed over at the last quit — is said once at the next launch. In the UI snap
     up without one — in the unsandboxed build, each in its own process — the gate does not pass
     and nothing is handed over: no request written, no installer running;
   - the quit path stops and seals both; the gate passes, no process had to be killed, and the real
-    installer is started; the script sees the swap and, at that moment, looks for profile data in
+    installer is started; the moment the old build has quit, the script opens it again through
+    LaunchServices, as a Dock click does: it must step aside (the app's log says so) and the
+    install go on, leaving no marker and no relaunch wish; the script sees the swap and, at that moment, looks for profile data in
     plaintext where it can see from outside the app — and says what it could not see: macOS may keep a
     sandboxed app's container from other programs, and there the app's own gate, which ran inside
     it, is the check — then sees the new build started by the installer and the installer's

@@ -506,7 +506,7 @@ struct ScenarioStepLine: View {
                             .lineLimit(compact ? 2 : 3)
                     }
                     if case .failed(let reason) = state, !reason.isEmpty {
-                        Text(reason)
+                        Text(ScenarioFailureText.text(reason))
                             .font(.lumenSecondary)
                             .foregroundStyle(Theme.danger)
                             .fixedSize(horizontal: false, vertical: true)
