@@ -57,8 +57,214 @@ static uint8_t output_buffer[65536];
 static err_t send_out(struct pbuf *packet) {
     if (output_function == NULL) return ERR_IF;
     u16_t length = pbuf_copy_partial(packet, output_buffer, packet->tot_len, 0);
+    lumen_net_shape(output_buffer, length);
     output_function(output_context, output_buffer, length);
     return ERR_OK;
+}
+
+/* A port of macOS's ephemeral range (net.inet.ip.portrange.first/last: 49152-65535). */
+static u16_t random_ephemeral_port(void) {
+    return (u16_t)(49152u + lumen_lwip_random() % 16384u);
+}
+
+/* ---- What leaves the tunnel looks like a Mac's (docs/OPENVPN.md, "A Mac's packets") ----
+ *
+ * The VPN server forwards the tunnel's packets as they are: whoever a page connects to sees the
+ * IP and TCP headers this stack wrote, and tools that tell a system by them (p0f and the sites
+ * built on it) read lwIP's — window scale 3, timestamps before the window scale, one timestamp
+ * clock for every connection, no DF, IP identifiers counting up, IPv6 flow label 0 — where Safari
+ * on a Mac with the same VPN shows macOS's. Each packet out is put in macOS's shape here, after
+ * lwIP has written it; lwIP itself is unchanged, and nothing here changes what a packet means:
+ *
+ *  - a SYN's options in XNU's order: mss, nop, wscale 6, nop, nop, timestamps, sackOK, eol
+ *    (the same 24 bytes; the scale is lwIP's own, TCP_RCV_SCALE in lwipopts.h);
+ *  - every timestamp value offset by a number of the connection's own (XNU's tcp_ts_offset): a
+ *    keyed hash of its addresses and ports, the same for all its segments; lwIP reads no echo back;
+ *  - IPv4: DF on TCP (XNU's path MTU discovery), a random identifier on a packet that is not a
+ *    fragment (XNU's ip_randomid), the header's checksum again;
+ *  - IPv6: the connection's own flow label (XNU's auto_flowlabel), from the same hash.
+ *
+ * The TCP checksum is made again where a byte of the segment changed. */
+
+static uint64_t shape_key[2];
+static int shape_keyed = 0;
+
+static uint64_t rotl64(uint64_t x, int b) { return (x << b) | (x >> (64 - b)); }
+
+/* SipHash-2-4 of `length` bytes (at most 40) under the process's random key. */
+static uint64_t shape_hash(const uint8_t *bytes, size_t length) {
+    if (!shape_keyed) {
+        shape_key[0] = ((uint64_t)lumen_lwip_random() << 32) | lumen_lwip_random();
+        shape_key[1] = ((uint64_t)lumen_lwip_random() << 32) | lumen_lwip_random();
+        shape_keyed = 1;
+    }
+    uint64_t v0 = 0x736f6d6570736575ULL ^ shape_key[0], v1 = 0x646f72616e646f6dULL ^ shape_key[1];
+    uint64_t v2 = 0x6c7967656e657261ULL ^ shape_key[0], v3 = 0x7465646279746573ULL ^ shape_key[1];
+#define SIPROUND do { v0 += v1; v1 = rotl64(v1, 13); v1 ^= v0; v0 = rotl64(v0, 32); \
+                      v2 += v3; v3 = rotl64(v3, 16); v3 ^= v2; v0 += v3; v3 = rotl64(v3, 21); v3 ^= v0; \
+                      v2 += v1; v1 = rotl64(v1, 17); v1 ^= v2; v2 = rotl64(v2, 32); } while (0)
+    size_t whole = length & ~(size_t)7;
+    for (size_t i = 0; i < whole; i += 8) {
+        uint64_t m = 0;
+        for (int j = 0; j < 8; j++) m |= (uint64_t)bytes[i + j] << (8 * j);
+        v3 ^= m; SIPROUND; SIPROUND; v0 ^= m;
+    }
+    uint64_t last = (uint64_t)length << 56;
+    for (size_t j = 0; j < (length & 7); j++) last |= (uint64_t)bytes[whole + j] << (8 * j);
+    v3 ^= last; SIPROUND; SIPROUND; v0 ^= last;
+    v2 ^= 0xff; SIPROUND; SIPROUND; SIPROUND; SIPROUND;
+#undef SIPROUND
+    return v0 ^ v1 ^ v2 ^ v3;
+}
+
+/* The connection's own number: its addresses and ports, in the order this side sends them. */
+static uint64_t connection_hash(const uint8_t *source, const uint8_t *destination, size_t address_length,
+                                const uint8_t *ports) {
+    uint8_t tuple[36];
+    memcpy(tuple, source, address_length);
+    memcpy(tuple + address_length, destination, address_length);
+    memcpy(tuple + 2 * address_length, ports, 4);
+    return shape_hash(tuple, 2 * address_length + 4);
+}
+
+static uint32_t read32(const uint8_t *p) {
+    return (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | p[3];
+}
+
+static void write32(uint8_t *p, uint32_t value) {
+    p[0] = (uint8_t)(value >> 24); p[1] = (uint8_t)(value >> 16); p[2] = (uint8_t)(value >> 8); p[3] = (uint8_t)value;
+}
+
+static uint32_t sum16(const uint8_t *bytes, size_t length, uint32_t sum) {
+    size_t i = 0;
+    for (; i + 1 < length; i += 2) sum += (uint32_t)bytes[i] << 8 | bytes[i + 1];
+    if (i < length) sum += (uint32_t)bytes[i] << 8;
+    return sum;
+}
+
+static uint16_t fold(uint32_t sum) {
+    while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+    return (uint16_t)~sum;
+}
+
+/* Puts a SYN's options in XNU's order when they are the four lwIP sends; true if it did. */
+static int reorder_syn_options(uint8_t *options, size_t length) {
+    int mss = -1, scale = -1;
+    uint32_t tsval = 0, tsecr = 0;
+    int has_ts = 0, has_sack = 0;
+    size_t i = 0;
+    while (i < length) {
+        uint8_t kind = options[i];
+        if (kind == 0) break;
+        if (kind == 1) { i++; continue; }
+        if (i + 1 >= length) return 0;
+        uint8_t size = options[i + 1];
+        if (size < 2 || i + size > length) return 0;
+        switch (kind) {
+        case 2: if (size != 4) return 0; mss = options[i + 2] << 8 | options[i + 3]; break;
+        case 3: if (size != 3) return 0; scale = options[i + 2]; break;
+        case 4: if (size != 2) return 0; has_sack = 1; break;
+        case 8: if (size != 10) return 0; tsval = read32(options + i + 2); tsecr = read32(options + i + 6); has_ts = 1; break;
+        default: return 0; /* something lwIP does not send: left as it is */
+        }
+        i += size;
+    }
+    if (mss < 0 || scale < 0 || !has_ts || !has_sack || length != 24) return 0;
+    uint8_t mac[24] = {
+        2, 4, (uint8_t)(mss >> 8), (uint8_t)mss,
+        1, 3, 3, (uint8_t)scale,
+        1, 1, 8, 10, 0, 0, 0, 0, 0, 0, 0, 0,
+        4, 2, 0, 0
+    };
+    write32(mac + 12, tsval);
+    write32(mac + 16, tsecr);
+    memcpy(options, mac, sizeof mac);
+    return 1;
+}
+
+/* Offsets the timestamp value wherever the option is; true if there was one. */
+static int offset_timestamp(uint8_t *options, size_t length, uint32_t offset) {
+    size_t i = 0;
+    while (i < length) {
+        uint8_t kind = options[i];
+        if (kind == 0) return 0;
+        if (kind == 1) { i++; continue; }
+        if (i + 1 >= length) return 0;
+        uint8_t size = options[i + 1];
+        if (size < 2 || i + size > length) return 0;
+        if (kind == 8 && size == 10) {
+            write32(options + i + 2, read32(options + i + 2) + offset);
+            return 1;
+        }
+        i += size;
+    }
+    return 0;
+}
+
+/* The TCP segment in macOS's shape; its checksum made again if anything changed. */
+static void shape_tcp(uint8_t *segment, size_t length, uint32_t pseudo_sum, uint64_t hash) {
+    if (length < 20) return;
+    size_t header = (size_t)(segment[12] >> 4) * 4;
+    if (header < 20 || header > length) return;
+    uint8_t *options = segment + 20;
+    size_t options_length = header - 20;
+    int changed = 0;
+    /* An active open's SYN (no ACK): the only segment lwIP writes all four options in. */
+    if ((segment[13] & 0x12) == 0x02) changed |= reorder_syn_options(options, options_length);
+    changed |= offset_timestamp(options, options_length, (uint32_t)(hash >> 32));
+    if (!changed) return;
+    segment[16] = 0;
+    segment[17] = 0;
+    uint16_t sum = fold(sum16(segment, length, pseudo_sum));
+    segment[16] = (uint8_t)(sum >> 8);
+    segment[17] = (uint8_t)sum;
+}
+
+void lumen_net_shape(uint8_t *packet, size_t length) {
+    if (length < 1) return;
+    uint8_t version = packet[0] >> 4;
+    if (version == 4) {
+        if (length < 20) return;
+        size_t header = (size_t)(packet[0] & 0x0F) * 4;
+        size_t total = (size_t)packet[2] << 8 | packet[3];
+        if (header < 20 || total < header || total > length) return;
+        uint16_t fragment = (uint16_t)(packet[6] << 8 | packet[7]);
+        int whole = (fragment & 0x3FFF) == 0; /* not a fragment: no MF, no offset */
+        uint8_t protocol = packet[9];
+        if (whole) {
+            uint32_t id = lumen_lwip_random();
+            packet[4] = (uint8_t)(id >> 8);
+            packet[5] = (uint8_t)id;
+            if (protocol == 6) packet[6] |= 0x40; /* DF */
+        }
+        if (whole && protocol == 6 && total - header >= 20) {
+            uint8_t *segment = packet + header;
+            uint64_t hash = connection_hash(packet + 12, packet + 16, 4, segment);
+            uint32_t pseudo = sum16(packet + 12, 8, 0) + 6 + (uint32_t)(total - header);
+            shape_tcp(segment, total - header, pseudo, hash);
+        }
+        packet[10] = 0;
+        packet[11] = 0;
+        uint16_t sum = fold(sum16(packet, header, 0));
+        packet[10] = (uint8_t)(sum >> 8);
+        packet[11] = (uint8_t)sum;
+    } else if (version == 6) {
+        if (length < 40) return;
+        size_t payload = (size_t)packet[4] << 8 | packet[5];
+        if (40 + payload > length) return;
+        uint8_t next = packet[6];
+        /* lwIP puts no extension header before TCP; a fragment header is left as it is. */
+        if (next != 6 || payload < 20) return;
+        uint8_t *segment = packet + 40;
+        uint64_t hash = connection_hash(packet + 8, packet + 24, 16, segment);
+        uint32_t label = (uint32_t)hash & 0xFFFFF;
+        if (label == 0) label = 1;
+        packet[1] = (uint8_t)((packet[1] & 0xF0) | (label >> 16));
+        packet[2] = (uint8_t)(label >> 8);
+        packet[3] = (uint8_t)label;
+        uint32_t pseudo = sum16(packet + 8, 32, 0) + 6 + (uint32_t)payload;
+        shape_tcp(segment, payload, pseudo, hash);
+    }
 }
 
 static err_t output_ipv4(struct netif *netif, struct pbuf *packet, const ip4_addr_t *next) {
@@ -304,6 +510,10 @@ lumen_tcp *lumen_tcp_connect(int family, const uint8_t *address, uint16_t port,
     tcp_sent(pcb, on_sent);
     tcp_err(pcb, on_error);
     tcp_nagle_disable(pcb);
+    /* A random local port, as macOS picks one for each connection (lwIP counts up from one). */
+    for (int attempt = 0; attempt < 8; attempt++) {
+        if (tcp_bind(pcb, family == 4 ? IP4_ADDR_ANY : IP6_ADDR_ANY, random_ephemeral_port()) == ERR_OK) break;
+    }
     err_t result = tcp_connect(pcb, &remote, port, on_connected);
     if (result != ERR_OK) {
         tcp_arg(pcb, NULL);
@@ -424,7 +634,12 @@ lumen_udp *lumen_udp_open(int family, lumen_udp_receive receive, void *context) 
         free(endpoint);
         return NULL;
     }
-    if (udp_bind(pcb, family == 4 ? IP4_ADDR_ANY : IP6_ADDR_ANY, 0) != ERR_OK) {
+    /* A random local port, as macOS's (a resolver's questions above all); lwIP's own if all are taken. */
+    err_t bound = ERR_USE;
+    for (int attempt = 0; attempt < 8 && bound != ERR_OK; attempt++) {
+        bound = udp_bind(pcb, family == 4 ? IP4_ADDR_ANY : IP6_ADDR_ANY, random_ephemeral_port());
+    }
+    if (bound != ERR_OK && udp_bind(pcb, family == 4 ? IP4_ADDR_ANY : IP6_ADDR_ANY, 0) != ERR_OK) {
         udp_remove(pcb);
         free(endpoint);
         return NULL;

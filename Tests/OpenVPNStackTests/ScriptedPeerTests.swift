@@ -25,10 +25,13 @@ final class ScriptedPeer {
     private var connections: [UInt32: Connection] = [:]
     private var _questions: [(from: String, name: String)] = []
     private var _udpSources: [String] = []
+    private var _syns: [[UInt8]] = []
     private var thread: Thread?
 
     var questions: [(from: String, name: String)] { lock.lock(); defer { lock.unlock() }; return _questions }
     var udpSources: [String] { lock.lock(); defer { lock.unlock() }; return _udpSources }
+    /// Every SYN the stack sent, whole (IP header and all), as it left the tunnel.
+    var syns: [[UInt8]] { lock.lock(); defer { lock.unlock() }; return _syns }
 
     init(descriptor: Int32) {
         self.descriptor = descriptor
@@ -66,6 +69,9 @@ final class ScriptedPeer {
         let source = Array(packet[12..<16])
         let destination = Array(packet[16..<20])
         let payload = Array(packet[headerLength..<total])
+        if packet[9] == 6, payload.count >= 20, payload[13] & 0x12 == 0x02 {
+            lock.lock(); _syns.append(Array(packet[0..<total])); lock.unlock()
+        }
         switch packet[9] {
         case 6: tcp(payload, from: source, to: destination)
         case 17: udp(payload, from: source, to: destination)
@@ -270,6 +276,43 @@ final class ScriptedPeerTests: XCTestCase {
         XCTAssertEqual(TestSockets.receive(client, count: 10), Array("echo:hello".utf8))
         shutdown(client, Int32(SHUT_WR))
         XCTAssertTrue(TestSockets.receiveToEnd(client).ended, "the far side's FIN reached the client")
+    }
+
+    /// What leaves the tunnel is a Mac's SYN (lumen_net_shape, docs/OPENVPN.md "A Mac's packets"):
+    /// TTL 64 with DF, window 65535, the options in XNU's order with window scale 6, a timestamp
+    /// clock and a local port of each connection's own.
+    func testASynLeavesTheTunnelInAMacsShape() {
+        for _ in 0..<2 {
+            let client = connectClient()
+            let (reply, _) = TestSockets.socksConnect(client, username: TestSockets.username, password: TestSockets.password,
+                                                      request: TestSockets.connectRequest(ipv4: [10, 99, 0, 1], port: 7))
+            XCTAssertEqual(reply, 0)
+            TestSockets.sendAll(client, Array("hi".utf8))
+            XCTAssertEqual(TestSockets.receive(client, count: 7), Array("echo:hi".utf8), "the connection carries in that shape")
+            close(client)
+        }
+        let syns = peer.syns
+        XCTAssertEqual(syns.count, 2)
+        guard syns.count == 2 else { return }
+        for syn in syns {
+            XCTAssertEqual(syn[8], 64, "TTL")
+            XCTAssertEqual(syn[6] & 0x40, 0x40, "DF")
+            XCTAssertEqual(ScriptedPeer.checksum(Array(syn[0..<20])), 0, "the IP header's checksum")
+            let tcp = Array(syn[20...])
+            XCTAssertEqual(Int(tcp[12] >> 4) * 4, 44)
+            XCTAssertEqual(UInt16(tcp[14]) << 8 | UInt16(tcp[15]), 65535, "window")
+            let options = Array(tcp[20..<44])
+            XCTAssertEqual(Array(options[0..<2]), [2, 4], "mss first")
+            XCTAssertEqual(Array(options[4..<12]), [1, 3, 3, 6, 1, 1, 8, 10], "nop, wscale 6, nop, nop, timestamps")
+            XCTAssertEqual(Array(options[16..<24]), [0, 0, 0, 0, 4, 2, 0, 0], "no echo, sackOK, eol")
+            let pseudo = ScriptedPeer.pseudoSum(from: Array(syn[12..<16]), to: Array(syn[16..<20]), protocolNumber: 6, length: tcp.count)
+            XCTAssertEqual(ScriptedPeer.checksum(tcp, initial: pseudo), 0, "the TCP checksum")
+            let port = UInt16(tcp[0]) << 8 | UInt16(tcp[1])
+            XCTAssertGreaterThanOrEqual(port, 49152, "macOS's ephemeral range")
+        }
+        let clocks = syns.map { ScriptedPeer.word(Array($0[20...]), 32) }
+        XCTAssertGreaterThan(max(clocks[0], clocks[1]) &- min(clocks[0], clocks[1]), 10_000,
+                             "each connection's timestamps start from a number of its own (about one run in 200 000 fails by chance)")
     }
 
     func testANameIsAskedOfThePushedServerThroughTheTunnel() {

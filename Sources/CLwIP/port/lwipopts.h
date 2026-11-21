@@ -76,11 +76,12 @@
 #define LWIP_UDPLITE                    0
 
 /* TCP: a client over a path with real loss (mobile networks): windows of 256 KiB with scaling,
- * selective acknowledgements to the far side, timestamps, segments ahead of a gap kept. */
+ * selective acknowledgements to the far side, timestamps, segments ahead of a gap kept. The window
+ * scale is macOS's (6): a SYN out of the tunnel says what a Mac's says (lumen_net_shape). */
 #define LWIP_TCP                        1
 #define TCP_MSS                         1460
 #define LWIP_WND_SCALE                  1
-#define TCP_RCV_SCALE                   3
+#define TCP_RCV_SCALE                   6
 #define TCP_WND                         (256 * 1024)
 #define TCP_SND_BUF                     (256 * 1024)
 #define TCP_SND_QUEUELEN                ((4 * TCP_SND_BUF + (TCP_MSS - 1)) / TCP_MSS)

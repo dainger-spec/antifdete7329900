@@ -115,6 +115,35 @@ a tunnel gone for good stops the profile.
 | Fail closed | while the tunnel is down there is no LumenTunnel and nothing behind the port: connections wait or are refused, nothing goes around; a tunnel not back within 45 s stops the profile, said; one that does not come up at a launch stops the launch, said; a stopped profile stops its tunnel | Linux e2e (server killed: nothing loads, LumenTunnel gone); macOS e2e (server killed: nothing loads, the profile stopped and said so, no OpenVPN or LumenTunnel left) |
 | Nothing left behind | OpenVPN and LumenTunnel in a process group of their own, ended together; LumenTunnel watches a lifeline pipe only the app holds and ends OpenVPN when the app is gone; OpenVPN processes a crashed run left are ended at the next start | macOS e2e (after the refused launch and after the stop, no process left) |
 
+## A Mac's packets (0.1.20)
+
+The VPN server forwards the tunnel's packets as they are, so the IP and TCP headers a site sees are
+the ones LumenTunnel's stack wrote — and tools that tell a system by them (p0f, and the sites that
+show its verdict beside the user agent) read lwIP's, not macOS's, where Safari on a Mac with the same
+`.ovpn` shows macOS's. Up to 0.1.19 that was: options `mss,nop,nop,ts,nop,ws 3,nop,nop,sok`, no DF,
+IP identifiers counting up, one timestamp clock for every connection, local ports counting up, IPv6
+flow label 0. Since 0.1.20 each packet out passes `lumen_net_shape` (`Sources/CLwIP/lumen_lwip.c`),
+after lwIP wrote it (lwIP itself is unchanged), and leaves as XNU's would:
+
+| | XNU (macOS 26) | LumenTunnel since 0.1.20 |
+|---|---|---|
+| SYN options | `mss 1460, nop, wscale 6, nop, nop, TS, sackOK, eol` (24 bytes) | the same, in that order (`TCP_RCV_SCALE` 6, so the scale said is the one used) |
+| SYN window | 65535 | 65535 |
+| TTL / hop limit | 64 | 64 |
+| DF on TCP | yes (path MTU discovery) | yes |
+| IPv4 identifier | random (`ip_randomid`) | random, on every packet that is not a fragment |
+| TCP timestamps | 1 kHz, from an offset of each connection's own (`tcp_ts_offset`) | 1 kHz, offset by a keyed hash (SipHash, a key per process) of the connection's addresses and ports |
+| local ports | random in 49152–65535 | random in 49152–65535 (TCP and UDP, the resolver's questions too) |
+| IPv6 flow label | of each connection (`auto_flowlabel`) | the same hash, 20 bits |
+
+Nothing here changes what a packet means: lwIP reads no timestamp echo back, the reordered options
+are the same four, and each checksum is made again. The MSS is the interface's (`tun-mtu`, 1500 by
+default: 1460, 1440 over IPv6) — what a Mac's utun with the same configuration says; OpenVPN's own
+`mssfix` then lowers it on the way out for both, as it would on a Mac. Not matched: ECN, which XNU
+asks for on some connections only, by its own heuristics; the way a window grows after the
+handshake. Tested: `ScriptedPeerTests.testASynLeavesTheTunnelInAMacsShape` (each field of two SYNs,
+and that a connection in that shape carries).
+
 ## The configuration
 
 `OpenVPNConfiguration` (BrowserCore) reads a `.ovpn` once, at import: as OpenVPN reads it (quotes,

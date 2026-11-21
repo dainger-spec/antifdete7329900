@@ -30,6 +30,10 @@ void lumen_net_set_ipv4(const uint8_t address[4]);
 void lumen_net_set_ipv6(const uint8_t address[16]);
 /* A packet from the tunnel. Bad packets are dropped by lwIP. */
 void lumen_net_input(const uint8_t *packet, size_t length);
+/* Puts one packet the stack wrote into macOS's shape, in place (lumen_lwip.c: a SYN's options in
+ * XNU's order, a timestamp clock of each connection's own, DF and random identifiers on IPv4, a
+ * flow label on IPv6). Every packet out passes here; exposed for the tests. */
+void lumen_net_shape(uint8_t *packet, size_t length);
 /* Runs lwIP's timers that are due. */
 void lumen_net_poll_timers(void);
 /* Milliseconds until a timer is due (at most 1000). */
