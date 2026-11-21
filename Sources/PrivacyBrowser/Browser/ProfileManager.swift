@@ -109,6 +109,10 @@ final class ProfileManager: ObservableObject {
     @Published private(set) var proxyLocationUnknown: Set<UUID> = []
     /// In a profile's own process: its proxy's exit was not found (the manager says so).
     var onProxyLocationUnknown: ((UUID) -> Void)?
+    /// A lookup through the profile's proxy answered (in a profile's own process): the manager in
+    /// the app, which keeps `proxyLocationUnknown` for the list and the editor, is told, so an
+    /// earlier "unknown" of this launch does not stay beside a place that is known now.
+    var onProxyLocationFound: ((UUID) -> Void)?
     /// Pages of Safari's chrome closed by a quit, before the seal (`prepareForQuit`).
     private var pagesClosedForQuit = 0
     /// Settings → Proxies: a profile whose proxy does not work is not started at all — its proxy is
@@ -731,6 +735,8 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .proxyLocationUnknown:
                 self.noteProxyLocationUnknown(id, name: summary.name, last: stored.rememberedProxyLocation)
+            case .proxyLocationFound:
+                self.proxyLocationUnknown.remove(id)
             case .cookiesRecovered(let report):
                 self.log.notice("Profile \(id.uuidString, privacy: .public)'s process put back \(report.restored) cookies its store had lost (\(report.cause.rawValue, privacy: .public)); notice shown: \(report.noticeShown, privacy: .public)")
                 self.onCookiesRecovered?(id, report)
@@ -1242,8 +1248,12 @@ final class ProfileManager: ObservableObject {
     /// answer about a proxy they replaced (or its credentials) is not kept. The exit IP is kept
     /// only while the warning that asks for it is on. Written only when it changed.
     private func rememberProxyLocation(_ found: ProxyLocation, for id: UUID) {
-        // A lookup that answered ends an earlier one's "unknown" for this profile.
+        // A lookup that answered ends an earlier one's "unknown" for this profile — here, and in
+        // the app when this is a profile's own process (the owner, 21 November: the language and
+        // time zone of the exit were applied, and «не удалось определить, где выходит прокси»
+        // stayed in the app until the profile stopped).
         proxyLocationUnknown.remove(id)
+        if runsInProfileProcess { onProxyLocationFound?(id) }
         do {
             var current = try repository.loadConfiguration(id)
             var found = found

@@ -212,6 +212,8 @@ enum ProfileSessionHost {
             manager.onCookiesRecovered = { _, report in ProfileSessionHost.send(.cookiesRecovered(report)) }
             // Where the proxy exits could not be found: the manager says so, where the user looks.
             manager.onProxyLocationUnknown = { _ in ProfileSessionHost.send(.proxyLocationUnknown) }
+            // ... and when it is found after all, so that the app's warning goes.
+            manager.onProxyLocationFound = { _ in ProfileSessionHost.send(.proxyLocationFound) }
             // Where it exits, when known: the country's flag on this process's Dock tile.
             // And in Safari's window, on the profile's chip (`SafariProfileMarker`).
             BrowserSession.onExitLocation = { _, location in

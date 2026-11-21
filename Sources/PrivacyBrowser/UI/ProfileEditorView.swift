@@ -1,4 +1,5 @@
 import BrowserCore
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -619,6 +620,12 @@ struct ProfileEditorView: View {
             Button(L("editor.discard.keep"), role: .cancel) {}
         }
         .onChange(of: draft.camera) { cameraMirror.camera = draft.camera }
+        // The launch's lookup answered after all while the editor is open: its warning goes.
+        .onReceive(model.manager?.$proxyLocationUnknown.eraseToAnyPublisher() ?? Empty<Set<UUID>, Never>().eraseToAnyPublisher()) { unknown in
+            if case .existing(let summary) = target, draft.proxyLocationLookupFailed, !unknown.contains(summary.id) {
+                draft.proxyLocationLookupFailed = false
+            }
+        }
         .sheet(isPresented: $showingGuard) { NetworkGuardSettingsView() }
         .sheet(item: $addingProxy) { request in
             if let proxies = model.proxyList {

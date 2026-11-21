@@ -562,6 +562,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         window.makeKeyAndOrderFront(nil)
         window.makeFirstResponder(view)
         self.window = window
+        // Once AppKit has put the window's buttons where this system puts them.
+        DispatchQueue.main.async { [weak self] in self?.alignTitleBarWithButtons() }
         // In sight as it opens; AppKit says when that changes (`windowDidChangeOcclusionState`).
         holdPrecision(true)
         if request.fullScreen == true {
@@ -631,7 +633,10 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         showTitleBar(false)
     }
     func windowWillExitFullScreen(_ notification: Notification) { showTitleBar(true) }
-    func windowDidExitFullScreen(_ notification: Notification) { fullScreenBusy = false }
+    func windowDidExitFullScreen(_ notification: Notification) {
+        fullScreenBusy = false
+        alignTitleBarWithButtons()
+    }
     /// Full screen that did not come about: the window is a window again.
     func windowDidFailToEnterFullScreen(_ window: NSWindow) {
         fullScreenBusy = false
@@ -645,6 +650,39 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         let display = request.display
         let height = (frameSize.width * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide)).rounded() + titleBarHeight
         return NSSize(width: frameSize.width, height: height)
+    }
+
+    /// Lumen's bar is as tall as twice the distance from the window's top to the middle of its
+    /// close button, and its line starts after the zoom button: its words then sit on the buttons'
+    /// line. The height taken before the window was shown (the frame less the content's layout
+    /// rect) was not that on macOS 26 — the owner's Mac, 21 November: the buttons in the bar's
+    /// upper half, the name and the route at its foot. The window's height is then its width's
+    /// share of the screen's shape plus the bar, as a resize makes it (`windowWillResize`) — the
+    /// same whether the frame was a new window's or one kept from before (`VMWindowPlacement`).
+    private func alignTitleBarWithButtons() {
+        guard let model = titleBar, let window, !window.styleMask.contains(.fullScreen),
+              let close = window.standardWindowButton(.closeButton), let holder = close.superview else { return }
+        let button = holder.convert(close.frame, to: nil)
+        let fromTop = window.frame.height - button.midY
+        guard fromTop > 4, fromTop < 40 else { return }
+        if let zoom = window.standardWindowButton(.zoomButton), let zoomHolder = zoom.superview,
+           let host = titleBarView as? NSHostingView<MachineTitleBar> {
+            let leading = (zoomHolder.convert(zoom.frame, to: nil).maxX + 14).rounded()
+            if leading > 40, leading < 160 { host.rootView = MachineTitleBar(model: model, leadingInset: leading) }
+        }
+        let height = max(28, (fromTop * 2).rounded())
+        let change = height - titleBarHeight
+        guard abs(change) >= 1 else { return }
+        HelperIO.log("window: the bar \(Int(titleBarHeight)) → \(Int(height)) pt, on the buttons' line")
+        titleBarHeight = height
+        titleBarConstraint?.constant = height
+        window.contentMinSize.height += change
+        let display = request.display
+        var frame = window.frame
+        let wanted = (frame.width * CGFloat(display.pixelsHigh) / CGFloat(display.pixelsWide)).rounded() + height
+        frame.origin.y += frame.height - wanted
+        frame.size.height = wanted
+        window.setFrame(frame, display: true)
     }
 
     /// The bar takes no height from the machine's screen in full screen: it goes, and comes back

@@ -150,6 +150,9 @@ enum ProfileEvent: Codable {
     /// No geolocation service answered through the profile's proxy: where it exits is not known,
     /// and the profile runs in the last known location's time zone and language, or this Mac's.
     case proxyLocationUnknown
+    /// A lookup through the proxy answered after all (later in the launch, or at a later look):
+    /// where it exits is known, and an earlier `proxyLocationUnknown` no longer holds.
+    case proxyLocationFound
     /// One step of `walkMenu`, as a line of JSON (`SafariMenuWalk`).
     case menuWalk(String)
     /// One line of JSON of `sweep` (`SafariSweep`).
