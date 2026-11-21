@@ -12,12 +12,15 @@ struct VMStorageView: View {
     @State private var confirmingBase = false
     @State private var confirmingDownload = false
     @State private var confirmingEverything = false
+    @State private var confirmingLeftovers = false
     @State private var error: String?
 
     private var baseBytes: Int64 { center.diskUsage[VMCenter.baseID] ?? 0 }
     private var downloadBytes: Int64 { center.diskUsage[VMCenter.downloadsID] ?? 0 }
     private var machineBytes: Int64 { center.profiles.reduce(0) { $0 + (center.diskUsage[$1.id] ?? 0) } }
-    private var total: Int64 { baseBytes + downloadBytes + machineBytes }
+    /// Machines' folders no profile names (`VMCenter.leftovers`).
+    private var leftoverBytes: Int64 { center.leftoverBytes }
+    private var total: Int64 { baseBytes + downloadBytes + machineBytes + leftoverBytes }
     /// Nothing may be removed while a machine runs or the setup is at work.
     private var busy: Bool { center.hasRunning || center.activity != nil }
 
@@ -46,6 +49,15 @@ struct VMStorageView: View {
                                 }
                                     .buttonStyle(.lumenGhost)
                                     .disabled(center.activity != nil)
+                            }
+                            divider
+                        }
+                        if !center.leftovers.isEmpty {
+                            row(symbol: "exclamationmark.triangle", title: L("vm.storage.leftovers"),
+                                detail: String(format: L("vm.storage.leftovers.detail"), center.leftovers.count), bytes: leftoverBytes) {
+                                Button(L("vm.storage.delete")) { confirmingLeftovers = true }
+                                    .buttonStyle(.lumenGhost)
+                                    .disabled(busy)
                             }
                             divider
                         }
@@ -99,6 +111,11 @@ struct VMStorageView: View {
         } message: {
             Text(String(format: L("vm.setup.removeDownload.message"), VMText.bytes(downloadBytes)))
         }
+        .confirmationDialog(L("vm.storage.leftovers.title"), isPresented: $confirmingLeftovers, titleVisibility: .visible) {
+            Button(L("vm.storage.leftovers.confirm"), role: .destructive) { deleteLeftovers() }
+        } message: {
+            Text(String(format: L("vm.storage.leftovers.message"), VMText.bytes(leftoverBytes)))
+        }
         .confirmationDialog(L("vm.storage.deleteAll.title"), isPresented: $confirmingEverything, titleVisibility: .visible) {
             Button(L("vm.storage.deleteAll.confirm"), role: .destructive) { deleteEverything() }
         } message: {
@@ -133,7 +150,8 @@ struct VMStorageView: View {
                 let width = geometry.size.width
                 HStack(spacing: 2) {
                     segment(baseBytes, of: width, opacity: 0.85)
-                    segment(machineBytes, of: width, opacity: 0.50)
+                    // The leftovers are machines' too: with theirs.
+                    segment(machineBytes + leftoverBytes, of: width, opacity: 0.50)
                     segment(downloadBytes, of: width, opacity: 0.24)
                 }
             }
@@ -141,7 +159,7 @@ struct VMStorageView: View {
             .clipShape(Capsule())
             HStack(spacing: 16) {
                 legend(L("vm.storage.base"), opacity: 0.85, shown: baseBytes > 0)
-                legend(L("vm.storage.machines"), opacity: 0.50, shown: machineBytes > 0)
+                legend(L("vm.storage.machines"), opacity: 0.50, shown: machineBytes + leftoverBytes > 0)
                 legend(L("vm.storage.download"), opacity: 0.24, shown: downloadBytes > 0)
             }
         }
@@ -210,6 +228,17 @@ struct VMStorageView: View {
             .font(.lumenSecondary)
             .foregroundStyle(Theme.textTertiary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The person's Delete on the leftovers' row, confirmed: the one caller of their removal
+    /// (scripts/check_deletion_paths.py).
+    private func deleteLeftovers() {
+        do {
+            try center.deleteLeftoversBecauseThePersonAsked()
+            error = nil
+        } catch {
+            self.error = errorText(error)
+        }
     }
 
     /// The person's "Delete everything", confirmed: the one caller of the machines' removal of

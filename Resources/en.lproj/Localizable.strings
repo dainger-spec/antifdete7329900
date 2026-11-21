@@ -3349,6 +3349,11 @@
 "vm.storage.machines" = "Machines";
 "vm.storage.machine.detail" = "What its macOS changed since it was made";
 "vm.storage.hint" = "A single machine is deleted in the list: from the ⋯ menu on its row, or with a right click on it.";
+"vm.storage.leftovers" = "Disks of deleted machines";
+"vm.storage.leftovers.detail" = "Machines not in the list: %ld. Nothing can start them any more";
+"vm.storage.leftovers.title" = "Delete the disks of machines that are not in the list?";
+"vm.storage.leftovers.confirm" = "Delete";
+"vm.storage.leftovers.message" = "These folders were left on the disk by machines that are no longer in Lumen's list. %@ goes back to the disk. The machines in the list and the base system are not touched.";
 "vm.storage.delete" = "Remove…";
 "vm.storage.delete.now" = "Delete";
 "vm.storage.deleteAll" = "Delete Everything…";

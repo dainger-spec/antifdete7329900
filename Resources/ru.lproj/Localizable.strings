@@ -3349,6 +3349,11 @@
 "vm.storage.machines" = "Машины";
 "vm.storage.machine.detail" = "То, что её macOS изменила с момента создания";
 "vm.storage.hint" = "Одну машину можно удалить в списке: меню ⋯ в её строке или правая кнопка мыши на ней.";
+"vm.storage.leftovers" = "Диски удалённых машин";
+"vm.storage.leftovers.detail" = "Машин, которых нет в списке: %ld. Их уже ничто не запустит";
+"vm.storage.leftovers.title" = "Удалить диски машин, которых нет в списке?";
+"vm.storage.leftovers.confirm" = "Удалить";
+"vm.storage.leftovers.message" = "Эти папки остались на диске от машин, которых больше нет в списке Lumen. Освободится %@. Машины из списка и базовая система не затрагиваются.";
 "vm.storage.delete" = "Удалить…";
 "vm.storage.delete.now" = "Удалить";
 "vm.storage.deleteAll" = "Удалить всё…";

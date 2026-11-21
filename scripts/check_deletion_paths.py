@@ -13,7 +13,9 @@ another account, not a sync, not a server's answer.
 A virtual machine's profile (docs/VM.md) is held to the same: its disk — a whole macOS — goes only
 by `VMCenter.deleteMachineBecauseThePersonAsked`, called from the machines' own Delete confirmation —
 or, for every machine at once, by `VMCenter.deleteEverythingBecauseThePersonAsked`, called from the
-Disk Space sheet's own "Delete everything" confirmation.
+Disk Space sheet's own "Delete everything" confirmation. Machines' folders that no profile in the list
+names go only by `VMCenter.deleteLeftoversBecauseThePersonAsked`, from that sheet's confirmation on
+their row.
 
 A vault being brought back from its sync location (`VaultRestore`, docs/SYNC_FORMAT.md) is built in a
 staging folder — copies of the profiles' synced files, as the sync location holds them. What an
@@ -93,7 +95,13 @@ RULES = [
      {("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteEverythingBecauseThePersonAsked"): "the one path"}),
     ("a virtual machine's folder removed",
      re.compile(r"removeItem\s*\(\s*at:\s*(self\.)?library\.machineDirectory\s*\("),
-     {("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteMachineBecauseThePersonAsked"): "the one path"}),
+     {("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteMachineBecauseThePersonAsked"): "the one path",
+      ("PrivacyBrowser/App/VirtualMachines/VMCenter.swift", "deleteLeftoversBecauseThePersonAsked"):
+          "only folders no profile in the list names, looked at again at that moment"}),
+    ("the path that deletes machines' folders no profile names",
+     re.compile(r"\bdeleteLeftoversBecauseThePersonAsked\s*\("),
+     {("PrivacyBrowser/UI/VirtualMachinesStorageView.swift", "deleteLeftovers"):
+          "the Disk Space sheet's confirmation on the leftovers' row"}),
     # A vault being brought back from its sync location (docs/SYNC_FORMAT.md): what an unfinished
     # restore downloaded — copies of the profiles' synced files — goes only by the person's Discard.
     ("the one path that discards an unfinished restore's download",

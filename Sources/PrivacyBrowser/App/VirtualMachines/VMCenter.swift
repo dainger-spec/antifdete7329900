@@ -183,6 +183,14 @@ final class VMCenter: ObservableObject {
         }
         for profile in list.profiles { readGuestStatus(of: profile.id) }
         asleep = Set(list.profiles.map(\.id).filter { library.machine(for: $0).hasSavedState })
+        // An installation the app did not see end — it was quit or replaced by an update while
+        // macOS was being installed, so neither its failure nor Cancel removed what it wrote — left
+        // up to twenty gigabytes in the base's folder that are no system: removed at the next
+        // start, as at a failure. Only where no base was ever recorded (`base.json` absent, not
+        // merely unreadable).
+        if !FileManager.default.fileExists(atPath: library.baseInfoURL.path) {
+            removeUnfinishedInstallation()
+        }
         measureDisk()
     }
 
@@ -224,8 +232,18 @@ final class VMCenter: ObservableObject {
     }
     var isReady: Bool { if case .ready = setup { return true } else { return false } }
 
-    /// What the machines take on disk in all: the base, what was fetched for it, every machine.
-    var totalDiskUsage: Int64 { diskUsage.values.reduce(0, +) }
+    /// What the machines take on disk in all: the base, what was fetched for it, every machine,
+    /// and the leftovers no profile names.
+    var totalDiskUsage: Int64 { diskUsage.values.reduce(0, +) + leftoverBytes }
+
+    /// Machines' folders on disk that no profile in the list names (`measureDisk`), with what
+    /// removing each would give back: a machine's whole macOS that nothing can start any more and
+    /// that the list, the Disk Space sheet's rows and its total did not show — the person found
+    /// them as "disk.img" after "disk.img" in the Mac's own Storage settings. Only read while the
+    /// list itself read (`loadError` nil): a list that did not read names no machine, and every
+    /// folder would look left over.
+    @Published private(set) var leftovers: [UUID: Int64] = [:]
+    var leftoverBytes: Int64 { leftovers.values.reduce(0, +) }
 
     /// What the setup still needs free on disk, as far as is known now — for the section to say
     /// before anything is fetched.
@@ -709,6 +727,32 @@ final class VMCenter: ObservableObject {
         setupError = nil
         offeredImage = nil
         setup = library.setupState()
+        measureDisk()
+    }
+
+    /// The machines' folders no profile in the list names: each named by a machine's identifier
+    /// exactly as `VMLibrary.machineDirectory` writes it (anything else in the folder is not a
+    /// machine's, and is not this app's to count or remove).
+    nonisolated static func leftoverMachineIDs(in library: VMLibrary, named: Set<UUID>) -> [UUID] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: library.machinesDirectory.path)) ?? []
+        return names.compactMap { name in
+            guard let id = UUID(uuidString: name), id.uuidString == name, !named.contains(id) else { return nil }
+            return id
+        }
+    }
+
+    /// Removes the machines' folders that no profile names (`leftovers`) — machines nothing can
+    /// start, whose disks only took room. Only from the Disk Space sheet's own confirmation
+    /// (scripts/check_deletion_paths.py); never while a machine runs or the setup is at work, nor
+    /// while the list did not read. Each folder is looked at again here, not taken on the last
+    /// count's word: one a profile names now stays.
+    func deleteLeftoversBecauseThePersonAsked() throws {
+        guard !hasRunning, running.isEmpty, activity == nil else { throw Refusal.busy }
+        guard loadError == nil else { throw Refusal.listUnreadable }
+        for id in Self.leftoverMachineIDs(in: library, named: Set(list.profiles.map(\.id))) where helpers[id] == nil {
+            try? FileManager.default.removeItem(at: library.machineDirectory(for: id))
+        }
+        leftovers = [:]
         measureDisk()
     }
 
@@ -1246,6 +1290,7 @@ final class VMCenter: ObservableObject {
         lastMeasure = Date()
         let library = self.library
         let ids = list.profiles.map(\.id)
+        let listRead = loadError == nil
         let baseID = Self.baseID
         let downloadsID = Self.downloadsID
         Task.detached(priority: .utility) { [weak self] in
@@ -1254,8 +1299,20 @@ final class VMCenter: ObservableObject {
             for id in ids { usage[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id), ownOnly: true) }
             usage[baseID] = VMLibrary.allocatedSize(of: library.baseDirectory)
             usage[downloadsID] = VMLibrary.allocatedSize(of: library.downloadsDirectory)
+            var leftovers: [UUID: Int64] = [:]
+            if listRead {
+                for id in VMCenter.leftoverMachineIDs(in: library, named: Set(ids)) {
+                    // What removing it gives back: its own blocks — all of them, for a machine
+                    // cloned from a base that has since been set up again.
+                    leftovers[id] = VMLibrary.allocatedSize(of: library.machineDirectory(for: id), ownOnly: true)
+                }
+            }
             let counted = usage
-            await MainActor.run { self?.diskUsage = counted }
+            let found = leftovers
+            await MainActor.run {
+                self?.diskUsage = counted
+                self?.leftovers = found
+            }
         }
     }
 

@@ -70,6 +70,27 @@ The disks are sparse files, and a machine's disk is an APFS clone of the base's 
 blocks the two have in common are stored once. On a volume that cannot clone (not APFS) the disk is
 copied whole — the full size of the base, per machine.
 
+**What macOS's own Storage settings show.** System Settings → General → Storage → "Large Files"
+lists every `disk.img` at its whole allocated size — the base's and each machine's, 25–30 GB each —
+because it does not know which blocks a clone shares. Six such lines (the owner's Mac, 21 November)
+are the base and five machines, not six copies: what removing each would give back is what Lumen's
+Disk Space sheet says, from each file's private blocks (`VMLibrary.allocatedSize(ownOnly:)`). Two
+things do make the disk grow past that, and the sheet shows both since 0.1.20:
+
+- **Machines no profile names any more.** A machine's folder is removed only with its profile
+  (`deleteMachineBecauseThePersonAsked`); a folder whose profile is gone from the list another way —
+  a vault brought back from its sync location, a list from an earlier vault — was never counted,
+  listed or removable, and holds a whole macOS. The sheet counts them (`VMCenter.leftovers`, only
+  while the list itself read) on a row of their own, "Disks of deleted machines", removed by its own
+  confirmation (`deleteLeftoversBecauseThePersonAsked`, scripts/check_deletion_paths.py).
+- **An installation that never ended.** The app quit, or an update replaced it, while macOS was
+  being installed: neither the failure nor Cancel ran, and up to twenty gigabytes stayed in the
+  base's folder with no `base.json`. Removed at the next start (`VMCenter.init`), as at a failure —
+  only where `base.json` is absent, never where it merely does not read.
+
+A base set up again (removed in the sheet, then installed anew) shares nothing with the machines
+cloned from the one before it: each of those keeps its whole disk from then on.
+
 ## The pieces
 
 ```
