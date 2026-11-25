@@ -133,6 +133,20 @@ enum ReleaseCheck {
                         ?? "no word from the profile's process in 90 s")
         }
 
+        var preferences: WindowLook?
+        manager.onWindowLook = { id, answer in if id == profile.id { preferences = answer } }
+        _ = manager.lookAtWindow(profile.id, .safariPreferences)
+        let deadline = Date().addingTimeInterval(25)
+        while preferences == nil, exited == nil, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        manager.onWindowLook = nil
+        guard let preferences, preferences.found, preferences.hostsSafariChrome else {
+            await manager.shutDown()
+            return fail("Safari Settings: " + (preferences?.detail ?? "the profile did not answer"))
+        }
+        print("RELEASE-CHECK PASS Safari Settings: " + preferences.detail)
+
         // The keychain between profiles (KeychainIsolation): a second profile beside the first, both
         // asked from inside, with the app and a process of its own executable as the controls. Here,
         // on the build as it ships, signed by the team, the keychain itself is shown.

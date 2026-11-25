@@ -330,6 +330,7 @@ enum SafariChrome {
         tolerateNilDirectoryListing()
         bridgeNibLookups()
         bridgeNibInitializers()
+        bridgePreferencesNibs()
         stubChromeFeatures()
         SafariTypingGuard.install()
         AddressBarCommit.install()
@@ -828,6 +829,26 @@ enum SafariChrome {
 
     /// How many nibs `bridgeNibInitializers` made from Safari's files (`--nib-check` says).
     private static var nibsBridged = 0
+
+    /// NSPreferencesModule loads its pane with NSBundle's AppKit method. When the pane lives
+    /// in Safari.app, its framework and the host's main bundle both miss it. AppKit then leaves
+    /// the pane's outlets empty even though it has already shown the preferences window.
+    private static func bridgePreferencesNibs() {
+        let load = NSSelectorFromString("loadNibNamed:owner:topLevelObjects:")
+        guard let method = class_getInstanceMethod(Bundle.self, load),
+              let module = NSClassFromString("PreferencesModule") else { return }
+        typealias Objects = AutoreleasingUnsafeMutablePointer<NSArray?>?
+        typealias Load = @convention(c) (Bundle, Selector, NSString, AnyObject?, Objects) -> Bool
+        let original = unsafeBitCast(method_getImplementation(method), to: Load.self)
+        let replacement: @convention(block) (Bundle, NSString, AnyObject?, Objects) -> Bool = { bundle, name, owner, objects in
+            if original(bundle, load, name, owner, objects) { return true }
+            guard bundle == Bundle.main, let pane = owner as? NSObject, pane.isKind(of: module),
+                  let url = nibURL(named: name as String),
+                  let container = chromeBundles.first(where: { url.path.hasPrefix($0.bundleURL.path + "/") }) else { return false }
+            return original(container, load, name, pane, objects)
+        }
+        method_setImplementation(method, imp_implementationWithBlock(replacement))
+    }
 
     /// Every bundle Safari's chrome keeps nibs and assets in, under both the ordinary path and the
     /// cryptex one, since a Safari update moves the frameworks between them.

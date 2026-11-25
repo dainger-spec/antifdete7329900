@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import ObjCExceptions
 import WebKit
 
 /// What the self-test does to a profile's window from inside the profile's own process, and what
@@ -14,6 +15,7 @@ enum WindowProbeAction: Codable, Equatable {
     case press(String)
     /// ⌘ and this key, through the menu bar.
     case shortcut(String)
+    case safariPreferences
     /// Typed into the window's address bar, then Return.
     case search(String)
     /// A picture of the window's content as it is drawn now (PNG, base64), for a person to look at.
@@ -77,6 +79,47 @@ struct WindowLook: Codable, Equatable {
 
 @MainActor
 enum WindowProbe {
+    /// Drive the native menu and toolbar in a disposable release-check profile. An empty
+    /// preferences window has a title and a toolbar too, so also inspect the pane's content.
+    private static func checkPreferences(from browser: NSWindow) async -> (Bool, String) {
+        guard let menu = NSApp.mainMenu?.items.first?.submenu,
+              let index = menu.items.firstIndex(where: { $0.action == NSSelectorFromString("showPreferences:") })
+        else { return (false, "the Settings menu item is missing") }
+        let caught = ExceptionLog.reported
+        if let error = PBCatchException({ menu.performActionForItem(at: index) }) {
+            return (false, "opening Settings raised " + error.name.rawValue)
+        }
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        guard let window = NSApp.windows.first(where: { $0.isVisible && $0 !== browser && $0.toolbar != nil && !SafariChromeHost.isBrowserWindow($0) }),
+              let toolbar = window.toolbar else { return (false, "the native Settings window is missing") }
+        func hasControl(_ view: NSView) -> Bool {
+            guard !view.isHiddenOrHasHiddenAncestor, !view.visibleRect.isEmpty else { return false }
+            if view is NSButton || view is NSTableView || view is NSSegmentedControl { return true }
+            return view.subviews.contains(where: hasControl)
+        }
+        var checked: [String] = []
+        var failures: [String] = []
+        for pane in toolbar.items {
+            guard let action = pane.action else { continue }
+            var selected = false
+            let error = PBCatchException { selected = NSApp.sendAction(action, to: pane.target, from: pane) }
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            let label = pane.label
+            if let error {
+                failures.append(label + " raised " + error.name.rawValue)
+            } else if !selected || window.attachedSheet != nil || window.title != label || window.contentView.map(hasControl) != true {
+                failures.append(label + " is empty or still shows " + window.title)
+            } else {
+                checked.append(label)
+            }
+        }
+        if checked.isEmpty { failures.append("no selectable Settings pane displayed its controls") }
+        if ExceptionLog.reported != caught { failures.append("a run-loop exception was reported") }
+        window.performClose(nil)
+        if !browser.isVisible { failures.append("closing Settings also closed the browser window") }
+        return (failures.isEmpty, (checked + failures).joined(separator: "; "))
+    }
+
     static func perform(_ action: WindowProbeAction, session: BrowserSession?) async -> WindowLook {
         var look = WindowLook()
         let controller = session?.windowControllers.first { $0.window?.isVisible == true }
@@ -84,6 +127,9 @@ enum WindowProbe {
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         switch action {
+        case .safariPreferences:
+            look.action = "Safari Settings"
+            if let window { (look.found, look.detail) = await checkPreferences(from: window) }
         case .describe:
             look.action = "describe"
             look.found = window != nil
