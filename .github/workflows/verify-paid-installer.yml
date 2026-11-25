@@ -86,6 +86,18 @@ jobs:
           const browser = await chromium.launch({executablePath:process.env.CHROME_BIN});
           const context = await browser.newContext({acceptDownloads:true, locale:'ru-RU'});
           const page = await context.newPage();
+          page.on('request', async r=>{
+            if (new URL(r.url()).pathname!='/installer') return;
+            const headers=await r.allHeaders();
+            const body=new URLSearchParams(r.postData()||'');
+            console.log('Installer request',r.method(),body.get('view')||'file','session present',Boolean(body.get('session')),'origin',headers.origin,'fetch-site',headers['sec-fetch-site']);
+          });
+          page.on('response',r=>{
+            const path=new URL(r.url()).pathname;
+            if(path==='/installer'||path==='/assets/installer.js') console.log('Installer response',path,r.status(),r.headers()['content-type'],r.headers()['content-disposition']||'no attachment');
+          });
+          page.on('requestfailed',r=>{if(new URL(r.url()).pathname==='/installer') console.log('Installer navigation ended:',r.failure()?.errorText);});
+          page.on('pageerror',e=>console.log('Browser script exception',e.name));
           let token;
           try {
             await page.goto('https://lumenbrowser.io/ru/login', {waitUntil:'domcontentloaded'});
