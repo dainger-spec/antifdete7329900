@@ -116,8 +116,6 @@ enum ProfileSessionHost {
         if SafariChromeHost.prepareForChildProcess(configuration: stored) {
             log.notice("Safari's chrome is hosted in this process")
         }
-        // ⌘, and Settings… in Safari's menu: the manager's Settings, not Safari's.
-        SafariChrome.onShowSettings = { ProfileSessionHost.send(.showSettings) }
         let delegate = Delegate(profileID: profileID, repository: repository)
         Self.delegate = delegate
         let application = NSApplication.shared

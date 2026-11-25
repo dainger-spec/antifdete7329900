@@ -199,11 +199,6 @@ enum SafariSweep {
             previousCaught?(exception, eventType)
         }
         SafariChrome.presentNotice = { title, text in SweepRecord.add("notices", "\(title) — \(text)") }
-        let previousSettings = SafariChrome.onShowSettings
-        SafariChrome.onShowSettings = {
-            SweepRecord.add("notes", "asked the manager for its Settings")
-            previousSettings?()
-        }
         SweepMenus.install()
         // What a menu item, chosen by a click, the keyboard or its key equivalent, sent: whether a
         // key equivalent reached the item the menu shows for it.

@@ -82,6 +82,8 @@ final class OpenVPNTunnels {
 
     private var tunnels: [UUID: OpenVPNTunnel] = [:]
 
+    private var resolving: [UUID: UUID] = [:]
+
     /// The bundled programs, or nil when this build has none. `PB_OPENVPN_DIR` names another
     /// folder holding both (the CI's checks run them from the build).
     static var programs: (openvpn: URL, tunnel: URL)? {
@@ -119,7 +121,12 @@ final class OpenVPNTunnels {
         }
         // The servers' addresses, asked of this Mac's resolver: the VPN server's own name is the
         // one thing the tunnel cannot look up itself. Nothing of the profile's is asked.
+        let attempt = UUID()
+        resolving[id] = attempt
         let targets = await Self.resolve(configuration.remotes)
+        guard resolving[id] == attempt else { throw CancellationError() }
+        resolving.removeValue(forKey: id)
+        try Task.checkCancellation()
         guard !targets.isEmpty else { throw Failure.serverNotFound }
         let tunnel = try OpenVPNTunnel(profileID: id, configuration: configuration, targets: targets, proxy: proxy,
                                        programs: programs)
@@ -134,7 +141,7 @@ final class OpenVPNTunnels {
         do {
             try await tunnel.waitUntilUp(timeout: Self.startTimeout)
         } catch {
-            tunnels[id] = nil
+            if tunnels[id] === tunnel { tunnels[id] = nil }
             tunnel.stop()
             Self.log.error("The OpenVPN tunnel of \(id.uuidString, privacy: .public) did not come up: \(String(describing: error), privacy: .private)")
             throw error
@@ -145,12 +152,14 @@ final class OpenVPNTunnels {
 
     /// Stops the tunnel of profile `id`, if it has one.
     func stop(profile id: UUID) {
+        resolving.removeValue(forKey: id)
         guard let tunnel = tunnels.removeValue(forKey: id) else { return }
         tunnel.stop()
         Self.log.notice("The OpenVPN tunnel of \(id.uuidString, privacy: .public) is stopped")
     }
 
     func stopAll() {
+        resolving.removeAll()
         for id in Array(tunnels.keys) { stop(profile: id) }
     }
 
@@ -460,6 +469,7 @@ final class OpenVPNTunnel {
         switch event {
         case "up":
             Self.log.notice("The tunnel of \(self.profileID.uuidString, privacy: .public) is up")
+            lastProblem = nil
             state = .up
             graceTask?.cancel()
             graceTask = nil

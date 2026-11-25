@@ -430,6 +430,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// every other profile's.
     private func prepareMachine() throws {
         guard !files.isComplete else { return }
+        if FileManager.default.fileExists(atPath: files.disk.path) {
+            throw VMFailure(.noBase, "This machine has an existing disk but is missing firmware or identity files. Restore its metadata before starting it.")
+        }
         guard let basePath = request.baseDirectory else {
             throw VMFailure(.noBase, "This machine has no disk, and no base system to make it from.")
         }
@@ -446,7 +449,11 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
         try? manager.removeItem(at: cloning)
         do {
             if clonefile(base.disk.path, cloning.path, 0) != 0 {
-                // Not a volume that clones (not APFS): a whole copy.
+                let code = errno
+                guard code == ENOTSUP || code == EXDEV else {
+                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+                }
+                // A volume without copy-on-write support needs a whole copy.
                 try manager.copyItem(at: base.disk, to: cloning)
             }
             try manager.copyItem(at: base.auxiliaryStorage, to: files.auxiliaryStorage)

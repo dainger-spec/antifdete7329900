@@ -1010,19 +1010,8 @@ enum SafariChrome {
         // state worth restoring anyway (the profile decides what opens), and the windows are
         // marked not restorable as well, in openWindow.
         replaceWithConstant("BrowserDocument", "fileType") { "public.html" as NSString }
-        // ⌘, and Settings… open the app's own Settings (in the manager's process), not Safari's:
-        // Safari's are built on services this process does not have, and their General pane threw
-        // on its first look at the default browser (the owner's Mac, 2026-10-30). Elsewhere — the
-        // developer's standalone chrome — they do nothing.
-        replaceWithConstant("AppController", "showPreferences:") {
-            SafariChrome.onShowSettings?()
-            return nil
-        }
-        // What the General pane does when the default browser may have changed — on its own first
-        // look, and, by its name, on the system's notice of a change, which would need no click to
-        // come. It built an array from the answer and a nil in it threw. Nothing here shows that
-        // pane any more, and nothing needs to know which browser is the default.
-        // Its own implementation is kept for `--default-browser-check`, which calls it to see why.
+        // Keep Safari's native Settings action. The General pane's default-browser
+        // observer assumes Safari's own LaunchServices context and can throw here.
         defaultBrowserQuestion = replaceWithConstant("GeneralPreferences", "_defaultWebBrowserMayHaveChanged") { nil }
     }
 
@@ -1134,8 +1123,7 @@ enum SafariChrome {
     /// `stubChromeFeatures` replaced it.
     static var defaultBrowserQuestion: IMP?
 
-    /// What ⌘, and Settings… do in Safari's menu (a profile's process asks the manager).
-    static var onShowSettings: (() -> Void)?
+
 
     // MARK: Safari's own AutoFill
 

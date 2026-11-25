@@ -370,7 +370,6 @@ final class WalkRecorder: @unchecked Sendable {
     /// The methods replaced, with what they were, to put back after the walk.
     nonisolated(unsafe) private static var replaced: [(Method, IMP)] = []
     nonisolated(unsafe) private static var previousPresentNotice: (@MainActor (String, String) -> Void)?
-    nonisolated(unsafe) private static var previousShowSettings: (() -> Void)?
 
     static func note(_ text: String) { effects.append(text) }
 
@@ -391,12 +390,6 @@ final class WalkRecorder: @unchecked Sendable {
         }
         previousPresentNotice = SafariChrome.presentNotice
         SafariChrome.presentNotice = { title, text in WalkRecorder.note("our notice: \(title) — \(text)") }
-        previousShowSettings = SafariChrome.onShowSettings
-        let showSettings = previousShowSettings
-        SafariChrome.onShowSettings = {
-            WalkRecorder.note("asks the manager for its Settings")
-            showSettings?()
-        }
         answerPanels()
         answerAlerts()
         answerPrinting()
@@ -411,7 +404,6 @@ final class WalkRecorder: @unchecked Sendable {
         replaced = []
         ExceptionLog.onThrown = nil
         if let previousPresentNotice { SafariChrome.presentNotice = previousPresentNotice }
-        SafariChrome.onShowSettings = previousShowSettings
     }
 
     /// Replaces `name` of `owner` — its own method, or the one it inherits (then the class that
