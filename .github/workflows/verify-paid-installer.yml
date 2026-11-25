@@ -29,10 +29,15 @@ jobs:
           def installer(fields):
               return post(site+'/installer', urllib.parse.urlencode(fields).encode(), 'application/x-www-form-urlencoded')
           import time
-          for attempt in range(50):
+          for attempt in range(65):
               req=urllib.request.Request(site+'/en/download?release=0.1.20', headers={'User-Agent':'Lumen', 'Cache-Control':'no-cache'})
               with client.open(req,timeout=10) as page:
-                  if b'data-installer="0.1.20"' in page.read(): break
+                  ready = b'data-installer="0.1.20"' in page.read()
+              if ready:
+                  try:
+                      with installer({'key':'invalid-release-check'}): pass
+                  except urllib.error.HTTPError as e:
+                      if e.code == 403: break
               time.sleep(5)
           else: raise RuntimeError('Production website has not switched to 0.1.20')
           try:
@@ -44,6 +49,11 @@ jobs:
               session = json.load(r).get('sessionToken')
               assert session, 'Test account sign-in needs another factor'
           try:
+              req = urllib.request.Request(api+'/account',headers={'Authorization':'Bearer '+session,'User-Agent':'Lumen'})
+              with client.open(req,timeout=20) as r:
+                  license = json.load(r)['license']
+                  print('Production test license:',license.get('plan'),license.get('status'))
+                  assert license.get('plan') in ('personal','pro','team') and license.get('status')=='active', 'Test account has no current paid plan'
               with installer({'session': session, 'lang':'ru', 'view':'page'}) as page:
                   assert page.status == 200 and 'no-store' in page.headers.get('Cache-Control','')
                   html = page.read().decode()
