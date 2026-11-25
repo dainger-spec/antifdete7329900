@@ -71,3 +71,44 @@ jobs:
                   print('Production paid download verified',size,digest.hexdigest())
           finally:
               with post(api+'/auth/logout',b'{}','application/json',session): pass
+      - name: Prepare the browser driver
+        run: npm install --no-audit --no-fund --ignore-scripts playwright-core@1.58.2
+      - name: Sign in and download using the actual website buttons
+        env:
+          TEST_EMAIL: ${{ secrets.LUMEN_E2E_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.LUMEN_E2E_PASSWORD }}
+        run: |
+          export CHROME_BIN="$(command -v google-chrome)"
+          node --input-type=module <<'JS'
+          import { chromium } from 'playwright-core';
+          import { createHash } from 'node:crypto';
+          import assert from 'node:assert/strict';
+          const browser = await chromium.launch({executablePath:process.env.CHROME_BIN});
+          const context = await browser.newContext({acceptDownloads:true, locale:'ru-RU'});
+          const page = await context.newPage();
+          let token;
+          try {
+            await page.goto('https://lumenbrowser.io/ru/login', {waitUntil:'domcontentloaded'});
+            assert.equal(new URL(page.url()).origin,'https://lumenbrowser.io');
+            await page.locator('#email').fill(process.env.TEST_EMAIL);
+            await page.locator('#password').fill(process.env.TEST_PASSWORD);
+            await page.locator('form').filter({has:page.locator('#password')}).locator('button[type=submit]').click();
+            await page.waitForURL(/\/ru\/account(?:\.html)?(?:[?#]|$)/,{timeout:25000});
+            token = await page.evaluate(()=>JSON.parse(sessionStorage.getItem('lumen-session')).token);
+            assert.ok(token);
+            await page.locator('[data-get] a.primary').click();
+            await page.locator('[data-installer="0.1.20"]').click();
+            await page.getByRole('heading',{name:'Загрузка Lumen для Mac'}).waitFor();
+            const [download] = await Promise.all([page.waitForEvent('download',{timeout:60000}),page.getByRole('button',{name:'Скачать установщик'}).click()]);
+            assert.equal(download.suggestedFilename(),'Lumen-0.1.20.dmg');
+            const hash=createHash('sha256');
+            let size=0;
+            for await(const chunk of await download.createReadStream()) { size+=chunk.length;hash.update(chunk); }
+            assert.equal(size,48948659);
+            assert.equal(hash.digest('hex'),'95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3');
+            console.log('Browser passed: sign-in form, account button, protected installer page, signed DMG downloaded and verified.');
+          } finally {
+            if(token) await context.request.post('https://api.lumenbrowser.io/v1/auth/logout',{headers:{Authorization:'Bearer '+token},data:{},maxRedirects:0});
+            await browser.close();
+          }
+          JS
