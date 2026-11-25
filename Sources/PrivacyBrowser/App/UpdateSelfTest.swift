@@ -154,6 +154,18 @@ enum UpdateSelfTest {
             check("forged: an appcast whose list was changed under its signature is refused", failed(updater) { $0 == .badSignature("appcast") }, "\(updater.state)")
             check("forged: nothing was downloaded", !archiveStaged(configuration))
 
+            try await serve("long-feed")
+            await updater.checkNow()
+            check("a feed beyond the size limit is refused", failed(updater) { $0 == .notAnAppcast })
+
+            try await serve("long-archive")
+            await updater.checkNow()
+            check("an archive longer than the signed size is refused", failed(updater) {
+                if case .archiveLength(let expected, let found) = $0 { return found > expected }
+                return false
+            })
+            check("a partial archive is removed", !archiveStaged(configuration))
+
             try await serve("tampered")
             await updater.checkNow()
             check("changed archive: refused once downloaded", failed(updater) { $0 == .archiveHash }, "\(updater.state)")

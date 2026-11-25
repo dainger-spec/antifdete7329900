@@ -112,8 +112,16 @@ def handler_for(feed):
                 if url.path == "/appcast.json":
                     feed.hits += 1
             if url.path == "/appcast.json":
+                if feed.mode == "long-feed":
+                    # No declared length. Leading JSON whitespace is valid, so only the limit refuses this feed.
+                    self.send_response(200)
+                    self.end_headers()
+                    self.wfile.write(b" " * (1 << 20) + feed.appcasts["valid"])
+                    return
                 return self.answer(200, feed.appcasts[feed.mode], "application/json")
             if url.path == "/" + feed.archive_name:
+                if feed.mode == "long-archive":
+                    return self.answer(200, feed.archive + b"x", "application/zip")
                 return self.answer(200, feed.tampered if feed.mode == "tampered" else feed.archive, "application/zip")
             return self.answer(404, b"not here", "text/plain")
     return Handler
@@ -315,6 +323,7 @@ def main():
         time.sleep(1.2)
         appcasts["valid"] = appcast(tool, key, os.path.join(out, "valid.json"), [release])
         appcasts["tampered"] = appcasts["valid"]
+        appcasts["long-archive"] = appcasts["valid"]
         appcasts["forged"] = forged(appcasts["valid"], args.port)
         with open(new_zip, "rb") as handle:
             archive = handle.read()

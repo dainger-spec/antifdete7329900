@@ -255,8 +255,7 @@ safe('safariShape', () => {
           push && typeof push.permission === 'function' ? JSON.stringify(push.permission('web.example.test')) : '-'].join('|');
 });
 safe('webkitObject', () => typeof window.webkit);
-// window.browser: WebKit's WebPageNamespace, which Safari gives every page (the Mac and an iPhone,
-// no extension needed; claude/measure-canvas-browser): its class, runtime's and the property's shape.
+// Safari exposes WebKit's WebPageNamespace on both macOS and iOS, even without extensions.
 safe('browserShape', () => {
   const b = window.browser;
   if (!b) return 'absent';

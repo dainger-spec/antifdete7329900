@@ -196,7 +196,7 @@ final class AppUpdater: ObservableObject, Updater {
     /// The release whose download failed last: Try Again downloads it again. Nil after a check
     /// failed, or a download went through.
     private(set) var failedRelease: AppcastItem?
-    private var downloadTask: URLSessionDownloadTask?
+    private var downloadTask: URLSessionDataTask?
     private var progressTimer: Timer?
 
     let configuration: Configuration
@@ -334,7 +334,10 @@ final class AppUpdater: ObservableObject, Updater {
             try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let archive = configuration.staging.appendingPathComponent(name)
-            let downloaded = try await fetchArchive(item.url, expected: item.length)
+            let downloaded = configuration.staging.appendingPathComponent(Self.archivePrefix + UUID().uuidString + ".zip")
+            try Data().write(to: downloaded, options: .withoutOverwriting)
+            defer { try? FileManager.default.removeItem(at: downloaded) }
+            try await fetchArchive(item.url, expected: item.length, to: downloaded)
             try? FileManager.default.removeItem(at: archive)
             try FileManager.default.moveItem(at: downloaded, to: archive)
             try UpdateVerifier.checkArchive(at: archive, item: item, keys: configuration.keys)
@@ -377,7 +380,7 @@ final class AppUpdater: ObservableObject, Updater {
 
     /// The archive, into a temporary file of this app's, with what has come said every fifth of a
     /// second (`downloadProgress`); its length is checked against the release.
-    private func fetchArchive(_ url: URL, expected length: Int) async throws -> URL {
+    private func fetchArchive(_ url: URL, expected length: Int, to file: URL) async throws {
         var request = URLRequest(url: url)
         request.httpShouldHandleCookies = false
         downloadProgress = UpdateDownloadProgress(received: 0, total: Int64(length), startedAt: Date())
@@ -387,32 +390,11 @@ final class AppUpdater: ObservableObject, Updater {
             downloadTask = nil
             downloadProgress = nil
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            let task = Self.session.downloadTask(with: request) { file, response, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                guard let file, let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                    continuation.resume(throwing: UpdateFetchError.status((response as? HTTPURLResponse)?.statusCode ?? 0))
-                    return
-                }
-                // The session's file goes when this returns: moved to one of ours first.
-                let kept = FileManager.default.temporaryDirectory.appendingPathComponent("lumen-update-\(UUID().uuidString).zip")
-                do {
-                    try FileManager.default.moveItem(at: file, to: kept)
-                } catch {
-                    continuation.resume(throwing: error)
-                    return
-                }
-                let size = (try? FileManager.default.attributesOfItem(atPath: kept.path)[.size] as? Int) ?? -1
-                guard size == length else {
-                    try? FileManager.default.removeItem(at: kept)
-                    continuation.resume(throwing: UpdateError.archiveLength(expected: length, found: size))
-                    return
-                }
-                continuation.resume(returning: kept)
-            }
+        let handle = try FileHandle(forWritingTo: file)
+        defer { try? handle.close() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let task = Self.session.dataTask(with: request)
+            task.delegate = UpdateArchiveWriter(handle: handle, length: length, completion: continuation)
             downloadTask = task
             progressTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self, weak task] _ in
                 MainActor.assumeIsolated {
@@ -422,6 +404,7 @@ final class AppUpdater: ObservableObject, Updater {
             }
             task.resume()
         }
+        try handle.close()
     }
 
     // MARK: Installing
@@ -586,7 +569,7 @@ final class AppUpdater: ObservableObject, Updater {
 
     /// The updater's own session: ephemeral, no cookies, no cache, no credentials, and the same
     /// headers from every Mac — a User-Agent without a version, one fixed language.
-    private static let session: URLSession = {
+    private nonisolated static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
@@ -600,24 +583,21 @@ final class AppUpdater: ObservableObject, Updater {
         return URLSession(configuration: configuration, delegate: UpdateTestTrust(), delegateQueue: nil)
     }()
 
-    private static func fetch(_ url: URL, limit: Int) async throws -> Data {
+    private nonisolated static func fetch(_ url: URL, limit: Int) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpShouldHandleCookies = false
-        let (data, response) = try await session.data(for: request)
+        let (bytes, response) = try await session.bytes(for: request)
+        defer { bytes.task.cancel() }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             throw UpdateFetchError.status((response as? HTTPURLResponse)?.statusCode ?? 0)
         }
-        guard data.count <= limit else { throw UpdateError.notAnAppcast }
-        return data
-    }
-
-    private enum UpdateFetchError: Error, CustomStringConvertible {
-        case status(Int)
-        var description: String {
-            switch self {
-            case .status(let code): return String(format: L("error.update.status"), code)
-            }
+        guard response.expectedContentLength <= Int64(limit) else { throw UpdateError.notAnAppcast }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < limit else { throw UpdateError.notAnAppcast }
+            data.append(byte)
         }
+        return data
     }
 
     /// A failure in the interface's words: the system's own (`localizedDescription`) follow the
@@ -645,6 +625,65 @@ final class AppUpdater: ObservableObject, Updater {
             return URL(fileURLWithPath: String(cString: directory), isDirectory: true)
         }
         return FileManager.default.homeDirectoryForCurrentUser
+    }
+}
+
+private enum UpdateFetchError: Error, CustomStringConvertible {
+    case status(Int)
+    var description: String {
+        switch self {
+        case .status(let code): return String(format: L("error.update.status"), code)
+        }
+    }
+}
+
+/// URLSession serializes these callbacks. Check the signed length before each disk write,
+/// including when the server omits Content-Length or sends an encoded response.
+private final class UpdateArchiveWriter: NSObject, URLSessionDataDelegate, @unchecked Sendable {
+    private let handle: FileHandle
+    private let length: Int
+    private let completion: CheckedContinuation<Void, Error>
+    private var written = 0
+    private var failure: Error?
+
+    init(handle: FileHandle, length: Int, completion: CheckedContinuation<Void, Error>) {
+        self.handle = handle
+        self.length = length
+        self.completion = completion
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse,
+                    completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            failure = UpdateFetchError.status((response as? HTTPURLResponse)?.statusCode ?? 0)
+            completionHandler(.cancel)
+            return
+        }
+        completionHandler(.allow)
+    }
+
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        guard failure == nil else { return }
+        do {
+            guard data.count <= length - written else {
+                throw UpdateError.archiveLength(expected: length, found: written + data.count)
+            }
+            try handle.write(contentsOf: data)
+            written += data.count
+        } catch {
+            failure = error
+            dataTask.cancel()
+        }
+    }
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        if let problem = failure ?? error {
+            completion.resume(throwing: problem)
+        } else if written != length {
+            completion.resume(throwing: UpdateError.archiveLength(expected: length, found: written))
+        } else {
+            completion.resume()
+        }
     }
 }
 

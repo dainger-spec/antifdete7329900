@@ -129,13 +129,26 @@ swift build -c "$CONFIG" --product PrivacyBrowser
 swift build -c "$CONFIG" --product PrivacyBrowserUpdater
 BIN_DIR="$(swift build -c "$CONFIG" --show-bin-path)"
 
+# Strip the linker debug map from shipped Swift executables before signing. SwiftPM keeps
+# the original binary and dSYM for symbolication. Debugger builds keep the map as well.
+copy_swift_executable() {
+  cp "$1" "$2"
+  if [[ "$CONFIG" == release && "${DEBUGGABLE:-0}" != 1 ]]; then
+    xcrun strip -S "$2"
+    if LC_ALL=C grep -aFq -- "$PWD/" "$2"; then
+      echo "error: $2 contains the local source directory" >&2
+      return 1
+    fi
+  fi
+}
+
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # The product is built as PrivacyBrowser and named Lumen here (CFBundleExecutable in Info.plist).
-cp "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/Lumen"
+copy_swift_executable "$BIN_DIR/PrivacyBrowser" "$APP/Contents/MacOS/Lumen"
 # The same code, for a profile's process: signed apart, without the app's keychain (above).
 PROFILE_EXECUTABLE="$APP/Contents/MacOS/LumenProfile"
-cp "$BIN_DIR/PrivacyBrowser" "$PROFILE_EXECUTABLE"
+copy_swift_executable "$BIN_DIR/PrivacyBrowser" "$PROFILE_EXECUTABLE"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Info.plist > "$APP/Contents/Info.plist"
 PLIST="$APP/Contents/Info.plist"
 [[ -z "${APP_VERSION:-}" ]] || /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $APP_VERSION" "$PLIST"
@@ -191,7 +204,7 @@ plutil -lint "$PLIST" >/dev/null
 # starts through LaunchServices at the end of a quit in which every profile was sealed.
 HELPER="$APP/Contents/Helpers/Lumen Updater.app"
 mkdir -p "$HELPER/Contents/MacOS"
-cp "$BIN_DIR/PrivacyBrowserUpdater" "$HELPER/Contents/MacOS/LumenUpdater"
+copy_swift_executable "$BIN_DIR/PrivacyBrowserUpdater" "$HELPER/Contents/MacOS/LumenUpdater"
 sed "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/Updater/Info.plist > "$HELPER/Contents/Info.plist"
 plutil -lint "$HELPER/Contents/Info.plist" >/dev/null
 
@@ -244,7 +257,7 @@ if [[ "$NE" == "1" || "$NE" == "check" ]]; then
     rm -rf "$SYSEXT"
   fi
   mkdir -p "$SYSEXT/Contents/MacOS"
-  cp "$BIN_DIR/NetworkGuardExtension" "$SYSEXT/Contents/MacOS/NetworkGuardExtension"
+  copy_swift_executable "$BIN_DIR/NetworkGuardExtension" "$SYSEXT/Contents/MacOS/NetworkGuardExtension"
   sed -e "s/\$(EXTENSION_ID)/$EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" -e "s/\$(EXTENSION_VERSION)/$EXTENSION_VERSION/g" \
     -e "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" Resources/NetworkGuard/Info.plist > "$SYSEXT/Contents/Info.plist"
   plutil -lint "$SYSEXT/Contents/Info.plist" >/dev/null
@@ -314,7 +327,7 @@ if [[ "$CAM" == "1" || "$CAM" == "check" ]]; then
     rm -rf "$CAMSYSEXT"
   fi
   mkdir -p "$CAMSYSEXT/Contents/MacOS"
-  cp "$BIN_DIR/CameraExtension" "$CAMSYSEXT/Contents/MacOS/CameraExtension"
+  copy_swift_executable "$BIN_DIR/CameraExtension" "$CAMSYSEXT/Contents/MacOS/CameraExtension"
   sed -e "s/\$(EXTENSION_ID)/$CAMERA_EXTENSION_ID/g" -e "s/\$(APP_GROUP)/$APP_GROUP/g" \
     -e "s/\$(EXTENSION_VERSION)/$EXTENSION_VERSION/g" -e "s/\$(BUNDLE_ID)/$BUNDLE_ID/g" \
     Resources/CameraExtension/Info.plist > "$CAMSYSEXT/Contents/Info.plist"
@@ -381,7 +394,7 @@ if [[ "$VM" == "1" || "$VM" == "check" ]]; then
   if [[ "$VM" == "1" ]]; then
     [[ "$SANDBOX" != "1" ]] || { echo "error: VM=1 needs SANDBOX=0 (a sandboxed app's helper cannot reach the machines' disks)" >&2; exit 1; }
     VM_HELPER="$APP/Contents/MacOS/LumenVM"
-    cp "$BIN_DIR/LumenVM" "$VM_HELPER"
+    copy_swift_executable "$BIN_DIR/LumenVM" "$VM_HELPER"
     mkdir -p "$APP/Contents/Resources/VMGuest"
     cp Resources/VMGuest/* "$APP/Contents/Resources/VMGuest/"
     chmod 755 "$APP/Contents/Resources/VMGuest/Install Lumen Tools.command" "$APP/Contents/Resources/VMGuest/install.sh" \
@@ -407,7 +420,7 @@ if [[ "$OVPN" == "1" || "$OVPN" == "check" ]]; then
   if [[ "$OVPN" == "1" ]]; then
     [[ "$SANDBOX" != "1" ]] || { echo "error: OVPN=1 needs SANDBOX=0 (a profile's tunnel is for a profile in its own process)" >&2; exit 1; }
     cp build/openvpn/openvpn "$APP/Contents/MacOS/openvpn"
-    cp "$BIN_DIR/LumenTunnel" "$APP/Contents/MacOS/LumenTunnel"
+    copy_swift_executable "$BIN_DIR/LumenTunnel" "$APP/Contents/MacOS/LumenTunnel"
     mkdir -p "$APP/Contents/Resources/ThirdParty/OpenVPN"
     cp build/openvpn/licenses/* "$APP/Contents/Resources/ThirdParty/OpenVPN/"
     cp Sources/CLwIP/lwip/COPYING "$APP/Contents/Resources/ThirdParty/OpenVPN/lwIP-COPYING.txt"
