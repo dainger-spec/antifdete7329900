@@ -120,11 +120,17 @@ publish() {
       --upload-file "$file" "$(object_url "$name")" \
       || die "$name: the upload to R2 failed"
   fi
+  if [[ "${6:-}" == --private ]]; then
+    r2 --fail --output "$TMP/body" "$(object_url "$name")" || die "Private read-back failed for $name"
+    code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' --head "$url")" || die "Could not verify the public URL"
+    case "$code" in 403|404) ;; *) die "Public installer URL returned $code" ;; esac
+  else
   # Read back as anyone reads it: the public address, through Cloudflare.
   code="$(curl --tlsv1.2 --silent --show-error --retry 3 --retry-delay 5 -H 'Cache-Control: no-cache' \
     --dump-header "$TMP/get" --output "$TMP/body" --write-out '%{http_code}' "$url")" \
     || die "$url could not be read back: the release has failed"
   [[ "$code" == 200 ]] || die "$url answered $code where $(basename "$file") was just published: the release has failed"
+  fi
   got="$(sha256 "$TMP/body")"
   got_size=$(( $(wc -c < "$TMP/body") ))
   rm -f "$TMP/body"
@@ -143,7 +149,7 @@ case "$1" in
   --free) [[ $# -eq 2 ]] || usage; keys; free "$2" ;;
   --current) [[ $# -eq 3 ]] || usage; keys; current "$2" "$3" ;;
   -*) usage ;;
-  *) [[ $# -eq 4 || ( $# -eq 5 && "${5:-}" == --replace ) ]] || usage
+  *) [[ $# -eq 4 || ( $# -eq 5 && ( "${5:-}" == --replace || "${5:-}" == --private ) ) ]] || usage
      keys
-     publish "$1" "$2" "$3" "$4" "$([[ "${5:-}" == --replace ]] && echo 1 || echo 0)" ;;
+     publish "$1" "$2" "$3" "$4" "$([[ "${5:-}" == --replace ]] && echo 1 || echo 0)" "${5:-}" ;;
 esac

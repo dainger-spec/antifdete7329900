@@ -458,9 +458,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             }
             try manager.copyItem(at: base.auxiliaryStorage, to: files.auxiliaryStorage)
             try manager.copyItem(at: base.hardwareModel, to: files.hardwareModel)
+            try VZMacMachineIdentifier().dataRepresentation.write(to: files.machineIdentifier, options: .atomic)
+            // Publish the complete disk only after all its companion files exist.
             try manager.moveItem(at: cloning, to: files.disk)
-            // Last: with it the machine is whole.
-            try VZMacMachineIdentifier().dataRepresentation.write(to: files.machineIdentifier)
         } catch {
             // A copy that stopped part-way — a full disk, above all — is gigabytes of nothing: gone
             // now, not left on the full disk until the machine's next start.

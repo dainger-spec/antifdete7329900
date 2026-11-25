@@ -141,6 +141,8 @@ if [[ -n "${R2_ENDPOINT:-}${R2_ACCESS_KEY_ID:-}${R2_SECRET_ACCESS_KEY:-}" ]]; th
   : "${R2_ENDPOINT:?R2_ENDPOINT (https://<account>.r2.cloudflarestorage.com)}"
   : "${R2_ACCESS_KEY_ID:?R2_ACCESS_KEY_ID}" "${R2_SECRET_ACCESS_KEY:?R2_SECRET_ACCESS_KEY}"
   [[ "$SIGN_IDENTITY" != "-" ]] || { echo "error: a dry run is never uploaded" >&2; exit 1; }
+  : "${R2_INSTALLER_BUCKET:?Private R2 bucket bound to the website as INSTALLERS}"
+  [[ "$R2_INSTALLER_BUCKET" != "${R2_BUCKET:-lumen-downloads}" ]] || { echo "error: private installer bucket must differ from the public updates bucket" >&2; exit 1; }
   PUBLISH=1
 fi
 
@@ -202,7 +204,7 @@ OUT="$(cd "$OUT" && pwd)"
 # releases (unless PREVIOUS_APPCAST names another).
 if [[ -n "$PUBLISH" ]]; then
   scripts/r2_publish.sh --free "${DOWNLOAD_URL}Lumen-$VERSION.zip"
-  scripts/r2_publish.sh --free "${DOWNLOAD_URL}Lumen-$VERSION.dmg"
+  R2_BUCKET="$R2_INSTALLER_BUCKET" scripts/r2_publish.sh --free "${DOWNLOAD_URL}Lumen-$VERSION.dmg"
   if [[ -z "${PREVIOUS_APPCAST:-}" ]]; then
     scripts/r2_publish.sh --current "$FEED_URL" "$OUT/previous-appcast.json"
     [[ ! -f "$OUT/previous-appcast.json" ]] || PREVIOUS_APPCAST="$OUT/previous-appcast.json"
@@ -570,7 +572,8 @@ fi
 # them again, in the same order, finishes the publication (the same bytes are only read back).
 if [[ -n "$PUBLISH" ]]; then
   scripts/r2_publish.sh "$OUT/$ZIP_NAME" "$DOWNLOAD_URL$ZIP_NAME" application/zip "public, max-age=31536000, immutable"
-  scripts/r2_publish.sh "$OUT/$DMG_NAME" "$DOWNLOAD_URL$DMG_NAME" application/x-apple-diskimage "public, max-age=31536000, immutable"
+  R2_BUCKET="$R2_INSTALLER_BUCKET" scripts/r2_publish.sh "$OUT/$DMG_NAME" "$DOWNLOAD_URL$DMG_NAME" application/x-apple-diskimage "private, no-store" --private
+  scripts/r2_publish.sh "$OUT/download.json" "${DOWNLOAD_URL}download.json" application/json "no-cache" --replace
   scripts/r2_publish.sh "$OUT/appcast.json" "$FEED_URL" application/json "no-cache" --replace
   PUBLISHED="published and read back: what $DOWNLOAD_URL serves is, byte for byte, what was built"
 else
