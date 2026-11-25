@@ -212,6 +212,11 @@ def behaviour(item):
         return ["disabled"]
     words = set()
     for effect in item.get("effects", []):
+        # Settings opens a persistent window in this profile. Record it separately
+        # from incidental AppKit windows that steady() intentionally ignores.
+        if item.get("action") == "showPreferences:" and effect.startswith("a window: NSWindow '"):
+            words.add("Safari Settings")
+            continue
         for pattern, word in ((r"^an open panel", "open panel"), (r"^a save panel", "save panel"),
                               (r"^an alert", "alert"), (r"^printing", "print"), (r"^page setup", "page setup"),
                               (r"modal", "modal window"), (r"^asks the system to open the file", "opens a file outside"),

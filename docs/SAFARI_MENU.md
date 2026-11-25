@@ -236,7 +236,7 @@ fea9a3f, Safari 26.6.2 and 27.0.1) and what is decided about it:
 
 What an item did is the walk's words: *disabled*; *changes the window* (the key window, its first
 responder, its page or zoom, a window or sheet closed); a window, sheet or panel by class; *alert*,
-*open panel*, *save panel* (answered with their cancel button); *our notice*, *our Settings*;
+*open panel*, *save panel* (answered with their cancel button); *our notice*, *Safari Settings*;
 *another app in front*; *hides other apps*, *quit*, *Help*, *character viewer* (asked for, not done);
 an exception by name; *nothing seen*; *—* where that Safari has no such item. Whether a window
 changed or nothing was seen follows timing, and whether Start Dictation… is enabled the system: those
@@ -246,7 +246,7 @@ differ from walk to walk (the record leaves them out).
 |---|---|---|---|---|
 | Safari › About Safari | - | changes the window; window NSPanel | changes the window; window NSPanel | **keep**: the standard About panel |
 | Safari › Safari Extensions… | - | disabled | disabled | **keep**: disabled: Safari's extensions are the real Safari's, off in a profile |
-| Safari › Settings… | ⌘, | our Settings | our Settings | **ours**: the manager's Settings (Safari's own have no place in a profile) |
+| Safari › Settings… | ⌘, | Safari Settings | Safari Settings | **keep**. Safari opens its preferences in the profile process. |
 | Safari › Settings for This Website… | - | changes the window; window _NSPopoverWindow | changes the window; window _NSPopoverWindow | **keep**: per-site settings, kept in the profile's home |
 | Safari › Connection Security Details… | - | disabled | disabled | **keep**: the page's certificate |
 | Safari › Clear History… | - | a window: the profile's library | a window: the profile's library | **fixed**: was disabled; opens the profile's own history, where it is cleared (`HistoryMenuRoute`; Safari's history service is not a profile's: H1) |
