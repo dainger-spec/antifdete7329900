@@ -35,7 +35,7 @@ jobs:
                   ready = b'data-installer="0.1.20"' in page.read()
               marker=urllib.request.Request(site+'/build.txt?verify='+str(int(time.time())), headers={'User-Agent':'Lumen','Cache-Control':'no-cache'})
               with client.open(marker,timeout=10) as r:
-                  ready = ready and r.readline().strip() == b'commit 799d89e'
+                  ready = ready and r.readline().strip() == b'commit 03a899a'
               if ready:
                   try:
                       with installer({'key':'invalid-release-check'}): pass
@@ -57,12 +57,7 @@ jobs:
                   license = json.load(r)['license']
                   print('Production test license:',license.get('plan'),license.get('status'))
                   assert license.get('plan') in ('personal','pro','team') and license.get('status')=='active', 'Test account has no current paid plan'
-              with installer({'session': session, 'lang':'ru', 'view':'page'}) as page:
-                  assert page.status == 200 and 'no-store' in page.headers.get('Cache-Control','')
-                  html = page.read().decode()
-                  assert 'Lumen-0.1.20.dmg' in html and checksum in html
-              print('Paid page served by production')
-              with installer({'session':session}) as image:
+              with installer({'session':session,'view':'page'}) as image:
                   assert image.status == 200 and 'no-store' in image.headers.get('Cache-Control','')
                   assert image.headers.get('Content-Disposition','').endswith('"Lumen-0.1.20.dmg"')
                   digest = hashlib.sha256()
@@ -111,26 +106,18 @@ jobs:
             await page.waitForURL(/\/ru\/account(?:\.html)?(?:[?#]|$)/,{timeout:25000});
             token = await page.evaluate(()=>JSON.parse(sessionStorage.getItem('lumen-session')).token);
             assert.ok(token);
-            await page.locator('[data-get] a.primary').click();
-            let releaseScript, scriptRequested;
-            const hold = new Promise(resolve=>releaseScript=resolve);
-            const requested = new Promise(resolve=>scriptRequested=resolve);
-            await page.route('**/assets/installer.js?v=2',async route=>{scriptRequested();await hold;await route.continue();});
-            const navigation=page.locator('[data-installer="0.1.20"]').click({noWaitAfter:true});
-            await Promise.race([requested, new Promise((_,reject)=>{const t=setTimeout(()=>reject(Error('Versioned installer script not requested')),15000);t.unref();})]);
-            const button=page.getByRole('button',{name:'Скачать установщик'});
-            try { assert.equal(await button.isDisabled(),true); } finally { releaseScript(); }
-            await navigation;
-            console.log('Verified the early click cannot submit an empty form.');
-            await page.getByRole('heading',{name:'Загрузка Lumen для Mac'}).waitFor();
-            const [download] = await Promise.all([page.waitForEvent('download',{timeout:60000}),page.getByRole('button',{name:'Скачать установщик'}).click()]);
-            assert.equal(download.suggestedFilename(),'Lumen-0.1.20.dmg');
-            const hash=createHash('sha256');
-            let size=0;
-            for await(const chunk of await download.createReadStream()) { size+=chunk.length;hash.update(chunk); }
-            assert.equal(size,48948659);
-            assert.equal(hash.digest('hex'),'95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3');
-            console.log('Browser passed: sign-in form, account button, protected installer page, signed DMG downloaded and verified.');
+            for (const [location,selector] of [['account','[data-get] [data-installer-download]'],['download','[data-installer="0.1.20"]']]) {
+              if(location==='download') await page.goto('https://lumenbrowser.io/en/download',{waitUntil:'domcontentloaded'});
+              const original=page.url();
+              const [download] = await Promise.all([page.waitForEvent('download',{timeout:60000}),page.locator(selector).click()]);
+              assert.equal(download.suggestedFilename(),'Lumen-0.1.20.dmg');
+              const hash=createHash('sha256'); let size=0;
+              for await(const chunk of await download.createReadStream()) {size+=chunk.length;hash.update(chunk);}
+              assert.equal(size,48948659);
+              assert.equal(hash.digest('hex'),'95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3');
+              assert.equal(page.url(),original);
+              console.log('One click downloaded and verified the full installer from '+location+'; the original page stayed open.');
+            }
           } finally {
             if(token) await context.request.post('https://api.lumenbrowser.io/v1/auth/logout',{headers:{Authorization:'Bearer '+token},data:{},maxRedirects:0});
             await browser.close();
