@@ -33,6 +33,9 @@ jobs:
               req=urllib.request.Request(site+'/en/download?release=0.1.20', headers={'User-Agent':'Lumen', 'Cache-Control':'no-cache'})
               with client.open(req,timeout=10) as page:
                   ready = b'data-installer="0.1.20"' in page.read()
+              marker=urllib.request.Request(site+'/build.txt?verify='+str(int(time.time())), headers={'User-Agent':'Lumen','Cache-Control':'no-cache'})
+              with client.open(marker,timeout=10) as r:
+                  ready = ready and r.readline().strip() == b'commit 799d89e'
               if ready:
                   try:
                       with installer({'key':'invalid-release-check'}): pass
@@ -109,7 +112,16 @@ jobs:
             token = await page.evaluate(()=>JSON.parse(sessionStorage.getItem('lumen-session')).token);
             assert.ok(token);
             await page.locator('[data-get] a.primary').click();
-            await page.locator('[data-installer="0.1.20"]').click();
+            let releaseScript, scriptRequested;
+            const hold = new Promise(resolve=>releaseScript=resolve);
+            const requested = new Promise(resolve=>scriptRequested=resolve);
+            await page.route('**/assets/installer.js?v=2',async route=>{scriptRequested();await hold;await route.continue();});
+            const navigation=page.locator('[data-installer="0.1.20"]').click({noWaitAfter:true});
+            await Promise.race([requested, new Promise((_,reject)=>{const t=setTimeout(()=>reject(Error('Versioned installer script not requested')),15000);t.unref();})]);
+            const button=page.getByRole('button',{name:'Скачать установщик'});
+            try { assert.equal(await button.isDisabled(),true); } finally { releaseScript(); }
+            await navigation;
+            console.log('Verified the early click cannot submit an empty form.');
             await page.getByRole('heading',{name:'Загрузка Lumen для Mac'}).waitFor();
             const [download] = await Promise.all([page.waitForEvent('download',{timeout:60000}),page.getByRole('button',{name:'Скачать установщик'}).click()]);
             assert.equal(download.suggestedFilename(),'Lumen-0.1.20.dmg');
