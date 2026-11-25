@@ -858,7 +858,15 @@ enum SweepSteps {
     static func settings() async {
         await S.command(kVK_ANSI_Comma)
         await SweepInput.pause(1.5)
-        S.note("after ⌘,: key \(keyWindow())")
+        guard let preferences = NSApp.keyWindow,
+              !SafariChromeHost.isBrowserWindow(preferences), preferences.isVisible else {
+            S.expect(false, "⌘, opened Safari settings in the profile process")
+            return
+        }
+        S.expect(true, "⌘, opened a profile window: \(keyWindow())")
+        preferences.performClose(nil)
+        await SweepInput.pause(0.5)
+        S.expect(S.frontPage() != nil, "the browser still has its page after closing settings")
     }
 
     // MARK: Every key equivalent

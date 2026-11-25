@@ -41,6 +41,7 @@ import datetime
 import hashlib
 import json
 import os
+from pathlib import Path
 import plistlib
 import re
 import shutil
@@ -339,6 +340,15 @@ def main():
         else:
             vault = os.path.join(out, "vault")
             roots = [os.path.join(home, "Library/WebKit", BUNDLE_ID), os.path.join(home, "Library/Caches", BUNDLE_ID)]
+        # A base and one existing profile, without booting a VM on the runner.
+        vm_root = Path(vault) / "VirtualMachines"
+        vm_disks = {}
+        for directory in ["base", "machines/68A26D42-081B-4DB1-89DA-55505BF90CCE"]:
+            disk = vm_root / directory / "disk.img"
+            disk.parent.mkdir(parents=True, exist_ok=True)
+            with disk.open("xb") as handle:
+                handle.write(directory.encode())
+            vm_disks[disk] = (disk.stat().st_ino, disk.read_bytes())
         binary = os.path.join(old_app, "Contents/MacOS/Lumen")
         environment = dict(os.environ, PB_SELFTEST_UPDATES="1", PRIVACYBROWSER_VAULT_DIR=vault,
                            PB_SELFTEST_UPDATE_CONTROL=f"https://localhost:{args.port}/__control",
@@ -417,6 +427,11 @@ def main():
             print("::endgroup::", flush=True)
             check("the new build opens the old build's data", code == 0 and "SELFTEST-UPDATES verify PASSED" in verified,
                   f"exit {code}")
+
+        actual_disks = list(Path(vault).rglob("disk.img"))
+        check("updating keeps each VM disk in place, without creating another",
+              set(actual_disks) == set(vm_disks)
+              and all((disk.stat().st_ino, disk.read_bytes()) == vm_disks[disk] for disk in actual_disks))
 
         # The capture: not one packet of the app while checks were off; the control seen.
         stop_capture(capture)
