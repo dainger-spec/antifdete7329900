@@ -1,0 +1,63 @@
+name: Paid website installer 0.1.20
+on:
+  push:
+    branches: [codex/verify-paid-installer-0.1.20]
+permissions: {}
+jobs:
+  production-download:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check official website with the Lumen production test account
+        env:
+          TEST_EMAIL: ${{ secrets.LUMEN_E2E_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.LUMEN_E2E_PASSWORD }}
+        shell: python
+        run: |
+          import hashlib, json, os, urllib.parse, urllib.request, urllib.error
+          site = 'https://lumenbrowser.io'
+          api = 'https://api.lumenbrowser.io/v1'
+          checksum = '95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3'
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, *args): return None
+          client = urllib.request.build_opener(NoRedirect())
+          def post(url, body, content_type, token=None):
+              headers = {'User-Agent': 'Lumen', 'Origin': site, 'Content-Type': content_type}
+              if token: headers['Authorization'] = 'Bearer ' + token
+              req = urllib.request.Request(url, data=body, headers=headers, method='POST')
+              return client.open(req, timeout=90)
+          def installer(fields):
+              return post(site+'/installer', urllib.parse.urlencode(fields).encode(), 'application/x-www-form-urlencoded')
+          import time
+          for attempt in range(50):
+              req=urllib.request.Request(site+'/en/download?release=0.1.20', headers={'User-Agent':'Lumen', 'Cache-Control':'no-cache'})
+              with client.open(req,timeout=10) as page:
+                  if b'data-installer="0.1.20"' in page.read(): break
+              time.sleep(5)
+          else: raise RuntimeError('Production website has not switched to 0.1.20')
+          try:
+              with installer({}): raise RuntimeError('missing credentials accepted')
+          except urllib.error.HTTPError as e:
+              assert e.code == 401, 'unexpected signed-out status '+str(e.code)
+          print('Signed-out request refused with HTTP 401')
+          with post(api+'/auth/login', json.dumps({'email': os.environ['TEST_EMAIL'], 'password': os.environ['TEST_PASSWORD']}).encode(), 'application/json') as r:
+              session = json.load(r).get('sessionToken')
+              assert session, 'Test account sign-in needs another factor'
+          try:
+              with installer({'session': session, 'lang':'ru', 'view':'page'}) as page:
+                  assert page.status == 200 and 'no-store' in page.headers.get('Cache-Control','')
+                  html = page.read().decode()
+                  assert 'Lumen-0.1.20.dmg' in html and checksum in html
+              print('Paid page served by production')
+              with installer({'session':session}) as image:
+                  assert image.status == 200 and 'no-store' in image.headers.get('Cache-Control','')
+                  assert image.headers.get('Content-Disposition','').endswith('"Lumen-0.1.20.dmg"')
+                  digest = hashlib.sha256()
+                  size = 0
+                  while block := image.read(1024*1024):
+                      digest.update(block)
+                      size += len(block)
+                  assert size == 48948659 and digest.hexdigest() == checksum, 'Paid file mismatch'
+                  print('Production paid download verified',size,digest.hexdigest())
+          finally:
+              with post(api+'/auth/logout',b'{}','application/json',session): pass
