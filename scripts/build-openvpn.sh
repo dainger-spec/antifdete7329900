@@ -23,8 +23,8 @@ OPENVPN_VERSION=2.7.9
 OPENVPN_SHA256=c42a6ed892ddfe2d6e3317a5040f19bec5827564affb2fe3f2b3904a94daacb1
 OPENVPN_URLS=("https://swupdate.openvpn.org/community/releases/openvpn-$OPENVPN_VERSION.tar.gz"
               "https://github.com/OpenVPN/openvpn/releases/download/v$OPENVPN_VERSION/openvpn-$OPENVPN_VERSION.tar.gz")
-MBEDTLS_VERSION=3.6.5
-MBEDTLS_SHA256=4a11f1777bb95bf4ad96721cac945a26e04bf19f57d905f241fe77ebeddf46d8
+MBEDTLS_VERSION=3.6.8
+MBEDTLS_SHA256=bc54b818e87f49c0b3281dd85d24adaede0e63b4e822e3fbd49c005a38b9595b
 MBEDTLS_URLS=("https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-$MBEDTLS_VERSION/mbedtls-$MBEDTLS_VERSION.tar.bz2")
 LZO_VERSION=2.10
 LZO_SHA256=c0f892943208266f9b6543b3ae308fab6284c5c90e627931446fb49b4221a072

@@ -466,6 +466,7 @@ if [[ "$XRAY" == "1" ]]; then
   chmod 755 "$XRAY_HELPER"
   mkdir -p "$APP/Contents/Resources/ThirdParty/Xray"
   cp Resources/Xray/NOTICE.txt "$APP/Contents/Resources/ThirdParty/Xray/NOTICE.txt"
+  cp scripts/xray-modules.patch "$APP/Contents/Resources/ThirdParty/Xray/modules.patch"
 fi
 
 # DEBUGGABLE=1 adds get-task-allow so lldb can attach. Under the hardened runtime a signature

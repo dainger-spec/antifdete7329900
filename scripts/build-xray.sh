@@ -173,6 +173,9 @@ HEAD_COMMIT="$(git -C "$SRC" rev-parse HEAD)"
 [[ "$HEAD_COMMIT" == "$XRAY_COMMIT" ]] \
   || { echo "error: Xray's tag $XRAY_TAG now names $HEAD_COMMIT, not the pinned $XRAY_COMMIT: refused" >&2; exit 1; }
 git -C "$SRC" diff --quiet HEAD || { echo "error: the Xray source in $SRC was changed: run $0 --clean" >&2; exit 1; }
+# The upstream tag still requires affected network and compression libraries. Only the
+# module versions and their verified checksums are patched; --record pins the resulting binaries.
+git -C "$SRC" apply --unidiff-zero "$PWD/scripts/xray-modules.patch"
 
 go_version="$(cd "$SRC" && go env GOVERSION)"
 [[ "$go_version" == "go$GO_VERSION" ]] || { echo "error: Go is $go_version, not the pinned go$GO_VERSION" >&2; exit 1; }

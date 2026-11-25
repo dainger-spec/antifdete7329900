@@ -24,8 +24,8 @@ XRAY_REPOSITORY=https://github.com/XTLS/Xray-core
 XRAY_TAG=v26.10.31
 XRAY_COMMIT=a4a3dff5b20c2faae567b742c172c7b95e75c083
 GO_VERSION=1.27.4
-SHA256_darwin_arm64=2ee7777012cfa0feecbecdc3ebf5afbde639c2aa7a10ad679b785ac5c79d34f0
-SHA256_darwin_amd64=29bd26a0fbcabfcb945e6ca03142832f25403ced3586c05319065a436065a898
+SHA256_darwin_arm64=a329405a8d150e3f17bcf16dda0a396bd0cef3ea6eea061fcda7e4f2553d0aa1
+SHA256_darwin_amd64=3bc1baa34070823d06c9ae309ca816f4fa10df9718b9c8ffee431e2a052bccac
 # The Go toolchain for each host that builds (golang.org/toolchain v0.0.1-go1.27.4.<os>-<arch>):
 GO_SHA256_darwin_arm64=fa86864372c70e6d4c0178d5ac70a819cad023774e5a26d3f955ed3a59c5c290
 #   sum.golang.org: h1:87DnSk/ftpTKvVhs/5KkUqpRmq8SWxkmKzbTca6PBTk=
