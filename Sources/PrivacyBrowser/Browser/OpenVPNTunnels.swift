@@ -140,6 +140,8 @@ final class OpenVPNTunnels {
         }
         do {
             try await tunnel.waitUntilUp(timeout: Self.startTimeout)
+            try Task.checkCancellation()
+            guard tunnels[id] === tunnel else { throw CancellationError() }
         } catch {
             if tunnels[id] === tunnel { tunnels[id] = nil }
             tunnel.stop()

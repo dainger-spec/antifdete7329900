@@ -429,44 +429,8 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
     /// of its own — to macOS inside, and to Apple's services, another Mac than the base and than
     /// every other profile's.
     private func prepareMachine() throws {
-        guard !files.isComplete else { return }
-        if FileManager.default.fileExists(atPath: files.disk.path) {
-            throw VMFailure(.noBase, "This machine has an existing disk but is missing firmware or identity files. Restore its metadata before starting it.")
-        }
-        guard let basePath = request.baseDirectory else {
-            throw VMFailure(.noBase, "This machine has no disk, and no base system to make it from.")
-        }
-        let base = VMLibrary.MachineFiles(directory: URL(fileURLWithPath: basePath, isDirectory: true))
-        guard base.isComplete else {
-            throw VMFailure(.noBase, "The base system is not installed.")
-        }
-        let manager = FileManager.default
-        try manager.createDirectory(at: files.share, withIntermediateDirectories: true)
-        // What a clone that stopped part-way left.
-        let made = [files.disk, files.auxiliaryStorage, files.hardwareModel, files.machineIdentifier]
-        for url in made { try? manager.removeItem(at: url) }
-        let cloning = files.directory.appendingPathComponent("disk.img.cloning")
-        try? manager.removeItem(at: cloning)
-        do {
-            if clonefile(base.disk.path, cloning.path, 0) != 0 {
-                let code = errno
-                guard code == ENOTSUP || code == EXDEV else {
-                    throw NSError(domain: NSPOSIXErrorDomain, code: Int(code))
-                }
-                // A volume without copy-on-write support needs a whole copy.
-                try manager.copyItem(at: base.disk, to: cloning)
-            }
-            try manager.copyItem(at: base.auxiliaryStorage, to: files.auxiliaryStorage)
-            try manager.copyItem(at: base.hardwareModel, to: files.hardwareModel)
-            try VZMacMachineIdentifier().dataRepresentation.write(to: files.machineIdentifier, options: .atomic)
-            // Publish the complete disk only after all its companion files exist.
-            try manager.moveItem(at: cloning, to: files.disk)
-        } catch {
-            // A copy that stopped part-way — a full disk, above all — is gigabytes of nothing: gone
-            // now, not left on the full disk until the machine's next start.
-            for url in [cloning] + made { try? manager.removeItem(at: url) }
-            throw error
-        }
+        let base = request.baseDirectory.map { URL(fileURLWithPath: $0, isDirectory: true) }
+        try files.prepareDisk(baseDirectory: base) { VZMacMachineIdentifier().dataRepresentation }
     }
 
     // MARK: The window
@@ -518,6 +482,9 @@ final class MachineRunner: NSObject, VZVirtualMachineDelegate, NSWindowDelegate 
             let model = MachineTitleBarModel(name: request.windowTitle, bar: bar, texts: request.texts)
             titleBar = model
             let host = NSHostingView(rootView: MachineTitleBar(model: model))
+            // The AppKit constraints already place this strip across the title bar.
+            // Applying SwiftUI’s window safe area again shifts the entire row down.
+            host.safeAreaRegions = []
             host.translatesAutoresizingMaskIntoConstraints = false
             let screen = MachineScreen()
             screen.translatesAutoresizingMaskIntoConstraints = false
