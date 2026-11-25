@@ -707,14 +707,14 @@ public final class VMNetDirectConnector: @unchecked Sendable {
     /// asked for names only. (Asked of such a literal alone, on a CI Mac, it did not bring up
     /// macOS's question about the local network — 14 November — but there is nothing for it to
     /// answer that the address does not already say.)
-    private static func addresses(of host: String, port: UInt16) -> (found: [Address], code: Int32) {
+    private static func addresses(of host: String, port: UInt16, numericOnly: Bool = false) -> (found: [Address], code: Int32) {
         var hints = addrinfo()
         hints.ai_family = AF_UNSPEC
         hints.ai_socktype = Sys.streamType
         hints.ai_flags = AI_NUMERICSERV | AI_NUMERICHOST
         var list: UnsafeMutablePointer<addrinfo>?
         var code = getaddrinfo(host, String(port), &hints, &list)
-        if code != 0 {
+        if code != 0 && !numericOnly {
             // A name: the resolver.
             hints.ai_flags = AI_NUMERICSERV
             list = nil
@@ -908,13 +908,13 @@ public final class VMNetDirectConnector: @unchecked Sendable {
 
     /// The same two questions of an address as it is written ("100.64.0.2"): for the tests.
     static func isOnOwnNetwork(numeric text: String) -> Bool {
-        guard let address = addresses(of: text, port: 9).found.first else { return false }
+        guard let address = addresses(of: text, port: 9, numericOnly: true).found.first else { return false }
         return isOnOwnNetwork(address)
     }
 
     /// The same, of an address as it is written ("100.64.0.2"): for the tests.
     static func goesIntoATunnel(numeric text: String) -> Bool {
-        guard let address = addresses(of: text, port: 9).found.first else { return false }
+        guard let address = addresses(of: text, port: 9, numericOnly: true).found.first else { return false }
         return goesIntoATunnel(address)
     }
 

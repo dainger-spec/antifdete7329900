@@ -50,7 +50,11 @@ final class ProxyProbeTests: XCTestCase {
         XCTAssertEqual(refused.failedStep, 2)
         let unknown = probe.runNow(ProxySettings(kind: .httpConnect, host: "no-such-proxy.invalid", port: 1080))
         // A resolver that cannot be asked at all (no network) is said apart from a name it does not know.
-        XCTAssertTrue([.hostNotFound, .resolverFailed].contains(unknown.verdict), "\(unknown)")
+        if unknown.verdict == .substituteDNS {
+            XCTAssertTrue(SubstituteDNS.isSubstitute(try XCTUnwrap(unknown.connectedAddress)))
+        } else {
+            XCTAssertTrue([.hostNotFound, .resolverFailed].contains(unknown.verdict), "\(unknown)")
+        }
         XCTAssertEqual(unknown.failedStep, 1)
     }
 

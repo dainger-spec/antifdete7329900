@@ -165,7 +165,7 @@ final class DirectConnectorTests: XCTestCase {
         // A port nobody listens on: one that was just closed.
         let gone = TestSocket.listen()
         Sys.close(gone.descriptor)
-        let connector = try connector()
+        let connector = try connector(names: ["nowhere.example": []])
         let client = try dial(connector.port)
         let started = Sys.now
         XCTAssertEqual(ask(client, address: [127, 0, 0, 1], port: gone.port), 5)
@@ -757,7 +757,7 @@ final class DirectConnectorTests: XCTestCase {
         }
         server.start()
 
-        let connector = try connector(names: ["www.example.com": ["127.0.0.1"]])
+        let connector = try connector(names: ["www.example.com": ["127.0.0.1"], "nowhere.example": []])
         let (stackEnd, guestEnd) = TestSocket.datagramPair()
         descriptors += [stackEnd, guestEnd]
         let network = VMNetwork(configuration: Wire.configuration(upstream: connector.upstream), frameDescriptor: stackEnd)
