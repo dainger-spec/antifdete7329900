@@ -29,7 +29,7 @@ jobs:
           s=r.read_text().replace('addingTimeInterval(25)','addingTimeInterval(300)')
           r.write_text(s)
           PY
-          ACCOUNT_SERVER_URL=https://example.invalid ENTITLEMENT_PUBLIC_KEYS="fixture=$(openssl rand -base64 32)" OVPN=0 XRAY=0 VM=0 NE=0 CAM=0 SANDBOX=0 APP_DIR=build/button-audit scripts/build-app.sh
+          ACCOUNT_SERVER_URL=https://example.invalid ENTITLEMENT_PUBLIC_KEYS="63a9a50f8cc6f129=bOCnaE4nVmmeqieu9CNIo0AY86OOYqe65OwSJbTwYn0=" OVPN=0 XRAY=0 VM=0 NE=0 CAM=0 SANDBOX=0 APP_DIR=build/button-audit scripts/build-app.sh
       - name: Press settings controls
         working-directory: app
         timeout-minutes: 8
