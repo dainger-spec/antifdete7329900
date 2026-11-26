@@ -1,0 +1,39 @@
+                if let content = window.contentView {
+                    func buttons(_ view: NSView) -> [NSButton] {
+                        guard !view.isHiddenOrHasHiddenAncestor, !view.visibleRect.isEmpty else { return [] }
+                        if let b = view as? NSButton { return [b] }
+                        return view.subviews.flatMap(buttons)
+                    }
+                    for b in buttons(content) {
+                        let actionName = b.action.map(NSStringFromSelector) ?? "binding"
+                        let id = label + " | " + b.title + " | " + actionName
+                        func note(_ message: String) { FileHandle.standardError.write(Data(("BUTTON " + message + "\n").utf8)) }
+                        guard b.isEnabled else { note("DISABLED " + id); continue }
+                        guard b.window === window, !b.isHiddenOrHasHiddenAncestor else { note("CHANGED " + id); continue }
+                        let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
+                        let reports = ExceptionLog.reported
+                        note("CLICK " + id)
+                        let cancel = Timer(timeInterval: 0.8, repeats: true) { _ in
+                            MainActor.assumeIsolated {
+                                if NSApp.modalWindow != nil { NSApp.abortModal() }
+                                for w in NSApp.windows { if let sheet = w.attachedSheet { w.endSheet(sheet, returnCode: .cancel) } }
+                            }
+                        }
+                        RunLoop.main.add(cancel, forMode: .common)
+                        RunLoop.main.add(cancel, forMode: .modalPanel)
+                        let error = PBCatchException {
+                            if let popup = b as? NSPopUpButton {
+                                if let i = popup.itemArray.indices.first(where: { $0 != popup.indexOfSelectedItem && popup.itemArray[$0].isEnabled && !popup.itemArray[$0].isSeparatorItem }) {
+                                    popup.selectItem(at: i)
+                                    if let a = popup.action { _ = NSApp.sendAction(a, to: popup.target, from: popup) }
+                                } else { note("NO ALTERNATE " + id) }
+                            } else { b.performClick(nil) }
+                        }
+                        try? await Task.sleep(nanoseconds: 300_000_000)
+                        let sheets = NSApp.windows.compactMap(\.attachedSheet)
+                        note("\(error == nil && ExceptionLog.reported == reports ? "RETURNED" : "EXCEPTION") " + id + " | " + (error?.reason ?? "-") + " | sheets=\(sheets.count)")
+                        for sheet in sheets { sheet.sheetParent?.endSheet(sheet, returnCode: .cancel) }
+                        for w in NSApp.windows where !before.contains(ObjectIdentifier(w)) && w.isVisible && w !== window && w !== browser { w.orderOut(nil) }
+                        cancel.invalidate()
+                    }
+                }

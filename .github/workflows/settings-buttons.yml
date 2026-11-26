@@ -1,0 +1,44 @@
+name: Native Safari settings buttons
+on:
+  push:
+    branches: [codex/settings-click-audit]
+permissions:
+  contents: read
+jobs:
+  controls:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [xcode-27, macos-26]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with: {path: qa, persist-credentials: false}
+      - uses: actions/checkout@v4
+        with: {path: app, ref: ae583bc1da397e2ddd1e9cc76d53311dd2c0373b, persist-credentials: false}
+      - name: Instrument disposable build
+        working-directory: app
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('Sources/PrivacyBrowser/Browser/WindowProbe.swift')
+          s=p.read_text(); needle='                checked.append(label)'; assert s.count(needle)==1
+          p.write_text(s.replace(needle,Path('../qa/checks/settings-buttons.swift.txt').read_text()+needle))
+          r=Path('Sources/PrivacyBrowser/App/ReleaseCheck.swift')
+          s=r.read_text().replace('addingTimeInterval(25)','addingTimeInterval(300)')
+          r.write_text(s)
+          PY
+          ACCOUNT_SERVER_URL=https://example.invalid ENTITLEMENT_PUBLIC_KEYS="fixture=$(openssl rand -base64 32)" OVPN=0 XRAY=0 VM=0 NE=0 CAM=0 SANDBOX=0 APP_DIR=build/button-audit scripts/build-app.sh
+      - name: Press settings controls
+        working-directory: app
+        timeout-minutes: 8
+        run: |
+          build/button-audit/Lumen.app/Contents/MacOS/Lumen --release-check >buttons.log 2>&1 || true
+          grep '^BUTTON ' buttons.log
+          grep '^RELEASE-CHECK .*Safari Settings:' buttons.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: settings-${{ matrix.runner }}
+          path: app/buttons.log
