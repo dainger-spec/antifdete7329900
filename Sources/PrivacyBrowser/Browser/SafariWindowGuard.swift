@@ -109,6 +109,7 @@ enum SafariWindowGuard {
 
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
+        explainUnavailableDeveloperMenu()
         guardMissingTitlebarController()
         guardResentKeys()
         guardLate()
@@ -117,6 +118,33 @@ enum SafariWindowGuard {
         _dyld_register_func_for_add_image { _, _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { SafariWindowGuard.guardLate() } }
         }
+    }
+
+    private static func explainUnavailableDeveloperMenu() {
+        let name = "updateIncludeDevelopMenuButton"
+        let update = NSSelectorFromString(name)
+        let outlet = NSSelectorFromString("includeDevelopMenuButton")
+        guard !guarded.contains(name), let owner = NSClassFromString("AdvancedPreferences"),
+              let method = class_getInstanceMethod(owner, update),
+              let encoding = method_getTypeEncoding(method), String(cString: encoding) == "v16@0:8",
+              let getter = class_getInstanceMethod(owner, outlet), let signature = method_getTypeEncoding(getter),
+              String(cString: signature) == "@16@0:8" else { return }
+        typealias Update = @convention(c) (NSObject, Selector) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Update.self)
+        let replacement: @convention(block) (NSObject) -> Void = { pane in
+            original(pane, update)
+            guard let button = pane.perform(outlet)?.takeUnretainedValue() as? NSButton else { return }
+            let help = L("safari.preferences.developerUnavailable")
+            if !button.isEnabled, button.action == nil, button.toolTip == nil {
+                button.toolTip = help
+                button.setAccessibilityHelp(help)
+            } else if button.isEnabled, button.toolTip == help {
+                button.toolTip = nil
+                button.setAccessibilityHelp(nil)
+            }
+        }
+        class_replaceMethod(owner, update, imp_implementationWithBlock(replacement), encoding)
+        guarded.insert(name)
     }
 
     /// Switching the native tab layout can ask a hosted window to remove a controller it never installed.
