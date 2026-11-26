@@ -1,0 +1,38 @@
+name: Compare ordinary web settings in Safari and Lumen
+on:
+  push:
+    branches: [codex/local-web-compat-nov26]
+permissions:
+  contents: read
+jobs:
+  same-mac:
+    runs-on: xcode-27
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: qa
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          path: source
+          ref: cb61b23f4fbf77e6d8aa93de5933a15bda85b5e8
+          persist-credentials: false
+      - name: Build Lumen
+        working-directory: source
+        run: SANDBOX=0 OVPN=0 XRAY=0 NE=0 CAM=0 VM=0 APP_DIR=build/local-qa scripts/build-app.sh
+      - name: Visit the same local page in Safari and a fresh Lumen profile
+        working-directory: source
+        env:
+          LUMEN_TEST_APP: build/local-qa/Lumen.app
+          QA_RESULT: web-compat-result.json
+        run: |
+          sw_vers -productVersion
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' /Applications/Safari.app/Contents/Info.plist
+          python3 ../qa/checks/web_compat.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: local-web-compat
+          path: source/web-compat-result.json
+          if-no-files-found: ignore
