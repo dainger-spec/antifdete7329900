@@ -1,7 +1,7 @@
-name: Paid website installer 0.1.20
+name: Paid website installer 0.1.22
 on:
   push:
-    branches: [codex/verify-paid-installer-0.1.20]
+    branches: [codex/verify-paid-installer-0.1.22]
 permissions: {}
 jobs:
   production-download:
@@ -17,7 +17,7 @@ jobs:
           import hashlib, json, os, urllib.parse, urllib.request, urllib.error
           site = 'https://lumenbrowser.io'
           api = 'https://api.lumenbrowser.io/v1'
-          checksum = '95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3'
+          checksum = '6c29c5376eff318e1ad384eb351a84bd204cf3462d84a828094932c591495bed'
           class NoRedirect(urllib.request.HTTPRedirectHandler):
               def redirect_request(self, *args): return None
           client = urllib.request.build_opener(NoRedirect())
@@ -30,19 +30,19 @@ jobs:
               return post(site+'/installer', urllib.parse.urlencode(fields).encode(), 'application/x-www-form-urlencoded')
           import time
           for attempt in range(65):
-              req=urllib.request.Request(site+'/en/download?release=0.1.20', headers={'User-Agent':'Lumen', 'Cache-Control':'no-cache'})
+              req=urllib.request.Request(site+'/en/download?release=0.1.22', headers={'User-Agent':'Lumen', 'Cache-Control':'no-cache'})
               with client.open(req,timeout=10) as page:
-                  ready = b'data-installer="0.1.20"' in page.read()
+                  ready = b'data-installer="0.1.22"' in page.read()
               marker=urllib.request.Request(site+'/build.txt?verify='+str(int(time.time())), headers={'User-Agent':'Lumen','Cache-Control':'no-cache'})
               with client.open(marker,timeout=10) as r:
-                  ready = ready and r.readline().strip() == b'commit 4a42e3d'
+                  ready = ready and r.readline().strip() == b'commit 0992fed'
               if ready:
                   try:
                       with installer({'key':'invalid-release-check'}): pass
                   except urllib.error.HTTPError as e:
                       if e.code == 403: break
               time.sleep(5)
-          else: raise RuntimeError('Production website has not switched to 0.1.20')
+          else: raise RuntimeError('Production website has not switched to 0.1.22')
           try:
               with installer({}): raise RuntimeError('missing credentials accepted')
           except urllib.error.HTTPError as e:
@@ -59,13 +59,13 @@ jobs:
                   assert license.get('plan') in ('personal','pro','team') and license.get('status')=='active', 'Test account has no current paid plan'
               with installer({'session':session,'view':'page'}) as image:
                   assert image.status == 200 and 'no-store' in image.headers.get('Cache-Control','')
-                  assert image.headers.get('Content-Disposition','').endswith('"Lumen-0.1.20.dmg"')
+                  assert image.headers.get('Content-Disposition','').endswith('"Lumen-0.1.22.dmg"')
                   digest = hashlib.sha256()
                   size = 0
                   while block := image.read(1024*1024):
                       digest.update(block)
                       size += len(block)
-                  assert size == 48948659 and digest.hexdigest() == checksum, 'Paid file mismatch'
+                  assert size == 44921830 and digest.hexdigest() == checksum, 'Paid file mismatch'
                   print('Production paid download verified',size,digest.hexdigest())
           finally:
               with post(api+'/auth/logout',b'{}','application/json',session): pass
@@ -106,15 +106,15 @@ jobs:
             await page.waitForURL(/\/ru\/account(?:\.html)?(?:[?#]|$)/,{timeout:25000});
             token = await page.evaluate(()=>JSON.parse(sessionStorage.getItem('lumen-session')).token);
             assert.ok(token);
-            for (const [location,selector] of [['account','[data-get] [data-installer-download]'],['download','[data-installer="0.1.20"]']]) {
+            for (const [location,selector] of [['account','[data-get] [data-installer-download]'],['download','[data-installer="0.1.22"]']]) {
               if(location==='download') await page.goto('https://lumenbrowser.io/en/download',{waitUntil:'domcontentloaded'});
               const original=page.url();
               const [download] = await Promise.all([page.waitForEvent('download',{timeout:60000}),page.locator(selector).click()]);
-              assert.equal(download.suggestedFilename(),'Lumen-0.1.20.dmg');
+              assert.equal(download.suggestedFilename(),'Lumen-0.1.22.dmg');
               const hash=createHash('sha256'); let size=0;
               for await(const chunk of await download.createReadStream()) {size+=chunk.length;hash.update(chunk);}
-              assert.equal(size,48948659);
-              assert.equal(hash.digest('hex'),'95c090fde7655e21e1e35f912fbb30d8b26574f37077214996ec1a1a3c8145b3');
+              assert.equal(size,44921830);
+              assert.equal(hash.digest('hex'),'6c29c5376eff318e1ad384eb351a84bd204cf3462d84a828094932c591495bed');
               assert.equal(page.url(),original);
               console.log('One click downloaded and verified the full installer from '+location+'; the original page stayed open.');
             }
