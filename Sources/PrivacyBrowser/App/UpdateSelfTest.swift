@@ -179,10 +179,26 @@ enum UpdateSelfTest {
             try Data("an earlier release".utf8).write(to: superseded) // l10n: not text
             let launchSuite = "PBUpdateLaunch-\(UUID().uuidString)"
             if let launchDefaults = UserDefaults(suiteName: launchSuite) {
+                let receipt = configuration.staging.appendingPathComponent("receipt.zip")
+                let folder = configuration.staging.appendingPathComponent("PrivacyBrowser-17.zip", isDirectory: true)
+                try Data("test receipt".utf8).write(to: receipt) // l10n: not text
+                try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+                if let item = updater.failedRelease {
+                    struct CachedRelease: Encodable { let item: AppcastItem; let archive: String }
+                    let encoder = JSONEncoder()
+                    encoder.dateEncodingStrategy = .iso8601
+                    launchDefaults.set(try encoder.encode(CachedRelease(item: item, archive: receipt.lastPathComponent)),
+                                       forKey: "PBUpdateStaged")
+                }
                 _ = AppUpdater(configuration: configuration, defaults: launchDefaults)
-                launchDefaults.removePersistentDomain(forName: launchSuite)
+                check("a mismatched saved archive is forgotten and unrelated files and folders survive cleanup",
+                      updater.failedRelease != nil && launchDefaults.data(forKey: "PBUpdateStaged") == nil
+                      && FileManager.default.fileExists(atPath: receipt.path) && FileManager.default.fileExists(atPath: folder.path))
                 check("an archive of a release replaced before a quit is removed at the next launch",
                       !FileManager.default.fileExists(atPath: superseded.path))
+                launchDefaults.removePersistentDomain(forName: launchSuite)
+                try? FileManager.default.removeItem(at: receipt)
+                try? FileManager.default.removeItem(at: folder)
             } else {
                 check("an archive of a release replaced before a quit is removed at the next launch", false, "no defaults of its own")
             }

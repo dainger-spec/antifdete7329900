@@ -329,18 +329,17 @@ final class AppUpdater: ObservableObject, Updater {
         guard !isPreview, case .available(let item) = state else { return }
         state = .downloading(item)
         failedRelease = nil
-        let name = Self.archivePrefix + "\(item.build).zip"
+        let name = Self.archiveName(for: item.build)
         do {
             try FileManager.default.createDirectory(at: configuration.staging, withIntermediateDirectories: true,
                                                     attributes: [.posixPermissions: 0o700])
             let archive = configuration.staging.appendingPathComponent(name)
             let downloaded = configuration.staging.appendingPathComponent(Self.archivePrefix + UUID().uuidString + ".zip")
             try Data().write(to: downloaded, options: .withoutOverwriting)
-            defer { try? FileManager.default.removeItem(at: downloaded) }
+            defer { _ = unlink(downloaded.path) }
             try await fetchArchive(item.url, expected: item.length, to: downloaded)
-            try? FileManager.default.removeItem(at: archive)
-            try FileManager.default.moveItem(at: downloaded, to: archive)
-            try UpdateVerifier.checkArchive(at: archive, item: item, keys: configuration.keys)
+            try UpdateVerifier.checkArchive(at: downloaded, item: item, keys: configuration.keys)
+            try SecureFile.replace(archive, with: downloaded)
             // The release this one replaces, downloaded and never installed (a newer one came out
             // before a quit), goes: it stayed in the folder for good.
             if let previous = loadStaged(), previous.archive != name { removeArchive(named: previous.archive) }
@@ -348,7 +347,6 @@ final class AppUpdater: ObservableObject, Updater {
             state = .ready(item)
             log.notice("Update downloaded and checked; it installs at the next quit that seals every profile")
         } catch {
-            try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
             if (error as? URLError)?.code == .cancelled {
                 // Cancel: the release is offered again, nothing is said.
                 log.notice("Update download cancelled")
@@ -493,7 +491,13 @@ final class AppUpdater: ObservableObject, Updater {
         guard let data = defaults.data(forKey: Key.staged) else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(Staged.self, from: data)
+        guard let staged = try? decoder.decode(Staged.self, from: data),
+              BuildVersion(staged.item.build) != nil,
+              staged.archive == Self.archiveName(for: staged.item.build) else {
+            defaults.removeObject(forKey: Key.staged)
+            return nil
+        }
+        return staged
     }
 
     private func saveStaged(_ staged: Staged) {
@@ -503,12 +507,14 @@ final class AppUpdater: ObservableObject, Updater {
     }
 
     private func archiveExists(_ staged: Staged) -> Bool {
-        FileManager.default.fileExists(atPath: configuration.staging.appendingPathComponent(staged.archive).path)
+        let url = configuration.staging.appendingPathComponent(staged.archive)
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return attributes?[.type] as? FileAttributeType == .typeRegular
     }
 
     private func discardStaged() {
         if let staged = loadStaged() {
-            try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(staged.archive))
+            removeArchive(named: staged.archive)
         }
         defaults.removeObject(forKey: Key.staged)
     }
@@ -516,12 +522,17 @@ final class AppUpdater: ObservableObject, Updater {
     /// What every release's archive is called in the staging folder, before its build.
     private static let archivePrefix = "PrivacyBrowser-"
 
+    private static func archiveName(for build: String) -> String { archivePrefix + build + ".zip" }
+
     /// Removes a release's archive from the staging folder — never the one a request hands the
     /// installer, nor anything named as no archive of ours is.
     private func removeArchive(named name: String) {
-        guard name.hasPrefix(Self.archivePrefix), name.hasSuffix(".zip"), !name.contains("/") else { return }
+        guard name.hasPrefix(Self.archivePrefix), UpdateStaging.isArchiveName(name) else { return }
+        let identifier = String(name.dropFirst(Self.archivePrefix.count).dropLast(".zip".count))
+        guard BuildVersion(identifier) != nil || UUID(uuidString: identifier) != nil else { return }
         if let request = try? UpdateRequest.read(from: configuration.staging), request.archive == name { return }
-        try? FileManager.default.removeItem(at: configuration.staging.appendingPathComponent(name))
+        // Only remove a directory entry for a file. Never recursively delete a folder during cleanup.
+        _ = unlink(configuration.staging.appendingPathComponent(name).path)
     }
 
     /// At launch: the archives of releases downloaded and never installed that nothing names any
