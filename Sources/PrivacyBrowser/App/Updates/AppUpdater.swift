@@ -693,8 +693,14 @@ private final class UpdateArchiveWriter: NSObject, URLSessionDataDelegate, @unch
 /// line and its own bundle id, names the certificate here by the SHA-256 of its DER, and a server
 /// presenting exactly that certificate is accepted. The app never sets it: nil, and every server
 /// gets the system's evaluation and nothing else.
-final class UpdateTestTrust: NSObject, URLSessionDelegate {
+final class UpdateTestTrust: NSObject, URLSessionTaskDelegate {
     nonisolated(unsafe) static var certificateSHA256: Data?
+
+    // Foundation's streaming API can deliver server trust to the task rather than the session.
+    func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge,
+                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+        urlSession(session, didReceive: challenge, completionHandler: completionHandler)
+    }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
