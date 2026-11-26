@@ -1642,7 +1642,10 @@
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "Загрузка остановлена: страница чуть не открылась мимо данных и прокси профиля. Сообщите нам и приложите диагностику (Настройки → Диагностика).";
 "safari.chrome.missingPieces" = "В Safari этой macOS не хватает частей окна профиля. Прокси работает как прежде, но окно может вести себя странно — нужно обновить Lumen.";
-"safari.preferences.developerUnavailable" = "В этом профиле Safari не поддерживает включение меню «Разработка».";
+"profile.inspector.switch" = "Включить веб-инспектор для этого профиля";
+"profile.inspector.help" = "Добавляет меню «Разработка» для открытых вкладок до закрытия профиля.";
+"profile.inspector.menu" = "Разработка";
+"profile.inspector.open" = "Открыть веб-инспектор вкладки";
 "safari.unavailable.title" = "Не удалось выполнить действие в Safari";
 "safari.unavailable.item" = "Не удалось выполнить команду «%@». Вы можете продолжить работу в профиле.";
 "safari.unavailable.action" = "Вы можете продолжить работу в профиле.";

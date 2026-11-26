@@ -79,9 +79,42 @@ struct WindowLook: Codable, Equatable {
 
 @MainActor
 enum WindowProbe {
+    private static func checkLocalInspector(button: NSButton, settings: NSWindow, session: BrowserSession) async -> Bool {
+        button.performClick(nil)
+        defer {
+            if button.state == .on {
+                settings.makeKeyAndOrderFront(nil)
+                button.performClick(nil)
+            }
+        }
+        guard let page = await SafariChromeHost.openScenarioPage(session: session)?.webView,
+              let command = NSApp.mainMenu?.items.compactMap({ $0.submenu?.items.first { $0.target === ProfileWebInspector.shared } }).first,
+              let menu = command.menu,
+              page.responds(to: NSSelectorFromString("_inspector")),
+              let inspector = page.perform(NSSelectorFromString("_inspector"))?.takeUnretainedValue() as? NSObject,
+              inspector.responds(to: NSSelectorFromString("isVisible")),
+              inspector.responds(to: NSSelectorFromString("isConnected")) else { return false }
+        page.loadHTMLString("<title>Inspector check</title><p>Local page</p>", baseURL: nil)
+        let remoteInspection = page.isInspectable
+        menu.performActionForItem(at: menu.index(of: command))
+        let deadline = Date().addingTimeInterval(6)
+        func connected() -> Bool {
+            inspector.value(forKey: "visible") as? Bool == true && inspector.value(forKey: "connected") as? Bool == true
+        }
+        while !connected(), Date() < deadline { try? await Task.sleep(nanoseconds: 100_000_000) }
+        let opened = connected() && page.isInspectable == remoteInspection
+        settings.makeKeyAndOrderFront(nil)
+        button.performClick(nil)
+        let closing = Date().addingTimeInterval(3)
+        while inspector.value(forKey: "visible") as? Bool == true, Date() < closing {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        return opened && inspector.value(forKey: "visible") as? Bool == false && NSApp.mainMenu?.items.contains(where: { $0.submenu === menu }) != true
+    }
+
     /// Drive the native menu and toolbar in a disposable release-check profile. An empty
     /// preferences window has a title and a toolbar too, so also inspect the pane's content.
-    private static func checkPreferences(from browser: NSWindow) async -> (Bool, String) {
+    private static func checkPreferences(from browser: NSWindow, session: BrowserSession?) async -> (Bool, String) {
         guard let menu = NSApp.mainMenu?.items.first?.submenu,
               let index = menu.items.firstIndex(where: { $0.action == NSSelectorFromString("showPreferences:") })
         else { return (false, "the Settings menu item is missing") }
@@ -102,6 +135,11 @@ enum WindowProbe {
             if let button = view as? NSButton, button.action == NSSelectorFromString("selectTabLayout:") { return [button] }
             return view.subviews.flatMap(layoutButtons)
         }
+        func developerSwitch(in view: NSView) -> NSButton? {
+            if let button = view as? NSButton, button.target === ProfileWebInspector.shared { return button }
+            return view.subviews.lazy.compactMap(developerSwitch).first
+        }
+        var testedInspector = false
         var checked: [String] = []
         var failures: [String] = []
         for pane in toolbar.items {
@@ -132,8 +170,16 @@ enum WindowProbe {
                         }
                     }
                 }
+                if let content = window.contentView, let button = developerSwitch(in: content), let session {
+                    testedInspector = await checkLocalInspector(button: button, settings: window, session: session)
+                }
                 checked.append(label)
             }
+        }
+        if testedInspector {
+            checked.append("local Web Inspector connected to the tab and closed")
+        } else {
+            failures.append("local Web Inspector did not connect and close")
         }
         if checked.isEmpty { failures.append("no selectable Settings pane displayed its controls") }
         if ExceptionLog.reported != caught { failures.append("a run-loop exception was reported") }
@@ -151,7 +197,7 @@ enum WindowProbe {
         switch action {
         case .safariPreferences:
             look.action = "Safari Settings"
-            if let window { (look.found, look.detail) = await checkPreferences(from: window) }
+            if let window { (look.found, look.detail) = await checkPreferences(from: window, session: session) }
         case .describe:
             look.action = "describe"
             look.found = window != nil

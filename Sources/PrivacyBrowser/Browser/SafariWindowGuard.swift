@@ -109,7 +109,7 @@ enum SafariWindowGuard {
 
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
-        explainUnavailableDeveloperMenu()
+        configureProfileDeveloperMenu()
         guardMissingTitlebarController()
         guardResentKeys()
         guardLate()
@@ -120,7 +120,7 @@ enum SafariWindowGuard {
         }
     }
 
-    private static func explainUnavailableDeveloperMenu() {
+    private static func configureProfileDeveloperMenu() {
         let name = "updateIncludeDevelopMenuButton"
         let update = NSSelectorFromString(name)
         let outlet = NSSelectorFromString("includeDevelopMenuButton")
@@ -134,14 +134,7 @@ enum SafariWindowGuard {
         let replacement: @convention(block) (NSObject) -> Void = { pane in
             original(pane, update)
             guard let button = pane.perform(outlet)?.takeUnretainedValue() as? NSButton else { return }
-            let help = L("safari.preferences.developerUnavailable")
-            if !button.isEnabled, button.action == nil, button.toolTip == nil {
-                button.toolTip = help
-                button.setAccessibilityHelp(help)
-            } else if button.isEnabled, button.toolTip == help {
-                button.toolTip = nil
-                button.setAccessibilityHelp(nil)
-            }
+            ProfileWebInspector.shared.configure(button)
         }
         class_replaceMethod(owner, update, imp_implementationWithBlock(replacement), encoding)
         guarded.insert(name)
