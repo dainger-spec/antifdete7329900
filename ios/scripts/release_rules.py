@@ -174,15 +174,26 @@ def scan(ios, app=None):
                     found.append((f"{rel}:{number}", "test-switch", line.strip()))
             if re.search(r"\bAccess\.full\b", LITERAL.sub('""', code)):
                 found.append((f"{rel}:{number}", "test-switch", "Access.full outside #if DEBUG: " + line.strip()))
+    # The String Catalog: every text and its English (and any .strings table left beside it).
     for folder, _, files in os.walk(os.path.join(ios, "Lumen")):
         for name in files:
-            if name.endswith(".strings"):
-                path = os.path.join(folder, name)
+            path = os.path.join(folder, name)
+            rel = os.path.relpath(path, ios)
+            if name.endswith(".xcstrings"):
+                import json
+                for key, entry in json.load(open(path, encoding="utf-8")).get("strings", {}).items():
+                    judge(f"{rel} {key!r}", key)
+                    for language, localization in entry.get("localizations", {}).items():
+                        value = localization.get("stringUnit", {}).get("value", "")
+                        judge(f"{rel} {key!r} ({language})", value)
+                        if OFFER_ENGLISH.search(value):
+                            found.append((f"{rel} {key!r} ({language})", "offer", value))
+            elif name.endswith(".strings"):
                 for number, line in enumerate(open(path, encoding="utf-8", errors="replace"), 1):
                     for text in LITERAL.findall(line):
-                        judge(f"{os.path.relpath(path, ios)}:{number}", text)
+                        judge(f"{rel}:{number}", text)
                         if OFFER_ENGLISH.search(text):
-                            found.append((f"{os.path.relpath(path, ios)}:{number}", "offer", text))
+                            found.append((f"{rel}:{number}", "offer", text))
     project = os.path.join(ios, "project.yml")
     if os.path.exists(project):
         lines = open(project, encoding="utf-8").read().splitlines()

@@ -8,6 +8,7 @@ and must be found: every word of the list, as a text, a screen's name or an Info
 App-Bound Domains breach. The words the app is meant to use ("сессии", "изоляция", "профиль
 устройства", "тестирование") must not be.
 """
+import json
 import os
 import plistlib
 import shutil
@@ -126,9 +127,11 @@ for what, line in [
 ]:
     check(f"red — {what}: found", any(f[1] == "offer" for f in scan(planted(line))))
 root = planted('let row = Text("Сессии")')
-with open(os.path.join(root, "Lumen", "Resources", "en.lproj", "Localizable.strings"), "a", encoding="utf-8") as f:
-    f.write('"Выбор" = "Choose a plan on the website";\n')
-check("red — an offer in the English table: found", any(f[1] == "offer" for f in scan(root)))
+catalog_path = os.path.join(root, "Lumen", "Resources", "Localizable.xcstrings")
+catalog = json.load(open(catalog_path, encoding="utf-8"))
+catalog["strings"]["Выбор"] = {"localizations": {"en": {"stringUnit": {"state": "translated", "value": "Choose a plan on the website"}}}}
+json.dump(catalog, open(catalog_path, "w", encoding="utf-8"), ensure_ascii=False)
+check("red — an offer in the English of the String Catalog: found", any(f[1] == "offer" for f in scan(root)))
 check("a paid plan's own name is allowed", not any(f[1] == "offer" for f in scan(planted('Text("Тариф: Профессиональный")'))))
 
 # No test switch in a release: in the sources outside #if DEBUG, and in a built release.

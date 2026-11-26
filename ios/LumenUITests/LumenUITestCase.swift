@@ -37,6 +37,9 @@ class LumenUITestCase: XCTestCase {
         for (name, value) in environment { app.launchEnvironment[name] = value }
         app.launch()
         self.app = app
+        // A test of the start screen waits for what comes up itself: the start screen, or the list once
+        // it was passed (AccountTests.testTheStartScreen).
+        if environment["LUMEN_TEST_WELCOME"] == "1" { return app }
         // In the device's own language the list is "Sessions" — or still "Сессии" when a planted fault
         // leaves the texts untranslated: that is for the test's own check to catch, not for this one.
         let bar = language == nil
@@ -169,7 +172,12 @@ class LumenUITestCase: XCTestCase {
             // The field's one button, whatever the system calls it in the app's language ("Clear text").
             let clear = field.buttons.firstMatch
             if clear.waitForExistence(timeout: attempt == 0 ? 8 : 2), clear.isHittable {
-                clear.tap()
+                // Touched where it was seen, not looked up again for the touch: a field that loses its
+                // focus as a message comes up takes its clear button away (run 175 — the touch looked
+                // for it for a minute and failed the test); a touch on the empty place is harmless, and
+                // the next go sees what is in the field.
+                let spot = clear.frame
+                app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: spot.midX, dy: spot.midY)).tap()
             } else {
                 // No clear button: the cursor to the far end, then delete it all.
                 field.coordinate(withNormalizedOffset: CGVector(dx: 0.99, dy: 0.5)).tap()
@@ -446,7 +454,8 @@ class LumenUITestCase: XCTestCase {
     func chooseProfile(_ level: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open", file: file, line: line)
-        reveal(app.segmentedControls["profileLevel"], "the device profile's choice is there").buttons[level].tap()
+        let id = ["Полный": "profile-full", "Упрощённый": "profile-simplified", "Свой": "profile-custom"][level] ?? level
+        reveal(app.buttons[id], "the device profile's choice \(level) is there").tap()
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: session, file: file, line: line)
     }
@@ -454,9 +463,18 @@ class LumenUITestCase: XCTestCase {
     func chooseProxy(_ name: String, in session: String, file: StaticString = #filePath, line: UInt = #line) {
         app.buttons["settingsButton"].tap()
         wait(app.buttons["settingsDone"], "the settings open")
-        reveal(app.buttons[name], "the settings list the proxy \(name)").tap()
+        // The proxy's row opens the chooser (a half-height sheet); a choice closes it.
+        reveal(app.buttons["proxyRow"], "the settings show the session's proxy").tap()
+        wait(app.buttons["choose-\(name)"], "the chooser lists the proxy \(name)").tap()
+        waitGone(app.buttons["proxySheetDone"], "the chooser closes")
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: session, file: file, line: line)
+    }
+
+    /// A menu's choice (Picker(.menu)): the menu opened by its button, then the option touched.
+    func pickFromMenu(_ id: String, _ option: String, file: StaticString = #filePath, line: UInt = #line) {
+        reveal(app.buttons[id], "the menu \(id) is there", file: file, line: line).tap()
+        wait(app.buttons[option], "the menu \(id) offers \(option)", file: file, line: line).tap()
     }
 
     // MARK: Sessions

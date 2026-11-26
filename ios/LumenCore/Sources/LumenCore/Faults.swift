@@ -53,6 +53,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case syncEditNotSent          // a rename made on the iPhone to a profile from the Mac never reaches the Mac
     case syncCookiesOverwriteLocal // the Mac's cookies applied over a newer change made on the iPhone
     case periodEndingSilent       // the paid period's end is never said before it comes
+    case welcomeForgetsGuest     // "Продолжить без входа" is not kept: the start screen comes back at the next launch
     // The account (rights from the server's signed document)
     case signatureNotChecked     // a document's signature is not checked: anyone's payload is taken
     case wrongDeviceAccepted     // a document of another device or another iPhone is taken
@@ -78,6 +79,7 @@ public enum Fault: String, CaseIterable, Sendable {
     case noiseUnstable           // the canvas noise seed changes on every read
     case canvasNoiseLowBit       // the canvas noise flips a colour's low bit, which a canvas cannot hold at partial alpha: its PNG reads back otherwise
     case noWebPageNamespace      // no extension controller: pages lack window.browser, which Safari gives every page
+    case webRTCAroundTunnel      // the WebRTC relay runs, but the pages keep the engine's own ICE servers: STUN from the iPhone's address
     case unmaskedReplacement     // one replacement made plainly, as most scripts do: the natives check must see it
 }
 

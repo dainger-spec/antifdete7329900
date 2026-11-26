@@ -15,6 +15,12 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+    /// How far the page has loaded (0…1): the address capsule's line.
+    @Published private(set) var progress: Double = 0
+    /// Why the last page did not load, when it did not (the browser shows it for a proxy that does not answer).
+    @Published private(set) var failure: URLError.Code?
+    /// The page's own ground is light: the bars over it turn light too, the status bar dark.
+    @Published private(set) var lightPage = true
     /// What the page looked like when it last finished loading: the tab's card shows it.
     @Published private(set) var thumbnail: UIImage?
     private var saved: TabRecord
@@ -61,6 +67,8 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
             webView.observe(\.canGoBack) { [weak self] view, _ in Task { @MainActor in self?.refresh(from: view) } },
             webView.observe(\.canGoForward) { [weak self] view, _ in Task { @MainActor in self?.refresh(from: view) } },
             webView.observe(\.isLoading) { [weak self] view, _ in Task { @MainActor in self?.refresh(from: view) } },
+            webView.observe(\.estimatedProgress) { [weak self] view, _ in Task { @MainActor in self?.progress = view.estimatedProgress } },
+            webView.observe(\.underPageBackgroundColor) { [weak self] view, _ in Task { @MainActor in self?.readGround(of: view) } },
         ]
     }
 
@@ -110,6 +118,17 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
         isLoading = view.isLoading
     }
 
+    /// Loads the page again after it failed (the browser's "Повторить").
+    func retry() {
+        failure = nil
+        if webView.url != nil { webView.reload() } else if let url { webView.load(URLRequest(url: url)) }
+    }
+
+    private func readGround(of view: WKWebView) {
+        var white: CGFloat = 1, alpha: CGFloat = 1
+        if view.underPageBackgroundColor.getWhite(&white, alpha: &alpha) { lightPage = alpha < 0.1 || white > 0.5 }
+    }
+
     func tearDown() {
         tornDown = true
         if let pending = pendingDialog {
@@ -126,7 +145,32 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     // MARK: WKNavigationDelegate
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        failure = nil
+    }
+
+    // A page that failed: the tab's own load ends (the trunk's link handoff), and the failure is noted
+    // for the proxy that does not answer (the design's p3-dead).
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
+        noteFailure(error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if navigation === ownNavigation { endOwnLoad() }
+        noteFailure(error)
+    }
+
+    /// A page that could not be reached; one the person stopped, or left for another, is no failure.
+    private func noteFailure(_ error: Error) {
+        let code = URLError.Code(rawValue: (error as NSError).code)
+        guard (error as NSError).domain == NSURLErrorDomain, code != .cancelled else { return }
+        failure = code
+        refresh(from: webView)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        failure = nil
         refresh(from: webView)
         if let url = webView.url { runtime?.recordVisit(url: url, title: webView.title ?? "") }
         saved = record
@@ -145,14 +189,6 @@ final class BrowserTab: NSObject, ObservableObject, Identifiable, WKNavigationDe
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         endOwnLoad()   // the tab's own load, or a navigation that took its place
-    }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        if navigation === ownNavigation { endOwnLoad() }
-    }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        if navigation === ownNavigation { endOwnLoad() }
     }
 
     /// A session's link must not leave its proxy and its data for another app. Schemes a web view

@@ -60,7 +60,8 @@ final class DeviceTests: LumenUITestCase {
 
         app.buttons["settingsButton"].tap()
         onScreen(wait(app.buttons["settingsDone"], "the settings open"), "the settings' Done")
-        reveal(app.segmentedControls["profileLevel"], "the device profile's choice can be reached")
+        // The dashboard's design: the device profile is a choice of rows (Полный, Упрощённый, Свой).
+        _ = onScreen(reveal(app.buttons["profile-full"], "the device profile's choice can be reached"), "the device profile's choice", wholly: false)
         shot("\(leg) 05 settings")
         app.buttons["settingsDone"].tap()
         waitForBrowser(session: long)
@@ -92,7 +93,11 @@ final class DeviceTests: LumenUITestCase {
         onScreen(app.buttons["cancelSignIn"], "the sign-in form's Cancel")
         shot("\(leg) 08 sign-in form")
         reveal(app.buttons["submitSignIn"], "the sign-in form's button can be reached").tap()
-        wait(app.staticTexts["accountEmail"], "signed in", timeout: 40)
+        // Signed in, the account's screen goes back to its top, where it says who (PlansView): at the
+        // largest text on the SE the address's row had been left above the screen (run 163), and the
+        // test's own drag back up pulled the sheet down and closed it (run 174).
+        let email = app.staticTexts["accountEmail"]
+        XCTAssertTrue(email.waitForExistence(timeout: 40), "signed in")
         // The plan, below the account's rows: scrolled to, as a person does, once the server named it.
         let plan = app.staticTexts["planName"]
         let named = Date().addingTimeInterval(30)

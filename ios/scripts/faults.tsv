@@ -64,6 +64,7 @@ freeLimitOwnRule	core	LumenCoreTests.LicenseTests/testTheFreeLevelComesFromTheDo
 documentNeverExpires	core	LumenCoreTests.LicenseTests/testADocumentRunsOut	past the document
 clockRollbackTrusted	core	LumenCoreTests.LicenseTests/testTheClockSetBackBringsNothingBack	the clock set back does not bring time back
 overLimitOpens	core	LumenCoreTests.LicenseTests/testProfilesOverTheLimitAreLocked	the two made first stay open
+welcomeForgetsGuest	ui	LumenUITests/AccountTests/testTheStartScreen	the start screen does not come back once passed
 activationWithoutPlatform	core	LumenCoreTests.LicenseTests/testAnActivationSaysItIsAnIPhone	the activation names its platform
 phoneLimitUnexplained	core	LumenCoreTests.LicenseTests/testRefusalsAreSaidWithTheirReason	the limit of phones is said with its reason
 noBrowseOpens	core	LumenCoreTests.EntitlementTests/testDecisionsInTimeOnTheServersVectors	a blocked account opens no profile
@@ -91,3 +92,4 @@ signatureNotChecked	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans
 robotCheckNotShown	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	the robot check opens in the app
 featuresFromPlan	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	no proxies without the feature
 noBrowseOpens	ui	LumenUITests/AccountTests/testRefusalsChecksAndOtherPlans	a blocked account opens no profile
+webRTCAroundTunnel	ui	LumenUITests/ProxyTests/testWebRTCGoesThroughTheProxy	every candidate is a relay at the proxy's exit
