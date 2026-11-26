@@ -1,4 +1,4 @@
-name: Compare ordinary web settings in Safari and Lumen
+name: Compare published Lumen 0.1.20 with system Safari
 on:
   push:
     branches: [codex/local-web-compat-nov26]
@@ -6,7 +6,12 @@ permissions:
   contents: read
 jobs:
   same-mac:
-    runs-on: xcode-27
+    name: Published Lumen on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-26, xcode-27]
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
@@ -18,9 +23,17 @@ jobs:
           path: source
           ref: cb61b23f4fbf77e6d8aa93de5933a15bda85b5e8
           persist-credentials: false
-      - name: Build Lumen
+      - name: Verify and extract the signed public update
         working-directory: source
-        run: SANDBOX=0 OVPN=0 XRAY=0 NE=0 CAM=0 VM=0 APP_DIR=build/local-qa scripts/build-app.sh
+        run: |
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --output "$RUNNER_TEMP/Lumen.zip" https://dl.lumenbrowser.io/Lumen-0.1.20.zip
+          echo "910cd8185cf26aaedc498fea28ad3b5045b85e2b311fe9a4c9ec1965de39c941  $RUNNER_TEMP/Lumen.zip" | shasum -a 256 --check
+          mkdir -p build/local-qa
+          ditto -x -k "$RUNNER_TEMP/Lumen.zip" build/local-qa
+          app=build/local-qa/Lumen.app
+          codesign --verify --deep --strict "$app"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = 0.1.20
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app/Contents/Info.plist")" = 21
       - name: Visit the same local page in Safari and a fresh Lumen profile
         working-directory: source
         env:
@@ -33,6 +46,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: local-web-compat
+          name: local-web-compat-${{ matrix.runner }}
           path: source/web-compat-result.json
           if-no-files-found: ignore
