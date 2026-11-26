@@ -4,12 +4,19 @@
                         if let b = view as? NSButton { return [b] }
                         return view.subviews.flatMap(buttons)
                     }
+                    let skipped = Set((ProcessInfo.processInfo.environment["LUMEN_QA_SKIP"] ?? "").components(separatedBy: "\n"))
+                    var counts: [String: Int] = [:]
                     for b in buttons(content) {
                         let actionName = b.action.map(NSStringFromSelector) ?? "binding"
+                        let prefix = label + "|" + actionName
+                        counts[prefix, default: 0] += 1
+                        let key = prefix + "|" + String(counts[prefix]!)
                         let id = label + " | " + b.title + " | " + actionName
                         func note(_ message: String) { FileHandle.standardError.write(Data(("BUTTON " + message + "\n").utf8)) }
                         guard b.isEnabled else { note("DISABLED " + id); continue }
                         guard b.window === window, !b.isHiddenOrHasHiddenAncestor else { note("CHANGED " + id); continue }
+                        if skipped.contains(key) { continue }
+                        note("KEY " + key)
                         let before = Set(NSApp.windows.filter(\.isVisible).map(ObjectIdentifier.init))
                         let reports = ExceptionLog.reported
                         note("CLICK " + id)
