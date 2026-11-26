@@ -97,6 +97,11 @@ enum WindowProbe {
             if view is NSButton || view is NSTableView || view is NSSegmentedControl { return true }
             return view.subviews.contains(where: hasControl)
         }
+        func layoutButtons(in view: NSView) -> [NSButton] {
+            guard !view.isHiddenOrHasHiddenAncestor else { return [] }
+            if let button = view as? NSButton, button.action == NSSelectorFromString("selectTabLayout:") { return [button] }
+            return view.subviews.flatMap(layoutButtons)
+        }
         var checked: [String] = []
         var failures: [String] = []
         for pane in toolbar.items {
@@ -110,6 +115,23 @@ enum WindowProbe {
             } else if !selected || window.attachedSheet != nil || window.title != label || window.contentView.map(hasControl) != true {
                 failures.append(label + " is empty or still shows " + window.title)
             } else {
+                if let content = window.contentView {
+                    let buttons = layoutButtons(in: content)
+                    if !buttons.isEmpty {
+                        guard let current = buttons.first(where: { $0.state == .on }),
+                              let other = buttons.first(where: { $0 !== current && $0.isEnabled }) else {
+                            failures.append(label + ": no alternate tab layout")
+                            continue
+                        }
+                        let change = PBCatchException { other.performClick(nil) }
+                        let switched = other.state == .on
+                        let restore = PBCatchException { current.performClick(nil) }
+                        if change != nil || restore != nil || !switched || current.state != .on {
+                            let reason = change?.reason ?? restore?.reason ?? "selection did not change"
+                            failures.append(label + ": could not switch and restore the tab layout (" + reason + ")")
+                        }
+                    }
+                }
                 checked.append(label)
             }
         }

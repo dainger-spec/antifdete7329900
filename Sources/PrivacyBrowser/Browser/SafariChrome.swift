@@ -840,12 +840,27 @@ enum SafariChrome {
         typealias Objects = AutoreleasingUnsafeMutablePointer<NSArray?>?
         typealias Load = @convention(c) (Bundle, Selector, NSString, AnyObject?, Objects) -> Bool
         let original = unsafeBitCast(method_getImplementation(method), to: Load.self)
+        let advanced = NSClassFromString("AdvancedPreferences")
+        let developerButton = NSSelectorFromString("includeDevelopMenuButton")
         let replacement: @convention(block) (Bundle, NSString, AnyObject?, Objects) -> Bool = { bundle, name, owner, objects in
-            if original(bundle, load, name, owner, objects) { return true }
-            guard bundle == Bundle.main, let pane = owner as? NSObject, pane.isKind(of: module),
-                  let url = nibURL(named: name as String),
-                  let container = chromeBundles.first(where: { url.path.hasPrefix($0.bundleURL.path + "/") }) else { return false }
-            return original(container, load, name, pane, objects)
+            let loaded = original(bundle, load, name, owner, objects)
+            if !loaded {
+                guard bundle == Bundle.main, let pane = owner as? NSObject, pane.isKind(of: module),
+                      let url = nibURL(named: name as String),
+                      let container = chromeBundles.first(where: { url.path.hasPrefix($0.bundleURL.path + "/") }),
+                      original(container, load, name, pane, objects) else { return false }
+            }
+            // The native pane connects its outlets during loading and updates their state afterwards.
+            if let advanced, let pane = owner as? NSObject, pane.isKind(of: advanced), pane.responds(to: developerButton) {
+                DispatchQueue.main.async { [weak pane] in
+                    guard let button = pane?.perform(developerButton)?.takeUnretainedValue() as? NSButton,
+                          !button.isEnabled, button.action == nil, button.toolTip == nil else { return }
+                    let help = L("safari.preferences.developerUnavailable")
+                    button.toolTip = help
+                    button.setAccessibilityHelp(help)
+                }
+            }
+            return true
         }
         method_setImplementation(method, imp_implementationWithBlock(replacement))
     }
@@ -1314,6 +1329,9 @@ enum SafariChrome {
         _ = NotificationCenter.default.addObserver(forName: NSMenu.willSendActionNotification, object: nil, queue: nil) { note in
             let title = (note.userInfo?["MenuItem"] as? NSMenuItem)?.title ?? ""
             MainActor.assumeIsolated { lastMenuItem = (title, Date()) }
+        }
+        _ = NotificationCenter.default.addObserver(forName: NSMenu.didSendActionNotification, object: nil, queue: nil) { _ in
+            MainActor.assumeIsolated { lastMenuItem = nil }
         }
         ExceptionLog.onCaughtInRunLoop = { exception, eventType in
             MainActor.assumeIsolated {

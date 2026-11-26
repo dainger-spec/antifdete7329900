@@ -109,6 +109,7 @@ enum SafariWindowGuard {
 
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
+        guardMissingTitlebarController()
         guardResentKeys()
         guardLate()
         guard lateGuards.contains(where: { !guarded.contains($0) }), !watchesImages else { return }
@@ -116,6 +117,23 @@ enum SafariWindowGuard {
         _dyld_register_func_for_add_image { _, _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { SafariWindowGuard.guardLate() } }
         }
+    }
+
+    /// Switching the native tab layout can ask a hosted window to remove a controller it never installed.
+    private static func guardMissingTitlebarController() {
+        let name = "_removeTitlebarViewController:"
+        let selector = NSSelectorFromString(name)
+        guard !guarded.contains(name), let owner = NSClassFromString("BrowserWindowController"),
+              let method = class_getInstanceMethod(owner, selector),
+              let encoding = method_getTypeEncoding(method), String(cString: encoding) == "v24@0:8@16" else { return }
+        typealias Remove = @convention(c) (AnyObject, Selector, AnyObject?) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Remove.self)
+        let replacement: @convention(block) (AnyObject, AnyObject?) -> Void = { window, controller in
+            guard let controller else { return }
+            original(window, selector, controller)
+        }
+        class_replaceMethod(owner, selector, imp_implementationWithBlock(replacement), encoding)
+        guarded.insert(name)
     }
 
     private static func guardLate() {
