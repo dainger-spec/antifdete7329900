@@ -35,7 +35,7 @@ jobs:
                   ready = b'data-installer="0.1.20"' in page.read()
               marker=urllib.request.Request(site+'/build.txt?verify='+str(int(time.time())), headers={'User-Agent':'Lumen','Cache-Control':'no-cache'})
               with client.open(marker,timeout=10) as r:
-                  ready = ready and r.readline().strip() == b'commit 03a899a'
+                  ready = ready and r.readline().strip() == b'commit 4a42e3d'
               if ready:
                   try:
                       with installer({'key':'invalid-release-check'}): pass
