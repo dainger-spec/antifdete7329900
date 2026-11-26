@@ -16,7 +16,7 @@ jobs:
       - uses: actions/checkout@v4
         with: {path: qa, persist-credentials: false}
       - uses: actions/checkout@v4
-        with: {path: app, ref: ae583bc1da397e2ddd1e9cc76d53311dd2c0373b, persist-credentials: false}
+        with: {path: app, ref: a2935e5ce409c3ed75b8858bec3889bccac36621, persist-credentials: false}
       - name: Instrument disposable build
         working-directory: app
         run: |
