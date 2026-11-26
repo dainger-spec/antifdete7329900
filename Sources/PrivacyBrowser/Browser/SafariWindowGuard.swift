@@ -109,6 +109,7 @@ enum SafariWindowGuard {
 
     /// The guards whose classes are loaded now; the others as their images load. Idempotent.
     static func install() {
+        configureContactAutoFill()
         configureProfileDeveloperMenu()
         guardMissingTitlebarController()
         guardResentKeys()
@@ -118,6 +119,33 @@ enum SafariWindowGuard {
         _dyld_register_func_for_add_image { _, _ in
             DispatchQueue.main.async { MainActor.assumeIsolated { SafariWindowGuard.guardLate() } }
         }
+    }
+
+    /// Safari's contact editor waits for the Mac's address book. Hosted profiles do not use it.
+    private static func configureContactAutoFill() {
+        let key = "AutoFillPreferences.updateViews"
+        let update = NSSelectorFromString("updateViews")
+        guard !guarded.contains(key), let owner = NSClassFromString("AutoFillPreferences"),
+              let method = class_getInstanceMethod(owner, update),
+              let encoding = method_getTypeEncoding(method), String(cString: encoding) == "v16@0:8" else { return }
+        typealias Update = @convention(c) (NSObject, Selector) -> Void
+        let original = unsafeBitCast(method_getImplementation(method), to: Update.self)
+        let replacement: @convention(block) (NSObject) -> Void = { pane in
+            original(pane, update)
+            let outlets = [("editMyCardButton", "editMyCard:"), ("autoFillAddressFieldsCheckBox", "toggleAutoFillAddressFields:")]
+            for (name, action) in outlets {
+                guard let outlet = class_getInstanceVariable(owner, name),
+                      let type = ivar_getTypeEncoding(outlet), String(cString: type).hasPrefix("@"),
+                      let button = object_getIvar(pane, outlet) as? NSButton,
+                      button.action == NSSelectorFromString(action) else { continue }
+                if action == "toggleAutoFillAddressFields:" { button.state = .off }
+                button.isEnabled = false
+                button.toolTip = L("profile.autofill.contacts.help")
+                button.setAccessibilityHelp(button.toolTip)
+            }
+        }
+        class_replaceMethod(owner, update, imp_implementationWithBlock(replacement), encoding)
+        guarded.insert(key)
     }
 
     private static func configureProfileDeveloperMenu() {

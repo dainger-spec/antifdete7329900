@@ -130,10 +130,10 @@ enum WindowProbe {
             if view is NSButton || view is NSTableView || view is NSSegmentedControl { return true }
             return view.subviews.contains(where: hasControl)
         }
-        func layoutButtons(in view: NSView) -> [NSButton] {
+        func buttons(in view: NSView, action: Selector) -> [NSButton] {
             guard !view.isHiddenOrHasHiddenAncestor else { return [] }
-            if let button = view as? NSButton, button.action == NSSelectorFromString("selectTabLayout:") { return [button] }
-            return view.subviews.flatMap(layoutButtons)
+            if let button = view as? NSButton, button.action == action { return [button] }
+            return view.subviews.flatMap { buttons(in: $0, action: action) }
         }
         func developerSwitch(in view: NSView) -> NSButton? {
             if let button = view as? NSButton, button.target === ProfileWebInspector.shared { return button }
@@ -154,10 +154,16 @@ enum WindowProbe {
                 failures.append(label + " is empty or still shows " + window.title)
             } else {
                 if let content = window.contentView {
-                    let buttons = layoutButtons(in: content)
-                    if !buttons.isEmpty {
-                        guard let current = buttons.first(where: { $0.state == .on }),
-                              let other = buttons.first(where: { $0 !== current && $0.isEnabled }) else {
+                    let contactControls = ["editMyCard:", "toggleAutoFillAddressFields:"].flatMap {
+                        buttons(in: content, action: NSSelectorFromString($0))
+                    }
+                    if contactControls.contains(where: { $0.isEnabled || $0.toolTip?.isEmpty != false }) {
+                        failures.append(label + ": contact AutoFill offered the Mac’s address book")
+                    }
+                    let layouts = buttons(in: content, action: NSSelectorFromString("selectTabLayout:"))
+                    if !layouts.isEmpty {
+                        guard let current = layouts.first(where: { $0.state == .on }),
+                              let other = layouts.first(where: { $0 !== current && $0.isEnabled }) else {
                             failures.append(label + ": no alternate tab layout")
                             continue
                         }

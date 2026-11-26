@@ -1642,6 +1642,7 @@
 /* Network guard of a profile's own process */
 "network.webViewOffProfile" = "Loading was stopped: the page nearly opened outside the profile's data and proxy. Please tell us, with the diagnostics (Settings → Diagnostics).";
 "safari.chrome.missingPieces" = "This macOS's Safari lacks parts of the profile's window. The proxy works as before, but the window may misbehave — Lumen needs an update.";
+"profile.autofill.contacts.help" = "This profile is isolated from the Mac’s address book.";
 "profile.inspector.switch" = "Enable Web Inspector for this profile";
 "profile.inspector.help" = "Adds a Develop menu for open tabs until this profile closes.";
 "profile.inspector.menu" = "Develop";
