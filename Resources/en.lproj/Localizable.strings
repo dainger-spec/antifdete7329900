@@ -2442,7 +2442,7 @@
 "help.scenarios.plan" = "Running and recording scenarios, and schedules, are part of the Professional and Team plans, and of the trial. On Personal, scenarios can be written, not run.";
 "help.scenarios.how" = "How to run a scenario";
 "help.scenarios.step.open" = "Open Scenarios: on the left of the Profiles window, in the File menu, or with ⇧⌘E.";
-"help.scenarios.step.new" = "In Templates choose one — its steps and what it asks for are shown beside the list — press Use the Template and answer its questions. Or New Scenario › Record Actions, or Empty, in Code.";
+"help.scenarios.step.new" = "In Templates choose one — its steps and what it asks for are shown beside the list — press Use the Template and answer its questions. Or New Scenario › Record Actions, or Start with Example Code.";
 "help.scenarios.step.write" = "The scenario opens as its settings and steps beside its code. Click a step to change it, move it, switch it off or delete it; the code is always what is true. ⌘S saves.";
 "help.scenarios.step.run" = "Check runs it once on the profile chosen under the name and marks the step that failed. Run… (⌘R) takes many profiles: by search or by tag, so many at once. Lumen starts stopped profiles itself.";
 "help.scenarios.step.log" = "The run's table says for each profile whether it is done, which step failed and why, how long it took and what the scenario returned. Click a row for its steps and its log. Run the Failed Again runs only those. The last 100 runs are kept under Runs.";
@@ -3638,7 +3638,7 @@
 "scenarios.export.failed" = "The scenario could not be exported: %@";
 "scenarios.new.template" = "From a Template…";
 "scenarios.new.record" = "Record Actions";
-"scenarios.new.empty" = "Empty, in Code";
+"scenarios.new.empty" = "Start with Example Code";
 "scenarios.new.file" = "From a File…";
 "scenarios.first.file" = "Import a file";
 "scenarios.first.file.text" = "One sent to you, or one you exported: a .%@ file";
@@ -3686,7 +3686,7 @@
 "scenarios.first.record" = "Record what you do";
 "scenarios.first.record.text" = "Once, in a profile's window. Passwords are not recorded.";
 "scenarios.first.code" = "Write code";
-"scenarios.first.code.text" = "JavaScript: page.goto, page.click, page.type.";
+"scenarios.first.code.text" = "The example opens example.com and reads the heading. Replace those steps with your own.";
 "scenarios.first.templates" = "Popular templates";
 "scenarios.form.create" = "Create Scenario";
 "scenarios.form.steps" = "What it will do";
