@@ -1779,6 +1779,7 @@ final class AppModel: ObservableObject {
     // MARK: Recording a scenario
 
     /// The profile a scenario is being recorded in, and what has been recorded so far.
+    private var stoppingRecording = false
     @Published private(set) var recordingProfile: UUID?
     @Published private(set) var recorded = ScenarioRecording()
     /// The scenario the recording is for: its steps go there when it ends, whichever scenario the
@@ -1789,7 +1790,7 @@ final class AppModel: ObservableObject {
     /// the profile first when it is not running. False when the plan has no automation, a
     /// recording is going already, or the profile did not start.
     func startRecording(on id: UUID, for scenario: UUID? = nil) async -> Bool {
-        guard license.allowsAutomation, manager != nil, recordingProfile == nil else { return false }
+        guard license.allowsAutomation, manager != nil, recordingProfile == nil, !stoppingRecording else { return false }
         if !isRunning(id) { await launch(id) }
         guard let manager, isRunning(id) else { return false }
         recorded = ScenarioRecording()
@@ -1815,8 +1816,12 @@ final class AppModel: ObservableObject {
     /// Ends the recording; its steps are the caller's to put into the scenario it was for
     /// (`recordingScenario`, read before this).
     @discardableResult
-    func stopRecording() -> [RecordedStep] {
-        if let id = recordingProfile { manager?.stopRecording(id) }
+    func stopRecording() async -> [RecordedStep] {
+        guard !stoppingRecording, let id = recordingProfile else { return [] }
+        stoppingRecording = true
+        defer { stoppingRecording = false }
+        await manager?.stopRecording(id)
+        guard recordingProfile == id else { return [] }
         recordingProfile = nil
         recordingScenario = nil
         return recorded.steps

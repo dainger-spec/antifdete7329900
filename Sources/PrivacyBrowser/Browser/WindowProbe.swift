@@ -72,6 +72,7 @@ struct WindowLook: Codable, Equatable {
     var hasProfileChip = false
     /// The accessibility identifiers of the window's controls that are shown.
     var controls: [String] = []
+    var hasAttachedSheet: Bool?
     /// The menu bar's items with a ⌘ shortcut: "⌘T New Tab".
     var menuItems: [String] = []
     var picture: String?
@@ -215,6 +216,7 @@ enum WindowProbe {
         case .describe:
             look.action = "describe"
             look.found = window != nil
+            look.hasAttachedSheet = NSApp.windows.contains { $0.attachedSheet != nil }
         case .press(let identifier):
             look.action = "press \(identifier)"
             if let window, let element = element(identifier, in: window) {

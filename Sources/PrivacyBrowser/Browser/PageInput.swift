@@ -291,6 +291,12 @@ final class PageInput {
         return Layout.current().key(for: String(character))
     }
 
+    /// Command shortcuts recorded with Latin letters also work with a non-Latin input source.
+    static func commandKey(for character: Character) -> Key? {
+        guard let source = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue() else { return nil }
+        return Layout(source).key(for: String(character))
+    }
+
     /// Presses and lets go of `key`, with its modifier keys pressed before and let go after (as a
     /// person's fingers do), holding it `hold` seconds.
     func press(_ key: Key, hold: TimeInterval, gap: TimeInterval = 0.03) async {
@@ -483,7 +489,7 @@ private struct Layout {
 
     private init() {}
 
-    private init(_ source: TISInputSource) {
+    init(_ source: TISInputSource) {
         guard let pointer = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return }
         let data = Unmanaged<CFData>.fromOpaque(pointer).takeUnretainedValue() as Data
         let keyboardType = UInt32(LMGetKbdType())

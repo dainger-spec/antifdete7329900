@@ -95,7 +95,7 @@ private struct ScenariosSectionBody: View {
                     place = .editor(recording)
                 } else {
                     // Its scenario is gone: there is nowhere for its steps to go, and no Stop to press.
-                    _ = model.stopRecording()
+                    Task { await model.stopRecording() }
                 }
             }
             guard !entered, let sample else { return }

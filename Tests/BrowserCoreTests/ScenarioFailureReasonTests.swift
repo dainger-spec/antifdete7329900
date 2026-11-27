@@ -6,6 +6,20 @@ import XCTest
 final class ScenarioFailureReasonTests: XCTestCase {
     private func parse(_ reason: String) -> ScenarioFailureReason { ScenarioFailureReason.parse(reason).reason }
 
+    func testAmbiguousRecordedControlNamesItsStep() {
+        let parsed = ScenarioFailureReason.parse("Error: multiple controls match Save (line 3)")
+        XCTAssertEqual(parsed.reason, .ambiguous(selector: "Save"))
+        XCTAssertEqual(parsed.line, 3)
+    }
+
+    func testTypingFailuresIdentifyTheFieldAndLine() {
+        let result = ScenarioFailureReason.parse("Error: typing target lost focus: #edit (line 4)")
+        XCTAssertEqual(result.reason, .typingFocus(selector: "#edit"))
+        XCTAssertEqual(result.line, 4)
+        XCTAssertEqual(parse("Error: typing target changed: #edit (line 4)"), .typingChanged(selector: "#edit"))
+        XCTAssertEqual(parse("Error: #notes is read-only (line 2)"), .readOnly(selector: "#notes"))
+    }
+
     func testTheLineAndJavaScriptsPrefixAreTakenOff() {
         let parsed = ScenarioFailureReason.parse("Error: no element matches #nothing-like-it (line 3)")
         XCTAssertEqual(parsed.reason, .notFound(selector: "#nothing-like-it"))

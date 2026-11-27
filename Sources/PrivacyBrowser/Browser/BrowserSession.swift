@@ -228,8 +228,8 @@ final class BrowserSession {
         recorder.start(pages: livePages)
     }
 
-    func stopRecording() {
-        recorder.stop(pages: livePages)
+    func stopRecording() async {
+        await recorder.stop(pages: livePages)
     }
 
     /// Puts back into `controller` — one the profile was applied to, which something has just

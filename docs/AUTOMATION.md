@@ -26,7 +26,7 @@ Names follow Playwright's so that a script moves over quickly; full compatibilit
 | `click(selector, clickCount)` | Waits for the element, scrolls it into view with the wheel, moves the pointer to a point inside it where it is on top, presses and lets go (2: a real double click); an element covered there is an error naming what covers it |
 | `hover(selector)`, `click(at:)` | The pointer over an element; a click at a viewport point |
 | `selectOption(selector, choice)` | Chooses in a list (a `<select>`, or its label): an option's value, else its words; `{value}`, `{label}`, `{index}`; a list of them where the list takes several. Gives back the values chosen. The pointer goes to the list; **the choice itself is set from the driver's world**, as AutoFill sets a field — see below |
-| `type(selector, text, delay)` | Clicks the field (unless focused), then key after key with Shift held around capitals; a character the keyboard layout has no key for is an error. The log says how many characters, never which |
+| `type(selector, text, delay)` | Clicks the field (unless focused), then key after key with Shift held around capitals; characters outside the active keyboard layout are committed as text at the caret. The log says how many characters, never which |
 | `press("Enter" / "Shift+Tab" / "Meta+a")` | A key or a combination, modifier keys pressed before and let go after. The keys with names: Enter, Tab, Backspace, Delete, Escape, Space, the four arrows (`ArrowDown`…), Home, End, PageUp, PageDown |
 | `scroll(by:)`, `scrollIntoView(selector)` | Wheel events where the pointer is |
 | `textContent`, `innerText`, `inputValue`, `getAttribute`, `count`, `isVisible`, `url`, `title` | Read from the driver's own content world |
@@ -34,10 +34,10 @@ Names follow Playwright's so that a script moves over quickly; full compatibilit
 | `screenshot(selector?)` | A PNG of the viewport or of an element's part in view |
 | `pause(range)` | A pause of random length |
 
-Selectors are CSS, or `text=…` for the smallest visible elements whose text holds it. Neither
-looks into a web component's own elements (an open shadow root): `host >>> inner` does — `inner`
-(CSS or `text=`) inside the shadow root of each element `host` finds, and again for a component
-in a component (`a >>> b >>> c`). Clicks aim at the element itself there, not at its host.
+Selectors support CSS and `text=…` substring searches. The recorder also uses `control=…`
+to identify a visible control by its attributes, label and container. Inside an open shadow root,
+use `host >>> inner`, chaining hosts for nested components (`a >>> b >>> c`). Quotes in CSS
+attributes and literal ` >>> ` in a recorded label are preserved.
 
 The driver reads the page (where an element is, whether it shows, its text) in a content world of
 its own; it never acts on the page from a script. Clicks, typing and scrolling are input events.
@@ -293,11 +293,13 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   again shows that scenario, where Stop is; a recording whose scenario was deleted meanwhile is
   ended there, its steps dropped.
 
-- **Selectors**, in this order: an `id` that is unique and not made for this load only (`:r1:`,
-  `ember123`, long runs of digits); `data-testid`, `data-test-id`, `data-test`, `data-qa`,
-  `data-cy`; `name`, `aria-label`, `placeholder`, `title` with the tag; for a link or button, its
-  text (`text=…`) when exactly one element has it; else the path from the nearest ancestor that
-  can be named, by position among siblings of its kind. An element inside a web component's open
+- **Selectors.** A unique stable ID takes priority. The recorder skips generated IDs such as
+  `:r1:`, `ember123` and `bn-formItem-…`. For buttons, links and other named controls it records a
+  `control=…` selector with an identifying attribute or tag, the exact visible label when short,
+  and the nearest identifiable container when available. Replay waits for one visible match and
+  reports ambiguity if several remain. Existing `text=…` selectors still accept substrings and
+  prefer a visible exact match. Other elements use identifying attributes or their position
+  among siblings under the nearest named ancestor. An element inside a web component's open
   shadow root is named by the same rules within that root, after its host's selector and `>>>`
   (`body > login-box >>> input[name="email"]`): a selector of the page itself would find nothing
   there on a replay, or a look-alike outside the component. A closed shadow root shows the page
@@ -311,8 +313,26 @@ Record ── AppModel.startRecording(on:) ── the profile started with a win
   month or year chosen in a list is noted without the value.
 - **Typing over text.** A field that held text when the person came to it gets
   `click; press('Meta+a'); type` — the typing replaces what was there, as it did.
-- **Enter in a form's field** is `page.press('Enter')`; the click the browser makes on the form's
-  button for it is not a second step.
+  While typing, the driver checks focus before each character. If the page replaces a text
+  field, it allows up to one second for the replacement to appear. It continues if the new
+  field is uniquely identified and preserves the text. When focus falls back to the document,
+  it can restore the caret in a reachable replacement in the same part of the form. Moving focus
+  to another control stops the step. If a page clears an initially empty, focused text input in
+  a uniquely identified wrapper outside a form, the driver can restore its last confirmed prefix
+  once through native text insertion. It stops on a second reset or an ambiguous edit. If a redirect to the same origin
+  finishes while the initial click waits, typing starts in the focused field of that document.
+  A navigation after the first character stops the remaining input. A recording can identify an anonymous
+  input by its unique field wrapper. A click or typing step saved with an old label attribute
+  can also find that exact label next to a single text field. Tab characters stay in the field. In a multiline editor
+  the driver inserts a recorded newline as text, preserving pasted lines on forms that send on Enter.
+  The recorder also captures plain text edited in a `contenteditable` host. Stop Recording
+  waits for the profile to deliver the focused field’s final edit. An action in another tab
+  records that tab’s web address before its first selector, so replay can follow it in one window.
+- **Enter in a form field** records the pressed modifiers too. Return can submit a form and
+  Command-Return or Control-Return can activate an editor shortcut. The browser's implicit
+  submission counts once. A subsequent keyboard activation of a button becomes its own step.
+  In a multiline editor, an ordinary newline stays in the recorded text. When the editor
+  cancels the newline to handle Enter itself, the recorder keeps the keypress.
 - **A choice in a list** (`<select>`) is `await page.selectOption(selector, 'value'); // its words`
   — the choice itself, heard as the list's `change`. The click that opened the list is not a
   step: replayed, it opened the system's menu and left it open. Chosen again before anything

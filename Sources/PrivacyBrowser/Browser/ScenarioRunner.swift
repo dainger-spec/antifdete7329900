@@ -227,7 +227,7 @@ final class ScenarioRunner {
         case "hover": try await driver.hover(try string(0), timeout: timeout(1)); return nil
         case "type":
             let delay = (options(2)["delay"] as? NSNumber)?.doubleValue
-            try await driver.type(try string(0), try string(1), delay: ScenarioWait.keyDelay(milliseconds: delay))
+            try await driver.type(try string(0), try string(1), delay: ScenarioWait.keyDelay(milliseconds: delay), insertUnmappedText: true)
             return nil
         case "press": try await driver.press(try string(0)); return nil
         case "scroll":

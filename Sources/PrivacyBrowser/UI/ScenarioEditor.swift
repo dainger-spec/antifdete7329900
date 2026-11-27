@@ -453,7 +453,16 @@ struct ScenarioEditor: View {
     /// chosen). A scenario that is still the example, or empty, is replaced by them.
     private func stopRecording() {
         guard sample == nil else { return }
-        let steps = model.stopRecording()
+        guard !starting else { return }
+        starting = true
+        Task { @MainActor in
+            let steps = await model.stopRecording()
+            starting = false
+            appendRecording(steps)
+        }
+    }
+
+    private func appendRecording(_ steps: [RecordedStep]) {
         guard !steps.isEmpty else { return }
         let lines = steps.map { ScenarioRecording.line(for: $0, passwordNote: L("scenarios.record.password")) }.joined(separator: "\n") + "\n"
         let untouched = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || source == L("scenarios.template")

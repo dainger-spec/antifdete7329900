@@ -82,6 +82,22 @@ final class ScenarioRecordingTests: XCTestCase {
         XCTAssertFalse(recording.steps.contains { $0.value == "07" || $0.label == "July" }, "a card's choice is never kept in a step")
     }
 
+    func testSwitchingTabsAfterClickStartsAtTheOtherAddress() {
+        var recording = ScenarioRecording()
+        _ = recording.loaded("https://example.org/a", at: start)
+        XCTAssertEqual(recording.acted(RecordedStep(.goto, value: "https://example.org/a"), at: start), [])
+        _ = recording.acted(RecordedStep(.click, selector: "#next"), at: start)
+        _ = recording.acted(RecordedStep(.goto, value: "https://example.org/b"), at: start)
+        XCTAssertEqual(recording.loaded("https://example.org/b", at: start), [])
+        XCTAssertEqual(recording.loaded("https://example.org/c", at: start), [RecordedStep(.goto, value: "https://example.org/c")])
+    }
+
+    func testClearingAnExistingFieldDeletesTheSelection() {
+        let step = RecordedStep(.fill, selector: "#query", value: "", replaces: true)
+        XCTAssertEqual(ScenarioRecording.line(for: step, passwordNote: ""),
+                       "await page.click('#query'); await page.press('Meta+a'); await page.press('Backspace');")
+    }
+
     func testTextIsQuotedAsJavaScript() {
         XCTAssertEqual(ScenarioRecording.quoted("it's a \\ \"test\"\nline\u{2028}"), #"'it\'s a \\ "test"\nline"# + "\\u2028'")
         XCTAssertEqual(ScenarioRecording.quoted("привет"), "'привет'")

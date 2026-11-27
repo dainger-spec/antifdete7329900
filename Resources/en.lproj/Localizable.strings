@@ -3827,6 +3827,10 @@
 "scenarios.failure.wait.reload" = "The page did not reload in time";
 "scenarios.failure.wait.profile" = "The profile's process did not answer";
 "scenarios.failure.wait.other" = "Timed out: %@";
+"scenarios.failure.ambiguous" = "Several controls match. Specify a more precise target for this step (%@).";
+"scenarios.failure.typingFocus" = "Typing stopped because %@ no longer has keyboard focus.";
+"scenarios.failure.typingChanged" = "The page changed %@ or its contents. Typing could not safely continue from the previous position.";
+"scenarios.failure.readOnly" = "%@ is read-only.";
 "scenarios.failure.notFound" = "Nothing on the page matches %@";
 "scenarios.failure.notVisible" = "%@ is on the page but cannot be seen";
 "scenarios.failure.covered" = "%1$@ is covered by another element: %2$@";

@@ -39,7 +39,7 @@ enum ProfileCommand: Codable {
     case stopScenario(ScenarioRunner.StopReason)
     /// Watch what the person does in this profile's pages, for a scenario (`ScenarioRecorder`).
     case startRecording
-    case stopRecording
+    case stopRecording(request: UUID)
     /// A WebDriver command to this profile's page (`WebDriverExecutor`); answered by `webDriverAnswer`.
     case webDriver(WebDriverCall)
     /// Say where this profile's traffic goes (`ProfileNetworkGuard.report`); with `probe`, also
@@ -120,6 +120,7 @@ enum ProfileEvent: Codable {
     case scenarioEnded(runID: UUID, ScenarioRunner.Outcome)
     /// Something the person did, or a page that loaded, while a scenario is being recorded.
     case recorded(ScenarioRecorder.Event)
+    case recordingStopped(request: UUID)
     /// The answer to `webDriver`, by the call's id.
     case webDriverAnswer(WebDriverAnswer)
     /// The answer to `importCookies`, with its `request`: what the profile's store did with them, or

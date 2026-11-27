@@ -57,6 +57,11 @@ public struct ScenarioRecording: Equatable, Sendable {
     /// What a person did on the page. Returns the steps to add (none for one that says nothing new).
     public mutating func acted(_ step: RecordedStep, at date: Date = Date()) -> [RecordedStep] {
         var step = step
+        if step.kind == .goto {
+            lastActionAt = nil
+            lastAddress = step.value
+            if steps.last == step { return [] }
+        }
         if step.kind == .fill {
             if step.secret == true { step.value = nil }
             // The same field typed into again before anything else: its last text is what counts.
@@ -115,6 +120,7 @@ public struct ScenarioRecording: Equatable, Sendable {
         case .fill:
             let select = step.replaces == true ? "await page.click(\(selector)); await page.press('Meta+a'); " : ""
             if step.secret == true { return select + "await page.type(\(selector), params.password || ''); // \(oneLine(passwordNote))" }
+            if step.replaces == true, step.value == "" { return select + "await page.press('Backspace');" }
             return select + "await page.type(\(selector), \(quoted(step.value ?? "")));"
         case .press: return "await page.press(\(quoted(step.value ?? "Enter")));"
         case .select:

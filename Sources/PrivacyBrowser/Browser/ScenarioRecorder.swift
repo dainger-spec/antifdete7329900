@@ -20,6 +20,7 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
                                      injectionTime: .atDocumentStart, forMainFrameOnly: true, in: world)
 
     private(set) var isRecording = false
+    private var stopping = false
     /// The script and handler are in the profile's content controllers (`BrowserSession.startRecording`).
     private(set) var isInstalled = false
     /// What a page said: it loaded an address, or the person did something on it.
@@ -29,8 +30,7 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
     }
 
     var onEvent: ((Event) -> Void)?
-    /// The page that was in front when the recording began, when it had an address of the web:
-    /// that address is the recording's first step.
+    /// The page whose URL replay is currently following.
     private weak var frontPage: WKWebView?
     private let log = Logger(subsystem: "PrivacyBrowser", category: "ScenarioRecorder")
 
@@ -46,7 +46,7 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
     /// is in front fully transparent (`BrowserSession.openOffscreenWindow`) — and not the page the
     /// profile's check measures with, whose address lives only while a snapshot is taken.
     private static func isSeen(_ page: WKWebView?) -> Bool {
-        guard let page, let window = page.window, window.isVisible, window.alphaValue > 0 else { return false }
+        guard let page, let window = page.window, window.isVisible, window.alphaValue > 0, !page.isHiddenOrHasHiddenAncestor else { return false }
         return page.url.map(SiteSnapshotPage.isMeasuringPage) != true
     }
 
@@ -61,21 +61,39 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         frontPage = scheme == "http" || scheme == "https" ? front : nil
         if let address = front?.url?.absoluteString { onEvent?(.loaded(address)) }
         // A page given the script here says so in its hello (`late`): it was open, it did not load.
-        let source = "if (globalThis.__pbRecorder) { globalThis.__pbRecorder.set(true); } else {\n"
+        let source = "if (globalThis.__pbRecorder) { globalThis.__pbRecorder.set(enable); } else {\n"
             + "globalThis.__pbRecorderLate = true;\n\(Self.script.source)\n}"
-        for page in shown {
-            page.callAsyncJavaScript(source, arguments: [:], in: nil, in: Self.world) { _ in }
+        for page in pages {
+            // Install in previously loaded background tabs as well. Their visibility hello
+            // enables recording when a person switches to them.
+            let enable = Self.isSeen(page)
+            page.callAsyncJavaScript(source, arguments: ["enable": enable], in: nil, in: Self.world) { _ in }
         }
         log.notice("A scenario's recording began on \(shown.count, privacy: .public) pages")
     }
 
-    func stop(pages: [WKWebView]) {
-        guard isRecording else { return }
-        isRecording = false
-        for page in pages {
-            page.callAsyncJavaScript("if (globalThis.__pbRecorder) { globalThis.__pbRecorder.set(false); }", arguments: [:],
-                                     in: nil, in: Self.world) { _ in }
+    func stop(pages: [WKWebView]) async {
+        guard isRecording, !stopping else { return }
+        stopping = true
+        // Keep accepting the final field values until WebKit has posted and acknowledged them.
+        // A suspended tab must not hold the editor open indefinitely.
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var pending: CheckedContinuation<Void, Never>? = continuation
+            let group = DispatchGroup()
+            for page in pages {
+                group.enter()
+                page.callAsyncJavaScript("await globalThis.__pbRecorder?.set(false);", arguments: [:],
+                                         in: nil, in: Self.world) { _ in group.leave() }
+            }
+            let finish = {
+                pending?.resume()
+                pending = nil
+            }
+            group.notify(queue: .main) { finish() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { finish() }
         }
+        isRecording = false
+        stopping = false
         log.notice("A scenario's recording ended")
     }
 
@@ -90,23 +108,36 @@ final class ScenarioRecorder: NSObject, WKScriptMessageHandlerWithReply {
         // what they are doing.
         let shown = Self.isSeen(message.webView)
         if type == "hello" {
-            replyHandler(["recording": isRecording && shown], nil)
+            replyHandler(["recording": isRecording && !stopping && shown], nil)
             // A page that was open when the recording began has not loaded: with a first page
             // already, only that one's hello counts — another window's would be a second opening
             // step, and what was done in the first replayed on it.
             let late = body["late"] as? Bool == true
-            if isRecording, shown, !late || frontPage == nil || message.webView === frontPage, let address = body["url"] as? String {
+            if isRecording, !stopping, shown, frontPage == nil || (!late && message.webView === frontPage),
+               let address = body["url"] as? String, Self.webAddress(address) {
+                frontPage = message.webView
                 onEvent?(.loaded(address))
             }
             return
         }
         replyHandler(nil, nil)
-        guard isRecording, shown, let kind = RecordedStep.Kind(rawValue: type), kind != .goto, kind != .load else { return }
-        // A secret's text (a password, a one-time code, a card's) never leaves the page's process,
-        // whatever the page's side sent.
+        guard isRecording, let kind = RecordedStep.Kind(rawValue: type), kind != .goto, kind != .load,
+              shown || (kind == .fill && frontPage != nil && frontPage === message.webView) else { return }
+        if let page = message.webView, page !== frontPage,
+           let address = page.url?.absoluteString ?? message.frameInfo.request.url?.absoluteString, Self.webAddress(address) {
+            // Replay drives one page. Waiting for a load on the previous tab leaves its
+            // document active, so the next selector would be looked up on the wrong site.
+            frontPage = page
+            onEvent?(.acted(RecordedStep(.goto, value: address)))
+        }
+        // A secret's text never leaves the page's process.
         let secret = body["secret"] as? Bool == true
         onEvent?(.acted(RecordedStep(kind, selector: body["selector"] as? String, value: secret ? nil : body["value"] as? String,
                                      secret: secret ? true : nil, replaces: body["replaces"] as? Bool == true ? true : nil,
                                      label: secret ? nil : body["label"] as? String)))
     }
+    private static func webAddress(_ address: String) -> Bool {
+        ["http", "https"].contains(URL(string: address)?.scheme?.lowercased() ?? "")
+    }
+
 }

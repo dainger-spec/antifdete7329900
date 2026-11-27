@@ -159,7 +159,7 @@ enum ProfileSessionHost {
             // it with the profile's data lying decrypted. Routed into the normal quit instead.
             signal(SIGTERM, SIG_IGN)
             let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-            source.setEventHandler { MainActor.assumeIsolated { NSApp.terminate(nil) } }
+            source.setEventHandler { MainActor.assumeIsolated { Self.stopFromManager() } }
             source.resume()
             terminationSource = source
 
@@ -167,7 +167,7 @@ enum ProfileSessionHost {
                 // The manager is gone (it quit or crashed): nothing can ask this process to seal the
                 // profile's data any more, so it does now, the way quitting does.
                 ProfileSessionHost.log.notice("The manager closed the channel: quitting, which seals the profile")
-                NSApp.terminate(nil)
+                Self.stopFromManager()
             }) { [weak self] line in
                 guard let command = ProfileChannel.decode(ProfileCommand.self, from: line) else { return }
                 self?.handle(command)
@@ -271,6 +271,20 @@ enum ProfileSessionHost {
             }
         }
 
+        /// Safari can decline to forward terminate: to our delegate while a sheet is up. A Stop
+        /// from outside the window must cancel unanswered dialogs so the usual quit can seal it.
+        private static func stopFromManager() {
+            if let modal = NSApp.modalWindow, modal.sheetParent == nil {
+                NSApp.abortModal()
+            }
+            for window in NSApp.windows {
+                if let sheet = window.attachedSheet {
+                    window.endSheet(sheet, returnCode: .cancel)
+                }
+            }
+            NSApp.terminate(nil)
+        }
+
         /// What the manager asked for. Anything that needs the profile's session waits until it
         /// exists: a command can arrive while the launch is still running.
         private func handle(_ command: ProfileCommand) {
@@ -284,7 +298,7 @@ enum ProfileSessionHost {
             }
             switch command {
             case .stop:
-                NSApp.terminate(nil)
+                Self.stopFromManager()
             case .activate:
                 NSApp.activate(ignoringOtherApps: true)
                 guard let session = manager?.session(for: profileID) else { return }
@@ -347,8 +361,12 @@ enum ProfileSessionHost {
                 showedWindow = true
                 if NSApp.activationPolicy() != .regular { NSApp.setActivationPolicy(.regular) }
                 manager?.startRecording(profileID)
-            case .stopRecording:
-                manager?.stopRecording(profileID)
+            case .stopRecording(let request):
+                let id = profileID
+                Task { @MainActor [weak manager] in
+                    await manager?.stopRecording(id)
+                    ProfileSessionHost.send(.recordingStopped(request: request))
+                }
             case .webDriver(let call):
                 // The session's window is one the person sees, as a scenario's is.
                 showedWindow = true

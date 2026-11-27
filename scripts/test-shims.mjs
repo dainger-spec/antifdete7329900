@@ -1842,7 +1842,10 @@ test('system camera installed, not this profile\'s: the virtual device is hidden
 // typed into. A secret — a password field, even one turned into text while focused, and what
 // autocomplete names a password, a one-time code or a card's — is said as one, without its text.
 const recorderSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/ScenarioRecorderScript.swift', import.meta.url), 'utf8');
-const recorderBody = recorderSwift.split('private static let body = #"""')[1].split('"""#')[0];
+const fieldSwift = readFileSync(new URL('../Sources/PrivacyBrowser/Browser/ScenarioFieldLocator.swift', import.meta.url), 'utf8');
+const fieldComponent = fieldSwift.split('static let script = #"""')[1].split('"""#')[0];
+const recorderBody = recorderSwift.split('private static let body = #"""')[1].split('"""#')[0]
+  .replace(String.raw`\#(ScenarioFieldLocator.script)`, () => fieldComponent);
 
 async function recorderWindow() {
   const context = vm.createContext({});
@@ -1869,7 +1872,7 @@ async function recorderWindow() {
     class HTMLLabelElement extends Element {}
     Object.assign(globalThis, { Element, HTMLInputElement, HTMLTextAreaElement, HTMLSelectElement, HTMLLabelElement });
     var CSS = { escape: (text) => text };
-    var document = { querySelectorAll: (selector) => elements.filter((e) => '#' + e.id === selector), body: {}, documentElement: {} };
+    var document = { addEventListener, querySelectorAll: (selector) => elements.filter((e) => '#' + e.id === selector), body: {}, documentElement: {} };
     var location = { href: 'https://example.com/login' };
     var performance = { now: () => 0 };
     window.webkit = { messageHandlers: { rec: { postMessage: (message) => { posted.push(message); return { recording: true }; } } } };
@@ -1916,6 +1919,24 @@ test('recorder: autocomplete passwords, one-time codes and card fields are secre
   assert.equal(note, 'select #exp: •••');
 });
 
+test('recorder: implicit submission, a second keyboard click, and a modified Enter remain distinct', async () => {
+  const w = await recorderWindow();
+  const steps = JSON.parse(run(w, `
+    const form = {}, field = new HTMLInputElement({ id: 'query' }), button = new Element('button', { id: 'send' });
+    const notes = new HTMLTextAreaElement({ id: 'notes' });
+    field.form = button.form = notes.form = form;
+    button.type = 'submit';
+    elements.push(field, button, notes);
+    fire('keydown', field, { key: 'Enter' });
+    fire('click', button, { detail: 0 });
+    fire('keydown', button, { key: 'Enter' });
+    fire('click', button, { detail: 0 });
+    fire('keydown', notes, { key: 'Enter', metaKey: true, shiftKey: true });
+    JSON.stringify(posted.filter(m => m.type !== 'hello').map(m => m.selector || m.value))
+  `));
+  assert.deepEqual(steps, ['#query', 'Enter', '#send', '#notes', 'Shift+Meta+Enter']);
+});
+
 // A web component's own elements (an open shadow root): the recorder names them through their
 // host (`host >>> inner`), and the driver's find (PageDriver.findAll) looks there — not at a
 // look-alike in the page itself. A stub DOM with shadow roots and the few selectors these use.
@@ -1957,6 +1978,8 @@ async function shadowWindow() {
       getAttribute(name) { return name in this.attrs ? String(this.attrs[name]) : null; }
       get id() { return this.attrs.id || ''; }
       get innerText() { return [this.ownText, ...this.children.map((c) => c.innerText)].filter(Boolean).join(' '); }
+      matches(selector) { return selector.split(',').some((part) => part.trim() === this.tagName.toLowerCase()); }
+      getClientRects() { return this.attrs.hidden ? [] : [{}]; }
       closest() { return null; }
       attachShadow() { this.shadowRoot = new ShadowRoot(this); return this.shadowRoot; }
     }
@@ -1988,6 +2011,8 @@ async function shadowWindow() {
       return true;
     };
     var document = new Node();
+    document.addEventListener = addEventListener;
+    var getComputedStyle = () => ({ visibility: 'visible' });
     document.nodeType = 9;
     document.documentElement = new Element('html');
     document.body = new Element('body');
@@ -2020,7 +2045,7 @@ test('recorder and driver: a field and a button in an open shadow root are named
           fire('click', pathOf(proceed));`);
   const steps = JSON.parse(run(w, 'JSON.stringify(posted.filter((m) => m.type !== "hello"))'));
   assert.deepEqual(steps.map((m) => [m.type, m.selector]),
-                   [['fill', 'body > login-box >>> input[name="email"]'], ['click', 'body > login-box >>> text=Continue']]);
+                   [['fill', 'body > login-box >>> input[name="email"]'], ['click', 'body > login-box >>> control={"selector":"button","text":"Continue"}']]);
   // The replay finds the component's own elements, not the newsletter's of the same shape.
   assert.equal(run(w, `driver.find(${JSON.stringify(steps[0].selector)})[0] === email`), true);
   assert.equal(run(w, `driver.find(${JSON.stringify(steps[1].selector)})[0] === proceed`), true);
@@ -2031,6 +2056,23 @@ test('recorder and driver: a field and a button in an open shadow root are named
   assert.equal(run(w, `document.hit = loginBox; loginBox.shadowRoot.hit = proceed; driver.at(5, 5) === proceed`), true);
   assert.equal(run(w, `driver.holds(proceed, driver.at(5, 5)) && driver.holds(loginBox, proceed) && !driver.holds(subscribe, proceed)`), true);
   assert.equal(run(w, `document.activeElement = loginBox; loginBox.shadowRoot.activeElement = email; driver.focused() === email`), true);
+});
+
+test('recorder and driver: changes to a control label or its neighbors cannot redirect a recorded click', async () => {
+  const w = await shadowWindow();
+  run(w, `proceed.ownText = 'Café >>> suite';
+          fire('click', pathOf(proceed));
+          var selector = posted.find(m => m.type === 'click').selector;
+          var other = new Element('button', {}, 'Café >>> suite plus tard');
+          loginBox.shadowRoot.append(other);
+          proceed.ownText = proceed.ownText.normalize('NFD');`);
+  assert.equal(run(w, 'driver.find(selector)[0] === proceed'), true);
+  run(w, "other.ownText = 'Café >>> suite'");
+  assert.equal(run(w, 'driver.find(selector).length'), 0, 'two visible matches');
+  run(w, 'other.attrs.hidden = true');
+  assert.equal(run(w, 'driver.find(selector)[0] === proceed'), true, 'one visible match');
+  run(w, "proceed.ownText = 'Cancel'");
+  assert.equal(run(w, 'driver.find(selector).length'), 0, 'the recorded label is gone');
 });
 
 // A choice in a list (a <select>): the recorder says the choice itself as a step — never the click
@@ -2070,6 +2112,7 @@ function listWindow() {
     class HTMLLabelElement { constructor(control) { this.control = control; this.nodeName = 'LABEL'; } }
     class Option {
       constructor(list, value, label, disabled) { this.list = list; this.value = value; this.label = label; this.disabled = !!disabled; this.chosen = false; }
+      matches(selector) { return selector === ':disabled' && this.disabled; }
       get selected() { return this.chosen; }
       // As a list of one does: choosing an option lets the others go.
       set selected(on) { if (on && !this.list.multiple) { for (const o of this.list.options) o.chosen = false; } this.chosen = !!on; }
@@ -2081,6 +2124,7 @@ function listWindow() {
         if (!multiple) this.options[0].chosen = true;
       }
       dispatchEvent(event) { events.push(event.type + (event.bubbles ? '' : ' (not bubbling)')); return true; }
+      matches(selector) { return selector === ':disabled' && this.disabled; }
       get chosen() { return this.options.filter((o) => o.selected).map((o) => o.value); }
     }
     var country = new HTMLSelectElement([['', 'Choose a country'], ['DE', 'Germany'], ['FR', ' France '], ['XX', 'Nowhere', true], ['Germany', 'A value named Germany']]);

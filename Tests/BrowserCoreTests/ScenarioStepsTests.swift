@@ -44,6 +44,15 @@ final class ScenarioStepsTests: XCTestCase {
         XCTAssertEqual(over[0].arguments, [.text("#q"), .text("new")])
     }
 
+    func testRecordedControlSurvivesParsingInTheStepsEditor() {
+        let selector = ##"#panel >>> control={"selector":"button[aria-label=\"What's next?\"]","text":"Save // draft >>> copy, {2}","within":"#form"}"##
+        let source = ScenarioRecording.line(for: RecordedStep(.click, selector: selector), passwordNote: "")
+        let parsed = ScenarioSteps(source)
+        XCTAssertEqual(parsed.source, source)
+        XCTAssertEqual(parsed.steps.map(\.kind), [.click])
+        XCTAssertEqual(parsed.steps.first?.arguments, [.text(selector)])
+    }
+
     func testACommentAboveNamesTheStepAndSettingsAreNotSteps() {
         let source = ScenarioTemplate.template("signin")!.source { $0 }
         let cut = ScenarioSteps(source)

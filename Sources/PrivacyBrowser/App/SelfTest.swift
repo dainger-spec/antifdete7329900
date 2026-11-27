@@ -414,6 +414,7 @@ final class SelfTest {
         await group("our window in its own process") { try await ownWindowInItsOwnProcess(repository) }
         await group("our window") { try await ownWindowAndSearch(repository) }
         await group("closing a profile's window") { try await closingTheWindowEndsTheProfile(repository) }
+        await group("stopping with a password sheet") { try await endAProfile(repository, byStop: true, withPasswordSheet: true) }
         await group("Safari's window, every day") { try await safarisWindowEveryDay(repository) }
         await group("a profile's process leaves nothing open") { try await profileProcessLeavesNothingOpen(repository) }
         await group("interface and websites' languages") { try await interfaceApartFromWebsites(repository) }
@@ -5856,8 +5857,8 @@ final class SelfTest {
         }
     }
 
-    private func endAProfile(_ repository: ProfileRepository, byStop: Bool) async throws {
-        let name = byStop
+    private func endAProfile(_ repository: ProfileRepository, byStop: Bool, withPasswordSheet: Bool = false) async throws {
+        let name = withPasswordSheet ? "Stop cancels an unanswered password sheet and seals the profile without killing its process" : byStop
             ? "Safari chrome: Stop with the profile's window open ends its process by itself — no crash, nothing left in plaintext"
             : "Safari chrome: closing a profile's window as its close button does ends its process by itself — no crash, nothing left in plaintext"
         guard !AppEnvironment.isSandboxed else {
@@ -5899,13 +5900,41 @@ final class SelfTest {
             return
         }
         // The page loads; then the profile is ended as a person ends it, and nothing else is asked.
-        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        if withPasswordSheet {
+            let source = """
+                await page.goto('http://proxied.selftest.invalid/pb-login');
+                await page.type('#user', 'sample');
+                await page.type('#pass', 'sample');
+                await page.click('#go');
+                """
+            var outcome: ScenarioRunner.Outcome?
+            manager.onScenarioEnded = { _, _, result in outcome = result }
+            _ = manager.runScenario(profile.id, name: "Test sign-in", source: source)
+            let finished = await waitUntil(timeout: 30) { outcome != nil }
+            var attached = false
+            manager.onWindowLook = { _, look in attached = look.hasAttachedSheet == true }
+            let shown = await waitUntil(timeout: 5) {
+                if !attached { _ = manager.lookAtWindow(profile.id, .describe) }
+                return attached
+            }
+            guard finished, outcome == .finished, shown else {
+                check(name, false, "the test sign-in did not show a sheet: \(String(describing: outcome))")
+                await manager.shutDown()
+                return
+            }
+        } else {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+        }
         if byStop {
             try? await manager.stop(profile.id)
         } else {
             _ = manager.closeWindows(profile.id)
         }
         let ended = await waitUntil(timeout: 60) { exited != nil }
+        if withPasswordSheet {
+            let passwords = try repository.passwordVault(for: profile.id)
+            check("Stop leaves the unanswered password unsaved", passwords.allEntries().isEmpty)
+        }
         // Nothing of the profile in plaintext on disk, as the update's gate looks for it (UpdateGate).
         let folder = repository.directory(for: profile.id)
         let plaintext = WebDataStoreVault.discoverDirectories(for: profile.id).map(\.lastPathComponent)
@@ -7990,7 +8019,7 @@ final class SelfTest {
         let acted = await outcome {
             try await driver.click("#button")
             try await driver.click("#button", clickCount: 2)
-            try await driver.type("#field", "Hello World")
+            try await driver.type("#field", "Hello World", insertUnmappedText: true)
             try await driver.click("#far")
         }
         let clicked = try? await driver.textContent("#clicked")
@@ -8011,11 +8040,28 @@ final class SelfTest {
         func number(_ event: [String: Any], _ key: String) -> Double? { (event[key] as? NSNumber)?.doubleValue }
         let untrusted = events.filter { $0["trusted"] as? Bool != true }.map(kind)
         var movesBeforeFirstPresses: [Int] = []
+        var arrivedAtPress: [Bool] = []
         var movesSince = 0
+        var lastMove: [String: Any]?
         for event in events {
-            if kind(event) == "pointermove" { movesSince += 1 }
+            if kind(event) == "pointermove" {
+                movesSince += 1
+                lastMove = event
+            }
             if kind(event) == "mousedown" {
-                if number(event, "detail") == 1 { movesBeforeFirstPresses.append(movesSince) }
+                if number(event, "detail") == 1 {
+                    movesBeforeFirstPresses.append(movesSince)
+                    // A background WebKit view can deliver just the departure and arrival.
+                    // Verify the destination of the observed movement, to a CSS pixel.
+                    let arrived = lastMove.flatMap { move -> Bool? in
+                        guard let target = move["target"] as? String, target == event["target"] as? String,
+                              let x = number(move, "clientX"), let y = number(move, "clientY"),
+                              let px = number(event, "clientX"), let py = number(event, "clientY") else { return nil }
+                        return abs(x - px) <= 1 && abs(y - py) <= 1
+                    }
+                    arrivedAtPress.append(arrived == true)
+                }
+                lastMove = nil
                 movesSince = 0
             }
         }
@@ -8036,15 +8082,21 @@ final class SelfTest {
         let focused = events.filter { ["pointerdown", "keydown", "wheel"].contains(kind($0)) }.allSatisfy { $0["hasFocus"] as? Bool == true }
         let keys = events.filter { kind($0) == "keydown" }.map { $0["key"] as? String ?? "?" }
         let doubleClick = events.contains { kind($0) == "dblclick" && $0["trusted"] as? Bool == true }
-        let pressesAfterMoves = movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 3 }
+        let pressesAfterMoves = movesBeforeFirstPresses.count >= 4 && movesBeforeFirstPresses.allSatisfy { $0 >= 2 }
+            && arrivedAtPress.allSatisfy { $0 }
         let buttonsHeld = downs.allSatisfy { number($0, "buttons") == 1 } && presses.allSatisfy { number($0, "pressure") == 0.5 }
-        let expectedKeys = ["Shift", "H", "e", "l", "l", "o", " ", "Shift", "W", "o", "r", "l", "d"]
+        // Text committed by an input method has no physical key on the active layout.
+        let expectedKeys = "Hello World".flatMap { character -> [String] in
+            guard let key = PageInput.key(typing: character) else { return [] }
+            return (key.modifiers.contains(.shift) ? ["Shift"] : []) +
+                (key.modifiers.contains(.option) ? ["Alt"] : []) + [String(character)]
+        }
         let activated = record["active"] as? Bool == true
         var recordPasses = !events.isEmpty && untrusted.isEmpty && pressesAfterMoves && buttonsHeld
         recordPasses = recordPasses && wheelsInPlace && focused && doubleClick && keys == expectedKeys && activated
         check("automation commands: the page cannot tell — every event trusted, pointer moves before every press, the button held, wheel time and place as a mouse's, focus throughout, keys with Shift around capitals, a real double click",
               recordPasses,
-              "\(events.count) events, untrusted \(untrusted), moves before presses \(movesBeforeFirstPresses), buttons \(downs.map { number($0, "buttons") ?? -1 }), pressure \(presses.map { number($0, "pressure") ?? -1 }), \(wheels.count) wheels in place \(wheelsInPlace), focus \(focused), dblclick \(doubleClick), keys \(keys), activation \(String(describing: record["active"]))")
+              "\(events.count) events, untrusted \(untrusted), moves before presses \(movesBeforeFirstPresses), arrived \(arrivedAtPress), buttons \(downs.map { number($0, "buttons") ?? -1 }), pressure \(presses.map { number($0, "pressure") ?? -1 }), \(wheels.count) wheels in place \(wheelsInPlace), focus \(focused), dblclick \(doubleClick), keys \(keys), activation \(String(describing: record["active"]))")
 
         // The run left the page as it was; a script in the page's own world does not.
         let after = await surface()
@@ -8104,11 +8156,11 @@ final class SelfTest {
             try await driver.goto(form)
             try await driver.waitFor("#late")
             try await driver.click("#button")
-            try await driver.type("#field", "Hi")
+            try await driver.type("#field", "Hi", insertUnmappedText: true)
             try await driver.click("#button")
         }
         _ = await waitUntil(timeout: 5) { seen.steps.count >= 5 }
-        session.stopRecording()
+        await session.stopRecording()
         let recordedLines = seen.steps.map { ScenarioRecording.line(for: $0, passwordNote: "") }
         // The page in front when the recording began (page two) is its first step.
         check("automation commands: a recording says the pages opened, the click and the typing, each with a selector that finds its element",
@@ -8120,6 +8172,33 @@ final class SelfTest {
         try? await Task.sleep(nanoseconds: 300_000_000)
         check("automation commands: after the recording is stopped nothing more is recorded", seen.steps.count == recordedLines.count,
               "\(seen.steps.count) steps")
+
+        // Both pages were already open: there is no navigation message when the next
+        // action moves to the other window. Replay needs its URL before its selector.
+        let otherWindow = session.openWindow(url: nil)
+        if let otherTab = otherWindow.selectedTab {
+            let other = PageDriver(webView: otherTab.webView) { url in _ = otherTab.load(url) }
+            var switched = ScenarioRecording()
+            let result = await outcome {
+                try await other.goto(two)
+                session.startRecording { event in
+                    switch event {
+                    case let .loaded(url): _ = switched.loaded(url)
+                    case let .acted(step): _ = switched.acted(step)
+                    }
+                }
+                try await driver.click("#button")
+                try await other.click("#heading")
+            }
+            await session.stopRecording()
+            let end = Array(switched.steps.suffix(3))
+            let expected = [RecordedStep(.click, selector: "#button"), RecordedStep(.goto, value: two.absoluteString),
+                            RecordedStep(.click, selector: "#heading")]
+            check("automation commands: recording across open windows names the second page before its click",
+                  result == "ok" && end == expected, "\(result): \(end)")
+            other.finish()
+        } else { check("automation commands: second recording window has a tab", false) }
+        otherWindow.close()
 
         // A choice in a list: by an option's words, the page hears of it; one that is not there is said.
         var values: [String] = []

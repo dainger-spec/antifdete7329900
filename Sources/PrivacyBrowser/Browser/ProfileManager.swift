@@ -182,6 +182,7 @@ final class ProfileManager: ObservableObject {
     /// The WebDriver's page of each profile run in this process that has a session (`webDriver`).
     private var webDriverExecutors: [UUID: WebDriverExecutor] = [:]
     /// A network report asked of a profile's own process and awaited (`networkReport(of:)`).
+    private var recordingStops: [UUID: CheckedContinuation<Void, Never>] = [:]
     private var pendingNetworkReports: [UUID: [CheckedContinuation<ProfileNetworkReport?, Never>]] = [:]
     /// Where the warm-up of each profile running in its own process has got to, as that process
     /// last reported it. The one the manager keeps for a profile it runs itself comes from the
@@ -697,6 +698,8 @@ final class ProfileManager: ObservableObject {
                 self.objectWillChange.send()
             case .recorded(let event):
                 self.onRecorded?(id, event)
+            case .recordingStopped(let request):
+                self.recordingStops.removeValue(forKey: request)?.resume()
             case .webDriverAnswer(let answer):
                 self.pendingWebDriver.removeValue(forKey: answer.id)?.continuation.resume(returning: answer)
             case .scenarioLine(let runID, let line):
@@ -1382,8 +1385,19 @@ final class ProfileManager: ObservableObject {
         return true
     }
 
-    func stopRecording(_ id: UUID) {
-        if let child = children[id] { child.send(.stopRecording) } else { sessions[id]?.stopRecording() }
+    func stopRecording(_ id: UUID) async {
+        guard let child = children[id] else {
+            await sessions[id]?.stopRecording()
+            return
+        }
+        let request = UUID()
+        await withCheckedContinuation { continuation in
+            recordingStops[request] = continuation
+            child.send(.stopRecording(request: request))
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                self?.recordingStops.removeValue(forKey: request)?.resume()
+            }
+        }
     }
 
     /// What a profile's own process says about where its traffic goes, awaited (the profile's

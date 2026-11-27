@@ -29,12 +29,16 @@ public enum ScenarioFailureReason: Equatable, Sendable {
 
     case noWindow
     case timedOut(Wait)
+    case ambiguous(selector: String)
     case notFound(selector: String)
     case notVisible(selector: String)
     /// Something else is on top of the element where the pointer would press; nil: the page was
     /// still moving under the pointer.
     case covered(selector: String, by: String?)
     case disabled(selector: String)
+    case typingFocus(selector: String)
+    case typingChanged(selector: String)
+    case readOnly(selector: String)
     case untypeable(String)
     case nothingToGoBackTo
     case nothingToGoForwardTo
@@ -68,6 +72,10 @@ public enum ScenarioFailureReason: Equatable, Sendable {
         default: break
         }
         if let what = text.dropping(prefix: "timed out: ") { return .timedOut(wait(what)) }
+        if let selector = text.dropping(prefix: "multiple controls match ") { return .ambiguous(selector: selector) }
+        if let selector = text.dropping(prefix: "typing target lost focus: ") { return .typingFocus(selector: selector) }
+        if let selector = text.dropping(prefix: "typing target changed: ") { return .typingChanged(selector: selector) }
+        if let selector = text.dropping(suffix: " is read-only") { return .readOnly(selector: selector) }
         if let selector = text.dropping(prefix: "no element matches "), !selector.isEmpty { return .notFound(selector: selector) }
         if let message = text.dropping(prefix: "navigation failed: ") {
             switch message {

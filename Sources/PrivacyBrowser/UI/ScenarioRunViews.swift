@@ -30,6 +30,10 @@ enum ScenarioFailureText {
             case .profile: return L("scenarios.failure.wait.profile")
             case .other(let what): return String(format: L("scenarios.failure.wait.other"), what)
             }
+        case .ambiguous(let selector): return String(format: L("scenarios.failure.ambiguous"), selector)
+        case .typingFocus(let selector): return String(format: L("scenarios.failure.typingFocus"), selector)
+        case .typingChanged(let selector): return String(format: L("scenarios.failure.typingChanged"), selector)
+        case .readOnly(let selector): return String(format: L("scenarios.failure.readOnly"), selector)
         case .notFound(let selector): return String(format: L("scenarios.failure.notFound"), selector)
         case .notVisible(let selector): return String(format: L("scenarios.failure.notVisible"), selector)
         case .covered(let selector, let by?): return String(format: L("scenarios.failure.covered"), selector, by)
