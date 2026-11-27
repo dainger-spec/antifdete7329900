@@ -111,8 +111,11 @@ private struct ScenariosSectionBody: View {
         }
         .sheet(item: $template) { template in
             ScenarioTemplateForm(template: template, taken: scenarios.map(\.name)) { scenario in
+                if sample == nil {
+                    guard model.saveScenario(scenario) else { return }
+                    place = .editor(scenario.id)
+                }
                 self.template = nil
-                if sample == nil, model.saveScenario(scenario) { place = .editor(scenario.id) }
             }
         }
         .sheet(item: $choosingFor) { scenario in
@@ -854,22 +857,30 @@ struct ScenarioTemplateForm: View {
 
     /// The scenario's text with the form's answers.
     private var source: String { template.source(settings: values) { L(ScenarioTemplate.wordKey($0)) } }
-    private var settings: [ScenarioSettings.Setting] { ScenarioSettings(source).settings }
     private var hasAdvanced: Bool { template.parameters.contains(where: \.isAdvanced) }
 
     /// What stops Create, in words: an address that is not one, a question left unanswered.
-    private var problem: String? {
-        for parameter in template.parameters where !parameter.isOptional && (!parameter.isAdvanced || namesFields) {
+    private func problem(in settings: [ScenarioSettings.Setting]) -> String? {
+        for parameter in template.parameters where !parameter.isAdvanced || namesFields {
             guard let setting = settings.first(where: { $0.name == parameter.name }) else { continue }
             switch (parameter.field, setting.value) {
             case (.address, .text(let text)):
+                if parameter.isOptional && text.isEmpty { continue }
                 guard let url = URL(string: text), let scheme = url.scheme?.lowercased(), ["http", "https"].contains(scheme), url.host?.isEmpty == false else {
                     return String(format: L("scenarios.form.problem.address"), setting.label)
                 }
-            case (_, .text(let text)) where text.trimmingCharacters(in: .whitespaces).isEmpty:
+            case (_, .text(let text)) where !parameter.isOptional && text.trimmingCharacters(in: .whitespaces).isEmpty:
                 return String(format: L("scenarios.form.problem.empty"), setting.label)
-            case (_, .list(let items)) where items.isEmpty:
+            case (_, .list(let items)) where !parameter.isOptional && items.isEmpty:
                 return String(format: L("scenarios.form.problem.empty"), setting.label)
+            case (.lines, .list(let items)) where ["FIELDS", "WHAT"].contains(parameter.name):
+                if let row = items.firstIndex(where: { line in
+                    guard let separator = line.range(of: " = ") else { return true }
+                    return line[..<separator.lowerBound].trimmingCharacters(in: .whitespaces).isEmpty
+                        || line[separator.upperBound...].trimmingCharacters(in: .whitespaces).isEmpty
+                }) {
+                    return String(format: L("scenarios.form.problem.pair"), setting.label, row + 1)
+                }
             default: break
             }
         }
@@ -877,6 +888,9 @@ struct ScenarioTemplateForm: View {
     }
 
     var body: some View {
+        let source = self.source
+        let settings = ScenarioSettings(source).settings
+        let problem = problem(in: settings)
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 VStack(alignment: .leading, spacing: 0) {
@@ -985,6 +999,7 @@ struct ScenarioTemplateForm: View {
 struct ScenarioSettingField: View {
     var field: ScenarioTemplate.Field?
     @Binding var value: ScenarioSettings.Value
+    @State private var listDraft: String?
 
     var body: some View {
         switch value {
@@ -1015,12 +1030,23 @@ struct ScenarioSettingField: View {
             Toggle("", isOn: Binding(get: { flag }, set: { value = .flag($0) }))
                 .toggleStyle(LumenSwitchStyle(showsLabel: false))
         case .list(let items):
-            TextField("", text: Binding(get: { items.joined(separator: "\n") }, set: { typed in
-                value = .list(typed.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
-            }), prompt: Text(verbatim: ""), axis: .vertical)
-                .lineLimit(3...8)
+            TextEditor(text: Binding(get: {
+                if let listDraft, Self.items(in: listDraft) == items { return listDraft }
+                return items.joined(separator: "\n")
+            }, set: { typed in
+                listDraft = typed
+                let updated = Self.items(in: typed)
+                if updated != items { value = .list(updated) }
+            }))
+                .font(.lumenBody)
+                .scrollContentBackground(.hidden)
+                .frame(height: 76)
                 .lumenField(height: nil)
         }
+    }
+
+    private static func items(in text: String) -> [String] {
+        text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 
     private var isCode: Bool {

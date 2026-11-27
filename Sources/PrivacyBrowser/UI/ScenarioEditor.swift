@@ -79,7 +79,7 @@ struct ScenarioEditor: View {
             if recordingStopped { stopRecording() }
         }
         // Edits not saved yet are kept on the way out — not those of a scenario just deleted (`save`).
-        .onDisappear { if sample == nil, edited { save() } }
+        .onDisappear { if sample == nil, loaded, edited { saveEdits() } }
         .onChange(of: profiles.map(\.id)) { _, ids in
             if let profileID, !ids.contains(profileID) { self.profileID = ids.first }
             if profileID == nil { profileID = ids.first }
@@ -104,7 +104,7 @@ struct ScenarioEditor: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button {
-                if sample == nil, edited { save() }
+                if sample == nil, saveEdits() == nil { return }
                 back()
             } label: {
                 HStack(spacing: 5) {
@@ -172,13 +172,15 @@ struct ScenarioEditor: View {
         ])
         .accessibilityLabel(L("scenarios.editor.mode"))
         if edited {
-            Button(L("scenarios.save"), action: save)
+            Button(L("scenarios.save")) { saveEdits() }
                 .buttonStyle(.lumenGhost)
                 .keyboardShortcut("s")
         }
         MoreMenu {
-            Button(L("scenarios.schedule.this")) { if edited { save() }; schedule(scenario, profileID) }
-            Button(L("scenarios.duplicate")) { if edited { save() }; model.saveScenario(model.scenarios.copy(of: Scenario(name: name, source: source, folder: scenario.folder, templateID: scenario.templateID))) }
+            Button(L("scenarios.schedule.this")) { if let saved = saveEdits() { schedule(saved, profileID) } }
+            Button(L("scenarios.duplicate")) {
+                if let saved = saveEdits() { model.saveScenario(model.scenarios.copy(of: saved)) }
+            }
             Divider()
             Button(L("scenarios.delete"), role: .destructive) { confirmingDelete = true }
         }
@@ -197,8 +199,7 @@ struct ScenarioEditor: View {
             .disabled(!canRun || profileID == nil)
             .help(L("scenarios.check.help"))
         Button {
-            if edited { save() }
-            run(Scenario(id: scenario.id, name: name, source: source, createdAt: scenario.createdAt, folder: scenario.folder, note: scenario.note, templateID: scenario.templateID))
+            if let saved = saveEdits() { run(saved) }
         } label: { Label(L("scenarios.run.on"), systemImage: "play.fill") }
             .buttonStyle(.lumenPrimary)
             .disabled(!canRun)
@@ -317,7 +318,7 @@ struct ScenarioEditor: View {
     /// done with the step as a whole.
     private func stepEditor(_ index: Int, _ step: ScenarioSteps.Step) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !step.isOff, ScenarioSteps.statement(step.kind, step.arguments) != nil {
+            if !step.isOff, ScenarioSteps.statement(editing: step, arguments: step.arguments) != nil {
                 ForEach(Array(step.arguments.enumerated()), id: \.offset) { place, argument in
                     if case .text(let text) = argument {
                         HStack(spacing: 10) {
@@ -328,7 +329,7 @@ struct ScenarioEditor: View {
                             TextField("", text: Binding(get: { text }, set: { typed in
                                 var arguments = step.arguments
                                 arguments[place] = .text(typed)
-                                if let line = ScenarioSteps.statement(step.kind, arguments) { source = ScenarioSteps(source).rewriting(index, statement: line).source }
+                                if let line = ScenarioSteps.statement(editing: step, arguments: arguments) { source = ScenarioSteps(source).rewriting(index, statement: line).source }
                             }), prompt: Text(verbatim: ""))
                                 .lumenField(height: 28)
                         }
@@ -411,9 +412,9 @@ struct ScenarioEditor: View {
 
     private func startCheck() {
         guard sample == nil, let profileID, let profile = profiles.first(where: { $0.id == profileID }) else { return }
-        if edited { save() }
+        guard let saved = saveEdits() else { return }
         selected = nil
-        check = model.scenarioBatches.start(Scenario(id: scenario.id, name: name, source: source), on: [(id: profile.id, name: profile.name)],
+        check = model.scenarioBatches.start(saved, on: [(id: profile.id, name: profile.name)],
                                             limit: 1, stopsProfiles: false, origin: .check)
     }
 
@@ -439,7 +440,7 @@ struct ScenarioEditor: View {
 
     private func startRecording() {
         guard sample == nil, let profileID else { return }
-        if edited { save() }
+        guard saveEdits() != nil else { return }
         starting = true
         Task { @MainActor in
             let started = await model.startRecording(on: profileID, for: scenario.id)
@@ -458,18 +459,21 @@ struct ScenarioEditor: View {
         let untouched = source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || source == L("scenarios.template")
         source = untouched ? lines : ScenarioSteps(source).inserting(lines, after: selected).source
         selected = nil
-        save()
+        saveEdits()
     }
 
     /// Writes the name and the text as they are on screen — only while the scenario is still in
     /// the library: one deleted from here (or gone with the vault) leaves the editor with its edits
     /// unsaved, and its `onDisappear` must not put it back.
-    private func save() {
-        guard model.scenarios.scenario(scenario.id) != nil else { return }
-        var changed = scenario
+    @discardableResult private func saveEdits() -> Scenario? {
+        guard let stored = model.scenarios.scenario(scenario.id) else { return nil }
+        guard edited else { return stored }
+        var changed = stored
         changed.name = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? L("scenarios.untitled") : name
         changed.source = source
-        model.saveScenario(changed)
+        if changed != stored, !model.saveScenario(changed) { return nil }
+        if name != changed.name { name = changed.name }
+        return changed
     }
 }
 

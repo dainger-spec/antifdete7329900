@@ -50,12 +50,13 @@ public struct ScenarioTemplate: Equatable, Sendable, Identifiable {
     /// A word of a script: `scenarios.template.word.<key>`.
     public static func wordKey(_ key: String) -> String { "scenarios.template.word.\(key)" }
 
+    private static let placeholder = try! NSRegularExpression(pattern: #"\{\{([A-Za-z0-9_.]+)\}\}"#)
+
     /// The `{{key}}` of the script, in order, each once.
     public var words: [String] {
-        guard let regex = try? NSRegularExpression(pattern: #"\{\{([A-Za-z0-9_.]+)\}\}"#) else { return [] }
         let text = script as NSString
         var seen = Set<String>(), found: [String] = []
-        for match in regex.matches(in: script, range: NSRange(location: 0, length: text.length)) {
+        for match in Self.placeholder.matches(in: script, range: NSRange(location: 0, length: text.length)) {
             let key = text.substring(with: match.range(at: 1))
             if seen.insert(key).inserted { found.append(key) }
         }
@@ -69,16 +70,18 @@ public struct ScenarioTemplate: Equatable, Sendable, Identifiable {
         var text = ""
         for line in ScenarioSteps.lines(of: script) {
             // In code a word is a text's inside: its quotes and backslashes escaped. In a comment, as it is.
-            var out = line
-            for key in words where out.contains("{{\(key)}}") {
+            let original = line as NSString
+            let matches = Self.placeholder.matches(in: line, range: NSRange(location: 0, length: original.length))
+            guard !matches.isEmpty else { text += line; continue }
+            let codeLength = ScenarioSteps.split(line).code.utf16.count
+            let out = NSMutableString(string: line)
+            for match in matches.reversed() {
+                let key = original.substring(with: match.range(at: 1))
                 let plain = word(key).split(whereSeparator: \.isNewline).joined(separator: " ")
-                while let range = out.range(of: "{{\(key)}}") {
-                    // After the line's code: `ScenarioSteps.split` knows a `//` inside a quoted text.
-                    let inComment = out.distance(from: out.startIndex, to: range.lowerBound) >= ScenarioSteps.split(out).code.count
-                    out.replaceSubrange(range, with: inComment ? plain : String(ScenarioRecording.quoted(plain).dropFirst().dropLast()))
-                }
+                let value = match.range.location >= codeLength ? plain : String(ScenarioRecording.quoted(plain).dropFirst().dropLast())
+                out.replaceCharacters(in: match.range, with: value)
             }
-            text += out
+            text += out as String
         }
         for (name, value) in settings { text = ScenarioSettings.setting(name, to: value, in: text) }
         return text

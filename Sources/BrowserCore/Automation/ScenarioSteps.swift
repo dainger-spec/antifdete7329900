@@ -144,8 +144,9 @@ public struct ScenarioSteps: Equatable, Sendable {
 
     /// `code` (whole lines) after the step at `index`; nil: at the end.
     public func inserting(_ code: String, after index: Int?) -> ScenarioSteps {
-        let text = code.hasSuffix("\n") ? code : code + "\n"
-        guard isCut else { return ScenarioSteps((source.isEmpty || source.hasSuffix("\n") ? source : source + "\n") + text) }
+        let ending = preferredLineEnding
+        let text = Self.lineEnding(of: code).isEmpty ? code + ending : code
+        guard isCut else { return ScenarioSteps((source.isEmpty || !Self.lineEnding(of: source).isEmpty ? source : source + ending) + text) }
         var list = closed
         let places = stepPlaces
         if let index, places.indices.contains(index) {
@@ -165,8 +166,23 @@ public struct ScenarioSteps: Equatable, Sendable {
         let lines = Self.lines(of: list[places[index]].text)
         let titleCount = lines.prefix { Self.isComment($0) }.count
         let indent = lines.dropFirst(titleCount).first.map { String($0.prefix { $0 == " " || $0 == "\t" }) } ?? ""
-        list[places[index]].text = lines.prefix(titleCount).joined() + indent + statement + "\n"
+        list[places[index]].text = lines.prefix(titleCount).joined() + indent + statement + Self.lineEnding(of: list[places[index]].text)
         return ScenarioSteps(list.map(\.text).joined())
+    }
+
+    /// Preserve the recorder's select-all gesture and any inline note when a field is edited.
+    public static func statement(editing step: Step, arguments: [Argument]) -> String? {
+        guard var updated = statement(step.kind, arguments) else { return nil }
+        let parts = split(step.code)
+        if step.kind == .type, trimmed(parts.code).hasPrefix("await page.click(") {
+            guard let oldField = step.arguments.first, let newField = arguments.first,
+                  let oldType = statement(.type, step.arguments) else { return nil }
+            func selectAll(_ field: Argument) -> String { "await page.click(\(field.code)); await page.press('Meta+a'); " }
+            guard trimmed(parts.code) == selectAll(oldField) + oldType else { return nil }
+            updated = selectAll(newField) + updated
+        }
+        let comment = trimmed(parts.rest)
+        return comment.isEmpty ? updated : updated + " " + comment
     }
 
     /// The line of a command, as the recorder writes them.
@@ -195,20 +211,45 @@ public struct ScenarioSteps: Equatable, Sendable {
     /// Where each step is among the pieces.
     private var stepPlaces: [Int] { pieces.indices.filter { pieces[$0].step != nil } }
 
+    fileprivate static func lineEnding(of text: String) -> String {
+        guard let last = text.last, isLineEnding(last) else { return "" }
+        return String(last)
+    }
+
+    private static func isLineEnding(_ character: Character) -> Bool {
+        // JavaScript has four line terminators. Swift treats CRLF as one Character.
+        switch character {
+        case "\n", "\r\n", "\r", "\u{2028}", "\u{2029}": return true
+        default: return false
+        }
+    }
+
+    private var preferredLineEnding: String {
+        pieces.lazy.map { Self.lineEnding(of: $0.text) }.first { !$0.isEmpty } ?? "\n"
+    }
+
     /// The pieces, each ending its line: the last may not (a text without a newline at its end).
     private var closed: [Piece] {
         var list = pieces
-        if let last = list.indices.last, !list[last].text.hasSuffix("\n") { list[last].text += "\n" }
+        if let last = list.indices.last, Self.lineEnding(of: list[last].text).isEmpty { list[last].text += preferredLineEnding }
         return list
     }
 
     /// The text's lines, each with its newline (the last without, when the text has none there).
     static func lines(of source: String) -> [String] {
-        guard !source.isEmpty else { return [] }
-        var parts = source.components(separatedBy: "\n")
-        let endsWithNewline = parts.last == ""
-        if endsWithNewline { parts.removeLast() }
-        return parts.enumerated().map { index, part in index < parts.count - 1 || endsWithNewline ? part + "\n" : part }
+        var lines: [String] = []
+        var start = source.startIndex
+        for index in source.indices where isLineEnding(source[index]) {
+            let end = source.index(after: index)
+            lines.append(String(source[start..<end]))
+            start = end
+        }
+        if start < source.endIndex { lines.append(String(source[start...])) }
+        return lines
+    }
+
+    private static func isLineTerminator(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "\n" || scalar == "\r" || scalar == "\u{2028}" || scalar == "\u{2029}"
     }
 
     /// The text with its comments blanked out — and, with `blankingTexts`, the insides of its
@@ -219,11 +260,11 @@ public struct ScenarioSteps: Equatable, Sendable {
     /// quote in one is read as a text's beginning, which ends with the line.
     static func withoutComments(_ source: String, blankingTexts: Bool = false) -> String {
         let scalars = Array(source.unicodeScalars)
-        let space: Unicode.Scalar = " ", newline: Unicode.Scalar = "\n"
+        let space: Unicode.Scalar = " "
         var out = String.UnicodeScalarView()
         func blank(_ scalar: Unicode.Scalar) {
-            if scalar == newline {
-                out.append(newline)
+            if isLineTerminator(scalar) {
+                out.append(scalar)
                 return
             }
             out.append(space)
@@ -242,10 +283,10 @@ public struct ScenarioSteps: Equatable, Sendable {
             index += 1
             if let open = quote {
                 if escaped {
-                    escaped = false
+                    escaped = scalar == "\r" && next == "\n"
                 } else if scalar == "\\" {
                     escaped = true
-                } else if scalar == open || scalar == newline {
+                } else if scalar == open || scalar == "\n" || scalar == "\r" {
                     quote = nil
                     out.append(scalar)
                     continue
@@ -276,7 +317,7 @@ public struct ScenarioSteps: Equatable, Sendable {
             }
             if scalar == "/", next == "/" {
                 blank(scalar)
-                while index < scalars.count, scalars[index] != newline {
+                while index < scalars.count, !isLineTerminator(scalars[index]) {
                     blank(scalars[index])
                     index += 1
                 }
@@ -363,7 +404,7 @@ public struct ScenarioSteps: Equatable, Sendable {
                 }
                 if scalar == "/", next == "/" { break }
                 if scalar == "/", next == "*" { inBlockComment = true; index += 1; continue }
-                if scalar == " " || scalar == "\t" || scalar == "\n" || scalar == "\r" { continue }
+                if scalar == " " || scalar == "\t" || isLineTerminator(scalar) { continue }
                 last = scalar
                 switch scalar {
                 case "'", "\"": quote = scalar
@@ -668,7 +709,7 @@ public struct ScenarioSettings: Equatable, Sendable {
         var lines = ScenarioSteps.lines(of: source)
         guard let setting = ScenarioSettings(source).settings.first(where: { $0.name == name }), lines.indices.contains(setting.line - 1) else { return source }
         let line = lines[setting.line - 1]
-        let ending = line.hasSuffix("\n") ? "\n" : ""
+        let ending = ScenarioSteps.lineEnding(of: line)
         lines[setting.line - 1] = "const \(name) = \(value.code);" + (setting.label.isEmpty ? "" : " // \(setting.label)") + ending
         return lines.joined()
     }

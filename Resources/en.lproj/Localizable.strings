@@ -3694,6 +3694,7 @@
 "scenarios.form.takes" = "Takes from each profile: %@. They are kept with the profile, not in the scenario; before a run Lumen says which profiles have none.";
 "scenarios.form.problem.address" = "%@: an address beginning with https:// is needed";
 "scenarios.form.problem.empty" = "%@: not filled in";
+"scenarios.form.problem.pair" = "In %@, line %d, enter both parts with a space on each side of the equals sign.";
 "scenarios.form.hint.selector" = "CSS, or text=… for words on the page.";
 "scenarios.form.hint.selector.optional" = "CSS, or text=… for words on the page. May be left empty.";
 "scenarios.form.hint.lines.QUERIES" = "One query a line; one is taken at random. A profile's own value query comes first.";

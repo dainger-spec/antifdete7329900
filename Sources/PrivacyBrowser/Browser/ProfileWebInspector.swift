@@ -7,6 +7,7 @@ import WebKit
 final class ProfileWebInspector: NSObject, NSMenuItemValidation {
     static let shared = ProfileWebInspector()
     private var menuItem: NSMenuItem?
+    private var contextClickMonitor: Any?
     private let inspected = NSHashTable<WKWebView>.weakObjects()
 
     private let changedPreferences = NSHashTable<WKPreferences>.weakObjects()
@@ -69,7 +70,19 @@ final class ProfileWebInspector: NSObject, NSMenuItemValidation {
             item.submenu = menu
             bar.insertItem(item, at: max(0, bar.items.count - 1))
             menuItem = item
+            if let page { enableInspection(of: page) }
+            // Safari creates tabs lazily. Prepare the clicked tab before WebKit builds its menu.
+            contextClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { [weak self] event in
+                if event.type == .rightMouseDown || event.modifierFlags.contains(.control),
+                   let window = event.window, SafariChromeHost.isBrowserWindow(window),
+                   let page = SafariChromeHost.frontPage(in: window) {
+                    self?.enableInspection(of: page)
+                }
+                return event
+            }
         } else if sender.state == .off, let item = menuItem {
+            if let contextClickMonitor { NSEvent.removeMonitor(contextClickMonitor) }
+            contextClickMonitor = nil
             item.menu?.removeItem(item)
             menuItem = nil
             for page in inspected.allObjects {
@@ -85,15 +98,20 @@ final class ProfileWebInspector: NSObject, NSMenuItemValidation {
         self.menuItem != nil && allowed && page != nil
     }
 
-    @objc func openInspector() {
-        guard menuItem != nil, allowed, let page, let inspector = inspector(for: page) else { return }
+    @discardableResult private func enableInspection(of page: WKWebView) -> Bool {
+        guard menuItem != nil, allowed else { return false }
         let prefs = page.configuration.preferences
-        guard prefs.responds(to: setExtras), prefs.responds(to: NSSelectorFromString("_developerExtrasEnabled")) else { return }
+        guard prefs.responds(to: setExtras), prefs.responds(to: NSSelectorFromString("_developerExtrasEnabled")) else { return false }
         if prefs.value(forKey: "_developerExtrasEnabled") as? Bool == false {
             changedPreferences.add(prefs)
             setLocalExtras(true, on: prefs)
         }
         inspected.add(page)
+        return true
+    }
+
+    @objc func openInspector() {
+        guard let page, let inspector = inspector(for: page), enableInspection(of: page) else { return }
         if PBCatchException({ _ = inspector.perform(NSSelectorFromString("show")) }) != nil {
             SafariChrome.presentNotice(L("safari.unavailable.title"), L("safari.unavailable.action"))
         }

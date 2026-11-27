@@ -3694,6 +3694,7 @@
 "scenarios.form.takes" = "Берёт у каждого профиля: %@. Они хранятся у профиля, не в сценарии; перед запуском Lumen скажет, у каких профилей их нет.";
 "scenarios.form.problem.address" = "%@: нужен адрес, начинающийся с https://";
 "scenarios.form.problem.empty" = "%@: не заполнено";
+"scenarios.form.problem.pair" = "В поле «%@», строка %d, укажите обе части и разделите их знаком = с пробелами.";
 "scenarios.form.hint.selector" = "CSS или text=… для надписи на странице.";
 "scenarios.form.hint.selector.optional" = "CSS или text=… для надписи на странице. Можно оставить пустым.";
 "scenarios.form.hint.lines.QUERIES" = "По запросу в строке; берётся случайный. Значение профиля query важнее.";

@@ -202,6 +202,43 @@ final class ScenarioStepsTests: XCTestCase {
 
     // MARK: Templates
 
+    func testEditingImportedSettingsKeepsTheNextStatementOnItsOwnLine() {
+        for ending in ["\r\n", "\n", "\r", "\u{2028}", "\u{2029}"] {
+            let lines = ["const TITLE = 'Old'; // Title", "const COUNT = 2;", "return TITLE;"]
+            let original = lines.joined(separator: ending) + ending
+            let changed = ScenarioSettings.setting("TITLE", to: .text("New"), in: original)
+            XCTAssertEqual(changed, original.replacingOccurrences(of: "'Old'", with: "'New'"))
+            XCTAssertEqual(ScenarioSettings(changed).value(of: "COUNT"), .number(2))
+            let steps = ScenarioSteps(changed)
+            XCTAssertEqual(steps.steps.map(\.kind), [.result])
+            XCTAssertEqual(steps.rewriting(0, statement: "return COUNT;").source,
+                           changed.replacingOccurrences(of: "return TITLE;", with: "return COUNT;"))
+            XCTAssertEqual(steps.inserting("log('OK');", after: 0).source, changed + "log('OK');" + ending)
+            let withComment = "// notes" + ending + "log('ready');"
+            XCTAssertEqual(ScenarioSteps.withoutComments(withComment), "        " + ending + "log('ready');")
+        }
+    }
+
+    func testPlaceholdersInLocalizedWordsAreKeptAsText() throws {
+        let template = try XCTUnwrap(ScenarioTemplate.template("opens"))
+        let source = template.source { _ in "It's {{step.result}}" }
+        XCTAssertTrue(source.contains("// It's {{step.result}}"))
+        XCTAssertTrue(source.contains(#"return 'It\'s {{step.result}}';"#))
+    }
+
+    func testEditingARecordedReplacementKeepsItsGestureAndNote() throws {
+        let source = "await page.click('#old'); await page.press('Meta+a'); await page.type('#old', 'old'); // QA note\n"
+        let step = try XCTUnwrap(ScenarioSteps(source).steps.first)
+        let arguments: [ScenarioSteps.Argument] = [.text("#new"), .text("new")]
+        XCTAssertEqual(ScenarioSteps.statement(editing: step, arguments: arguments),
+                       "await page.click('#new'); await page.press('Meta+a'); await page.type('#new', 'new'); // QA note")
+        let differentTargets = source.replacingOccurrences(of: "click('#old')", with: "click('#other')")
+        let custom = try XCTUnwrap(ScenarioSteps(differentTargets).steps.first)
+        XCTAssertNil(ScenarioSteps.statement(editing: custom, arguments: arguments))
+        let append = try XCTUnwrap(ScenarioSteps("await page.type('#old', 'old');").steps.first)
+        XCTAssertEqual(ScenarioSteps.statement(editing: append, arguments: arguments), "await page.type('#new', 'new');")
+    }
+
     func testEveryTemplateIsCutIntoNamedStepsAndItsFormReadsItsSettings() {
         XCTAssertEqual(ScenarioTemplate.all.count, 12)
         XCTAssertEqual(Set(ScenarioTemplate.all.map(\.id)).count, 12)

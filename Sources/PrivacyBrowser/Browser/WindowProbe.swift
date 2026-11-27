@@ -80,6 +80,9 @@ struct WindowLook: Codable, Equatable {
 @MainActor
 enum WindowProbe {
     private static func checkLocalInspector(button: NSButton, settings: NSWindow, session: BrowserSession) async -> Bool {
+        guard let page = await SafariChromeHost.openScenarioPage(session: session)?.webView,
+              let browser = page.window else { return false }
+        settings.makeKeyAndOrderFront(nil)
         button.performClick(nil)
         defer {
             if button.state == .on {
@@ -87,14 +90,19 @@ enum WindowProbe {
                 button.performClick(nil)
             }
         }
-        guard let page = await SafariChromeHost.openScenarioPage(session: session)?.webView,
+        guard page.configuration.preferences.responds(to: NSSelectorFromString("_developerExtrasEnabled")),
+              page.configuration.preferences.value(forKey: "_developerExtrasEnabled") as? Bool == true,
               let command = NSApp.mainMenu?.items.compactMap({ $0.submenu?.items.first { $0.target === ProfileWebInspector.shared } }).first,
               let menu = command.menu,
               page.responds(to: NSSelectorFromString("_inspector")),
               let inspector = page.perform(NSSelectorFromString("_inspector"))?.takeUnretainedValue() as? NSObject,
               inspector.responds(to: NSSelectorFromString("isVisible")),
               inspector.responds(to: NSSelectorFromString("isConnected")) else { return false }
-        page.loadHTMLString("<title>Inspector check</title><p>Local page</p>", baseURL: nil)
+        browser.makeKeyAndOrderFront(nil)
+        page.loadHTMLString("<title>Loading</title><p>Local page</p><script>document.title='Inspector check'</script>", baseURL: nil)
+        let loaded = Date().addingTimeInterval(4)
+        while page.title != "Inspector check", Date() < loaded { try? await Task.sleep(nanoseconds: 100_000_000) }
+        guard page.title == "Inspector check" else { return false }
         let remoteInspection = page.isInspectable
         menu.performActionForItem(at: menu.index(of: command))
         let deadline = Date().addingTimeInterval(6)
