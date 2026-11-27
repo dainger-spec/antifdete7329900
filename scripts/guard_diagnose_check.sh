@@ -5,13 +5,14 @@
 #
 # The diagnosis (GuardDiagnosis.swift) measures the network guard on a Mac where it is installed —
 # the owner's; CI cannot load the extension. What CI can show is that it starts, reads what it
-# reads, says in words where it stops, and does not pass: two runs.
+# reads, says in words where it stops, and does not pass.
 #   1. The app as CI builds it (NE=check: no guard inside) must say it has none.
 #   2. A copy with the extension laid inside, as an NE=1 build has it (ad hoc: CI has no team), must
 #      name its guard, ask systemextensionsctl and NEFilterManager, say it cannot ask a guard signed
 #      by no team, and print its answers.
 #   3. The same copy with the listing of a Mac where an earlier copy waits for the restart must say
 #      so on its first line (the owner's Mac after updating to 0.1.3).
+#   4. With only the active extension in the listing, the restart message must be absent.
 # Any run fails this when it crashes, hangs (60 s), exits 0 — a pass where no guard runs would
 # be a false one — or leaves out a section the owner's run needs.
 set -euo pipefail
@@ -36,7 +37,8 @@ failed=0
 run() {
   local out="$work/$2.txt"
   status=0
-  perl -e 'alarm shift; exec @ARGV' 60 "$1/Contents/MacOS/Lumen" --guard-diagnose >"$out" 2>&1 || status=$?
+  # macOS may log to stderr before main. Check the report on stdout and leave stderr in the CI log.
+  perl -e 'alarm shift; exec @ARGV' 60 "$1/Contents/MacOS/Lumen" --guard-diagnose >"$out" || status=$?
   echo "---- $2: exit $status"
   cat "$out"
   echo "----"
@@ -99,10 +101,7 @@ enabled	active	teamID	bundleID (version)	name	[state]
 *	*	ABCDE12345	$identifier (0.1.3/4)	Lumen Network Guard	[activated enabled]
 		ABCDE12345	$identifier (0.1.2/3)	Lumen Network Guard	[terminated waiting to uninstall on reboot]
 LIST
-status=0
-PB_GUARD_DIAGNOSE_EXTENSIONS_LIST="$work/list.txt" perl -e 'alarm shift; exec @ARGV' 60 "$copy/Contents/MacOS/Lumen" --guard-diagnose \
-  >"$work/restart.txt" 2>&1 || status=$?
-echo "---- restart: exit $status"; cat "$work/restart.txt"; echo "----"
+PB_GUARD_DIAGNOSE_EXTENSIONS_LIST="$work/list.txt" run "$copy" restart
 expect_status restart
 if head -1 "$work/restart.txt" | grep -q "^RESTART THIS MAC:"; then
   echo "OK   restart says to restart the Mac, on its first line"
@@ -110,11 +109,15 @@ else
   echo "FAIL restart's first line is not the restart: $(head -1 "$work/restart.txt")"
   failed=1
 fi
-if head -1 "$work/with-guard.txt" | grep -q "RESTART"; then
-  echo "FAIL with-guard (nothing waits for a restart) says to restart"
+sed '/terminated waiting to uninstall on reboot/d' "$work/list.txt" >"$work/active-list.txt"
+PB_GUARD_DIAGNOSE_EXTENSIONS_LIST="$work/active-list.txt" run "$copy" active
+expect_status active
+expect active "Lumen's network guard on this Mac"
+if grep -q '^RESTART THIS MAC:' "$work/active.txt"; then
+  echo "FAIL the active extension alone asks for a restart"
   failed=1
 fi
-if grep -q "The check: PASSES" "$work/as-built.txt" "$work/with-guard.txt"; then
+if grep -q "The check: PASSES" "$work/as-built.txt" "$work/with-guard.txt" "$work/restart.txt" "$work/active.txt"; then
   echo "FAIL a run says the check passes where no guard runs"
   failed=1
 fi
